@@ -53,6 +53,8 @@ type queryTab struct {
 	savedAs  string // path of the saved query this tab edits (auto-save)
 	lastAuto string
 	firstErr int // index of the first failed result in this batch, -1 if none
+	replace  int // >= 0: the next result replaces this index instead of starting a new set
+	closed   bool
 }
 
 func newQueryTab(ws *Workspace, id int) *queryTab {
@@ -215,9 +217,9 @@ func (t *queryTab) timeoutTick() tea.Cmd {
 	if secs <= 0 || t.ws.a.d.NoTimers {
 		return nil
 	}
-	ws, tab, batch := t.ws.id, t.id, t.batch
+	ws, tab, batch, gen := t.ws.id, t.id, t.batch, t.ws.gen
 	return tea.Tick(time.Duration(secs)*time.Second, func(time.Time) tea.Msg {
-		return wsMsg{ws: ws, tab: tab, msg: queryTimeoutMsg{batch}}
+		return wsMsg{ws: ws, tab: tab, gen: gen, msg: queryTimeoutMsg{batch}}
 	})
 }
 
@@ -255,16 +257,37 @@ func (t *queryTab) run(stmts []db.Stmt) tea.Cmd {
 	for _, s := range stmts {
 		gated = append(gated, db.Statement{Text: s.Text})
 	}
-	return t.ws.gate(gated, func() tea.Cmd { return t.start(stmts) })
+	go_ := func() tea.Cmd { return t.ws.gate(gated, func() tea.Cmd { return t.start(stmts) }) }
+	for _, r := range t.res { // an edited result is replaced by the run: ask first, like a table reload
+		if !r.pinned && r.grid != nil && r.grid.HasPending() {
+			t.ws.a.push(&confirmDlg{title: "Discard pending result edits?", lines: []string{"Running again replaces the results; uncommitted edits in them will be lost."}, yes: "Discard", danger: true, onYes: go_})
+			return nil
+		}
+	}
+	return go_()
+}
+
+func (t *queryTab) Busy() bool { return t.running }
+
+// CancelWork stops the running statement (prefix . from any pane).
+func (t *queryTab) CancelWork() tea.Cmd {
+	if !t.running {
+		return nil
+	}
+	return t.Cancel()
 }
 
 func (t *queryTab) start(stmts []db.Stmt) tea.Cmd {
+	if t.running || t.closed {
+		return nil
+	}
 	var keep []*resultView // pinned results stay; everything else is replaced
 	for _, r := range t.res {
 		if r.pinned {
 			keep = append(keep, r)
 		}
 	}
+	t.replace = -1
 	t.running, t.queue, t.res, t.rc, t.status, t.firstErr = true, stmts, keep, 0, "", -1
 	t.batch++
 	t.started = time.Now()
@@ -284,16 +307,17 @@ func (t *queryTab) next() tea.Cmd {
 	t.queue = t.queue[1:]
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
-	ws, sess, batch, tab, limit := t.ws, t.ws.sess, t.batch, t.id, t.limit
+	ws, sess, batch, tab, limit, gen := t.ws, t.ws.sess, t.batch, t.id, t.limit, t.ws.gen
 	return func() tea.Msg {
 		start := time.Now()
 		res, err := sess.Exec(ctx, s.Text, limit)
-		return wsMsg{ws: ws.id, tab: tab, msg: queryDoneMsg{batch: batch, stmt: s, res: res, err: err, took: time.Since(start)}}
+		return wsMsg{ws: ws.id, tab: tab, gen: gen, msg: queryDoneMsg{batch: batch, stmt: s, res: res, err: err, took: time.Since(start)}}
 	}
 }
 
 // Close cancels a running statement when the tab goes away.
 func (t *queryTab) Close() {
+	t.closed = true
 	if t.cancel != nil {
 		t.cancel()
 	}
@@ -344,6 +368,13 @@ func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
 		rv := t.toResult(m)
 		if t.ws.a.d.Cfg.Editor.ResultMode == "append" && len(t.res) > 0 {
 			rv.title = t.res[0].title
+		}
+		if t.replace >= 0 && t.replace < len(t.res) { // a committed result is refreshed in place
+			rv.title, rv.pinned = t.res[t.replace].title, t.res[t.replace].pinned
+			t.res[t.replace] = rv
+			t.running, t.queue, t.rc, t.replace = false, nil, t.replace, -1
+			t.focusResults = true
+			return t.makeEditable(t.rc)
 		}
 		t.res = append(t.res, rv)
 		if m.err != nil && t.firstErr < 0 {

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -45,7 +46,17 @@ func editableDDL(dialect string, ref db.ObjRef, ddl string) string {
 		drop = "DROP MATERIALIZED VIEW IF EXISTS " + name + ";\n"
 	case db.KindFunction, db.KindProcedure:
 		if dialect == "mysql" {
-			drop = "DROP " + strings.ToUpper(string(ref.Kind)) + " IF EXISTS " + name + ";\n"
+			// Create the new body under a temporary name first; the original is only dropped and
+			// renamed once the CREATE has succeeded, so a failed edit never destroys the routine.
+			kind := strings.ToUpper(string(ref.Kind))
+			tmp := ref.Name + "__tuidb_new"
+			body := strings.Replace(ddl, "`"+ref.Name+"`", "`"+tmp+"`", 1)
+			body = regexp.MustCompile(`(?i)^CREATE\s+DEFINER=[^ ]+\s+`).ReplaceAllString(body, "CREATE ")
+			return fmt.Sprintf("-- Definition of %s. The routine body may contain ';', so the terminator is switched to $$.\n"+
+				"-- Running all creates %s first; the old routine is dropped only after that succeeds.\n"+
+				"DELIMITER $$\n%s$$\nDROP %s IF EXISTS %s$$\nDELIMITER ;\n"+
+				"-- MySQL cannot rename routines: run this tab again after changing `%s` back to `%s` above, or keep the new name.\n",
+				ref.Name, tmp, body, kind, name, tmp, ref.Name)
 		}
 	}
 	head := fmt.Sprintf("-- Definition of %s. Edit it, then run all to apply (it asks first in safe mode).\n", ref.Name)

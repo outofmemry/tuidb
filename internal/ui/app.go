@@ -43,6 +43,7 @@ type App struct {
 	toastSeq  int
 	nextID    int
 	quit      bool
+	deferred  []wsMsg // async results held back while a dialog is open
 	startConn *config.Connection
 }
 
@@ -100,6 +101,7 @@ func (a *App) saveSession() {
 type wsMsg struct { // async result for workspace ws (and optionally one of its tabs)
 	ws  int
 	tab int
+	gen int // workspace generation when the work started
 	msg tea.Msg
 }
 
@@ -120,7 +122,10 @@ type testedMsg struct {
 
 // ---- helpers used by the other files ------------------------------------------------------
 
-func (a *App) push(o Overlay) { a.overlays = append(a.overlays, o) }
+func (a *App) push(o Overlay) {
+	a.overlays = append(a.overlays, o)
+	a.machine = keymap.Machine{Map: a.d.Keys} // a pending prefix must not outlive a dialog
+}
 
 func (a *App) say(format string, args ...any) tea.Cmd {
 	return a.notify(false, fmt.Sprintf(format, args...))
@@ -237,14 +242,34 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		old := w.o
 		w.o, w.sess, w.caps = m.o, m.o.Sess, m.o.Sess.Caps()
-		w.forget(nil)
+		w.forget(nil) // also bumps the generation: in-flight results from the old session are dropped
 		old.Close()
-		return a, tea.Batch(a.say("reconnected to %s", w.conn.Name), w.sb.load(), w.reloadTab())
+		cmds := []tea.Cmd{a.say("reconnected to %s", w.conn.Name), w.sb.load()}
+		for _, t := range w.tabs {
+			if tt, ok := t.(*tableTab); ok {
+				cmds = append(cmds, tt.load())
+			}
+		}
+		return a, tea.Batch(cmds...)
 	case wsMsg:
+		if len(a.overlays) > 0 { // results that would open a dialog over the current one wait until it closes
+			a.deferred = append(a.deferred, m)
+			return a, nil
+		}
 		if w := a.wsByID(m.ws); w != nil {
 			return a, w.handle(m)
 		}
 		return a, nil
+	case tea.InterruptMsg, tea.QuitMsg: // Ctrl+C as a signal, SIGTERM, SIGHUP: same teardown as quit
+		if a.quit {
+			return a, nil // already torn down: tea.Quit itself arrives here as a QuitMsg
+		}
+		a.saveSession()
+		for _, w := range a.wss {
+			w.close()
+		}
+		a.quit = true
+		return a, tea.Quit
 	case tea.KeyPressMsg:
 		return a, a.key(m)
 	case tea.ClipboardMsg:
@@ -270,6 +295,16 @@ func (a *App) updateTop(msg tea.Msg) tea.Cmd {
 		a.overlays = append(a.overlays[:top], a.overlays[top+1:]...)
 	} else {
 		a.overlays[top] = o
+	}
+	if len(a.overlays) == 0 && len(a.deferred) > 0 {
+		q := a.deferred
+		a.deferred = nil
+		cmds := []tea.Cmd{cmd}
+		for _, m := range q {
+			m := m
+			cmds = append(cmds, func() tea.Msg { return m })
+		}
+		return tea.Batch(cmds...)
 	}
 	return cmd
 }

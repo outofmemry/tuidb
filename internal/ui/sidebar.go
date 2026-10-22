@@ -418,8 +418,8 @@ func (s *sidebar) schedulePrefetch() tea.Cmd {
 		return nil
 	}
 	s.prefetchSeq++
-	seq, ref, id := s.prefetchSeq, r.obj.ObjRef, s.w.id
-	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return wsMsg{ws: id, tab: -1, msg: prefetchMsg{seq: seq, ref: ref}} })
+	seq, ref, id, gen := s.prefetchSeq, r.obj.ObjRef, s.w.id, s.w.gen
+	return tea.Tick(150*time.Millisecond, func(time.Time) tea.Msg { return wsMsg{ws: id, tab: -1, gen: gen, msg: prefetchMsg{seq: seq, ref: ref}} })
 }
 
 func (s *sidebar) prefetch(m prefetchMsg) tea.Cmd {
@@ -784,11 +784,19 @@ func (s *sidebar) adminOp(op db.AdminOp) tea.Cmd {
 	f := newForm(verb+" "+ref.Name+"?", []formField{
 		{Key: "cascade", Label: "Cascade", Kind: fBool, Value: "false"},
 		{Key: "restart", Label: "Restart identity", Kind: fBool, Value: "false", Show: func(map[string]string) bool { return op == db.OpTruncate && s.w.caps.Dialect == "postgres" }},
-		{Key: "warn", Label: "", Kind: fLabel, Value: "Statements are shown for review and go through safe mode."},
+		{Key: "warn", Label: "", Kind: fLabel, Value: "This cannot be undone. Type the name to confirm."},
+		{Key: "confirm", Label: "Type its name", Kind: fText},
 	}, func(v map[string]string) tea.Cmd {
 		opts["cascade"], opts["restart_identity"] = v["cascade"], v["restart"]
 		return run()
 	})
+	f.validate = func(v map[string]string) error {
+		if v["confirm"] != ref.Name {
+			return fmt.Errorf("type %q to confirm", ref.Name)
+		}
+		return nil
+	}
+	f.idx = 3 // start on the confirmation field
 	f.submit = "Enter: " + strings.ToLower(verb)
 	s.w.a.push(f)
 	return nil

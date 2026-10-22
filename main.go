@@ -62,6 +62,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if state.Recovered != "" {
+		fmt.Fprintln(os.Stderr, "tuidb:", state.Recovered)
+	}
 	d := &ui.Deps{
 		Cfg: cfg, Keys: km, Conns: conns, ConnPath: connPath, State: state,
 		Hist:    &store.History{Dir: filepath.Join(data, "history")},

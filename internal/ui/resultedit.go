@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -52,6 +53,9 @@ func (t *queryTab) makeEditable(idx int) tea.Cmd {
 		return nil
 	}
 	var ref *db.ObjRef
+	if schema == "" { // an unqualified name resolves against the session's schema, not whatever the sidebar shows
+		schema = t.ws.sess.CurrentSchema()
+	}
 	for _, o := range t.ws.sb.objs {
 		if o.Kind == db.KindTable && strings.EqualFold(o.Name, table) && (schema == "" || strings.EqualFold(o.Schema, schema)) {
 			r := o.ObjRef
@@ -65,7 +69,7 @@ func (t *queryTab) makeEditable(idx int) tea.Cmd {
 	batch, r, caps := t.batch, *ref, t.ws.caps
 	if cols, ok := t.ws.meta[r]; ok {
 		return func() tea.Msg {
-			return wsMsg{ws: t.ws.id, tab: t.id, msg: resultColsMsg{batch: batch, idx: idx, ref: r, cols: cols}}
+			return wsMsg{ws: t.ws.id, tab: t.id, gen: t.ws.gen, msg: resultColsMsg{batch: batch, idx: idx, ref: r, cols: cols}}
 		}
 	}
 	return t.ws.async(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
@@ -168,19 +172,29 @@ func (t *queryTab) Commit() tea.Cmd {
 	if rv == nil || !rv.grid.HasPending() {
 		return t.ws.a.say("no pending result edits")
 	}
+	for _, r := range t.res {
+		if r != rv && r.grid != nil && r.grid.HasPending() {
+			return t.ws.a.say("another result has edits too: commit one result at a time (switch with [ and ])")
+		}
+	}
+	if t.running {
+		return t.ws.a.say("a query is running; wait for it")
+	}
 	stmts, err := t.Statements()
 	if err != nil {
 		return t.ws.a.fail(err)
 	}
-	stmt := rv.stmt
+	idx := t.rc
 	return t.ws.execute(stmts, func(err error) tea.Cmd {
-		if err != nil {
+		if err != nil || t.closed {
 			return nil
 		}
-		// run the query again so the grid shows what the server now holds, and stay in the results
-		cmd := t.start([]db.Stmt{{Text: stmt}})
+		// refresh only this result in place so other results (and their edits) stay
+		rv.grid.DiscardPending()
+		t.replace, t.running, t.queue, t.batch = idx, true, []db.Stmt{{Text: rv.stmt}}, t.batch+1
+		t.started = time.Now()
 		t.focusResults = true
-		return tea.Batch(cmd, t.ws.a.say("committed %d statement(s)", len(stmts)))
+		return tea.Batch(t.next(), t.ws.a.say("committed %d statement(s)", len(stmts)))
 	})
 }
 

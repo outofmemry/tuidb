@@ -65,6 +65,9 @@ type Workspace struct {
 	// round trip. Only touched on the UI loop; cleared by reload, reconnect and schema changes.
 	meta map[db.ObjRef][]db.Column
 	lost bool // the last keep-alive ping failed
+	// gen counts session changes (database switch, reconnect, reload). Messages created under an
+	// older generation are dropped: their rows, columns and errors belong to another database.
+	gen int
 }
 
 type pingMsg struct{ err error }
@@ -79,7 +82,11 @@ func (w *Workspace) ping() tea.Cmd {
 }
 
 func newWorkspace(a *App, id int, c config.Connection, o *Opened) *Workspace {
-	lvl, _ := safemode.Parse(c.SafeMode)
+	// general.default_safe_mode covers connections that set none; an unparsable value fails closed.
+	lvl, err := safemode.Parse(orDefault(c.SafeMode, a.d.Cfg.General.DefaultSafeMode))
+	if err != nil {
+		lvl = safemode.Safe2
+	}
 	w := &Workspace{a: a, id: id, conn: c, o: o, sess: o.Sess, caps: o.Sess.Caps(), level: lvl, showSB: true, focusSB: true, meta: map[db.ObjRef][]db.Column{}}
 	w.sb = newSidebar(w)
 	return w
@@ -150,6 +157,7 @@ func mergeFKs(cols []db.Column, fks []db.ForeignKey) []db.Column {
 func (w *Workspace) forget(ref *db.ObjRef) {
 	if ref == nil {
 		w.meta = map[db.ObjRef][]db.Column{}
+		w.gen++
 		return
 	}
 	delete(w.meta, *ref)
@@ -196,15 +204,28 @@ func (w *Workspace) context() string {
 // The session is captured here, on the UI loop: a reconnect swaps w.sess, and a closure that read
 // it later from its own goroutine would race with that.
 func (w *Workspace) async(tab int, f func(ctx context.Context, sess db.Session) tea.Msg) tea.Cmd {
-	id, sess := w.id, w.sess
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		return wsMsg{ws: id, tab: tab, msg: f(ctx, sess)}
+	cmd, _ := w.asyncCancel(tab, f)
+	return cmd
+}
+
+// asyncCancel is async plus a cancel function; loads use it so a newer load, a closed tab or a
+// disconnect can stop the old one. The deadline follows general.query_timeout_secs (0 = none).
+func (w *Workspace) asyncCancel(tab int, f func(ctx context.Context, sess db.Session) tea.Msg) (tea.Cmd, context.CancelFunc) {
+	id, sess, gen := w.id, w.sess, w.gen
+	ctx, cancel := context.WithCancel(context.Background())
+	if secs := w.a.d.Cfg.General.QueryTimeoutSecs; secs > 0 {
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(secs)*time.Second)
 	}
+	return func() tea.Msg {
+		defer cancel()
+		return wsMsg{ws: id, tab: tab, gen: gen, msg: f(ctx, sess)}
+	}, cancel
 }
 
 func (w *Workspace) handle(m wsMsg) tea.Cmd {
+	if _, apply := m.msg.(applyDoneMsg); !apply && m.gen != w.gen {
+		return nil // from before a database switch / reconnect: not this session's data
+	}
 	if cm, ok := m.msg.(colsMetaMsg); ok && cm.err == nil && cm.cols != nil {
 		w.meta[cm.ref] = cm.cols
 	}
@@ -250,6 +271,10 @@ func (w *Workspace) gate(stmts []db.Statement, run func() tea.Cmd) tea.Cmd {
 	}
 	confirm, password := w.level.Gate(readOnly)
 	switch {
+	case password && w.o.Password == "":
+		// nothing to compare against: a blank field must not pass as "the database password"
+		w.a.push(&confirmDlg{title: w.level.Label() + ": this connection has no stored password. Send?", lines: lines, yes: "Send", danger: true, onYes: run})
+		return nil
 	case password:
 		pw := w.o.Password
 		f := newForm(w.level.Label()+": enter the database password", []formField{
@@ -286,19 +311,21 @@ func (w *Workspace) execute(stmts []db.Statement, then func(err error) tea.Cmd) 
 	}
 	return w.gate(stmts, func() tea.Cmd {
 		w.applying = true
-		return w.async(-2, func(ctx context.Context, sess db.Session) tea.Msg {
+		id, sess, atomic := w.id, w.sess, w.caps.Transactions
+		return func() tea.Msg { // no deadline: a commit must never be cut off half way
 			start := time.Now()
-			err := sess.Apply(ctx, stmts)
-			return applyDoneMsg{stmts: stmts, err: err, dur: time.Since(start), then: then}
-		})
+			err := sess.Apply(context.Background(), stmts)
+			return wsMsg{ws: id, tab: -2, msg: applyDoneMsg{stmts: stmts, err: err, dur: time.Since(start), then: then, atomic: atomic}}
+		}
 	})
 }
 
 type applyDoneMsg struct {
-	stmts []db.Statement
-	err   error
-	dur   time.Duration
-	then  func(err error) tea.Cmd
+	stmts  []db.Statement
+	err    error
+	dur    time.Duration
+	then   func(err error) tea.Cmd
+	atomic bool // the driver ran the batch in one transaction
 }
 
 // ---- tabs -------------------------------------------------------------------------------
@@ -403,7 +430,11 @@ func (w *Workspace) handleGlobal(msg tea.Msg) (tea.Cmd, bool) {
 			w.record(s.Shown(), "gui", m.dur/time.Duration(max(1, len(m.stmts))), m.err)
 		}
 		if m.err != nil {
-			w.a.errorDialog("Statement failed (nothing was committed)", m.err)
+			title := "Statement failed (nothing was committed)"
+			if !m.atomic {
+				title = "Statement failed (earlier statements in the batch may have been applied)"
+			}
+			w.a.errorDialog(title, m.err)
 		}
 		if m.then != nil {
 			return m.then(m.err), true
@@ -449,11 +480,37 @@ func (w *Workspace) input(msg tea.Msg) tea.Cmd {
 // mutating actions are refused while statements are in flight, so edits typed in that window
 // cannot be wiped by the reload that follows the commit.
 var mutating = map[string]bool{"commit": true, "discard": true, "undo": true, "redo": true, "add_row": true, "duplicate_rows": true,
-	"delete_rows": true, "set_value": true, "paste_rows": true, "paste_cells": true, "reload_tab": true, "delete_item": true, "truncate": true}
+	"delete_rows": true, "set_value": true, "paste_rows": true, "paste_cells": true, "reload_tab": true, "delete_item": true, "truncate": true,
+	"run_current": true, "run_all": true, "open_database": true, "reconnect": true, "disconnect": true}
+
+// busy reports whether any tab has a running query or load.
+func (w *Workspace) busy() bool {
+	for _, t := range w.tabs {
+		if b, ok := t.(interface{ Busy() bool }); ok && b.Busy() {
+			return true
+		}
+	}
+	return false
+}
 
 func (w *Workspace) action(name string) tea.Cmd {
 	if w.applying && mutating[name] {
 		return w.a.say("a change is still being sent; wait for it to finish")
+	}
+	if name == "process_list" && w.busy() {
+		name = "cancel_query" // the same key: cancel while something runs, process list otherwise
+	}
+	if name == "cancel_query" { // works from any pane: the running tab is found, not the focused one
+		var cmds []tea.Cmd
+		for _, t := range w.tabs {
+			if c, ok := t.(interface{ CancelWork() tea.Cmd }); ok {
+				cmds = append(cmds, c.CancelWork())
+			}
+		}
+		if len(cmds) == 0 {
+			return w.a.say("nothing is running")
+		}
+		return tea.Batch(cmds...)
 	}
 	// tab-level first: it knows its own focus (grid vs editor vs structure)
 	if t := w.tab(); t != nil && !w.focusSB {
@@ -691,6 +748,9 @@ type databasesMsg struct {
 }
 
 func (w *Workspace) openDatabase(name string) tea.Cmd {
+	if name != w.sess.CurrentDatabase() && w.busy() {
+		return w.a.say("a query is still running; cancel it before switching database")
+	}
 	if name != w.sess.CurrentDatabase() && w.dirty() {
 		w.a.push(&confirmDlg{title: "Switching database closes all tabs", lines: []string{"There are unsaved changes in open tabs; they will be lost."}, yes: "Switch", danger: true,
 			onYes: func() tea.Cmd { return w.switchDatabase(name) }})
@@ -823,7 +883,7 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	if w.showDetail {
 		detW = clamp(W/4, 30, 46)
 	}
-	if w.showConsole {
+	if w.showConsole && H >= 14 { // a console needs room for the main pane too
 		conH = clamp(H/4, 5, 12)
 	}
 	mainH := H - conH

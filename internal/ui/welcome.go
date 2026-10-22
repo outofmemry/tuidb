@@ -130,7 +130,7 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	switch k.Keystroke() {
+	switch keymap.FromMsg(k) {
 	case "down", "j":
 		w.move(1)
 	case "up", "k":
@@ -151,9 +151,19 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 		return w.remove()
 	case "i":
 		return w.importURL()
-	case "u":
+	case "u": // the clipboard is shared and often synced: no password unless asked for with U
 		if r, ok := w.current(); ok {
-			return tea.Batch(tea.SetClipboard(r.conn.FormatURL()), w.a.say("copied %s as URL (includes the password)", r.conn.Name))
+			c := r.conn
+			c.Password = ""
+			return tea.Batch(tea.SetClipboard(c.FormatURL()), w.a.say("copied %s as URL without the password (U includes it)", c.Name))
+		}
+	case "U":
+		if r, ok := w.current(); ok {
+			c := r.conn
+			w.a.push(&confirmDlg{title: "Copy the URL with the password to the clipboard?", lines: []string{"Clipboard managers and synced clipboards keep what is copied."}, yes: "Copy", danger: true,
+				onYes: func() tea.Cmd {
+					return tea.Batch(tea.SetClipboard(c.FormatURL()), w.a.say("copied %s with its password", c.Name))
+				}})
 		}
 	case "tab":
 		if len(w.a.wss) > 0 {
@@ -231,7 +241,7 @@ func (w *welcome) importURL() tea.Cmd {
 	return nil
 }
 
-var sslModes = []string{"", "disable", "prefer", "require", "verify-ca", "verify-full"}
+var sslModes = append([]string{""}, config.SSLModes...)
 
 // form opens the create/edit dialog. idx<0 creates a new connection.
 func (w *welcome) form(c config.Connection, idx int) tea.Cmd {

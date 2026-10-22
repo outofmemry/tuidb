@@ -69,7 +69,12 @@ type confirmDlg struct {
 func (d *confirmDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
 		switch k.Keystroke() {
-		case "y", "enter":
+		case "y":
+			return nil, d.onYes()
+		case "enter": // a reflexive Enter must not be the destructive choice
+			if d.danger {
+				return nil, nil
+			}
 			return nil, d.onYes()
 		case "n", "esc", "q":
 			return nil, nil
@@ -100,6 +105,9 @@ func (d *confirmDlg) View(th Theme, maxW, maxH int) string {
 		label = "Yes"
 	}
 	hint := "y/Enter: " + label + "   n/Esc: cancel" + more
+	if d.danger {
+		hint = "y: " + label + "   Enter/n/Esc: cancel" + more
+	}
 	t := d.title
 	if d.danger {
 		t = th.Err.Render("⚠ ") + t

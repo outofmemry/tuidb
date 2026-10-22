@@ -56,6 +56,11 @@ type tableTab struct {
 	loadedRows  int
 	paste       string // "rows" or "cells" while the clipboard read is pending
 	findText    string
+	cancel      context.CancelFunc // stops the in-flight load
+	committing  bool               // a commit was sent and its reload has not landed yet
+	closed      bool
+	wantPKSort  bool // table.default_sort = pk_asc / pk_desc: applied once the key is known
+	pkDesc      bool
 	waitCols    bool // rows are waiting for the column metadata (the query needs the names)
 	resCols     []db.ResultColumn
 	fb          filterBar
@@ -73,18 +78,33 @@ type tableTab struct {
 	fkEdits             map[string]*db.ForeignKey
 	creating            bool
 	docs                []string
-	tree                *docTree
-	jsonTop             int
+	jsonCache           struct {
+		docs  []string
+		lines []string
+		kinds [][]tokKind
+	}
+	tree    *docTree
+	jsonTop int
 }
 
 func newTableTab(ws *Workspace, id int, ref db.ObjRef) *tableTab {
 	t := &tableTab{ws: ws, id: id, ref: ref, grid: &Grid{}, limit: ws.a.d.Cfg.General.RowLimit, hidden: map[string]bool{}}
 	t.grid.Editable = ref.Kind == db.KindTable
+	t.grid.NoStripes = !ws.a.d.Cfg.Table.AlternatingRows
+	cfg := ws.a.d.Cfg.Table
 	if ts := ws.a.d.State.Table(t.stateKey()); ts.Sort != nil || len(ts.Filters.Filters) > 0 || len(ts.Hidden) > 0 {
 		t.sort, t.filters, t.showFilters = ts.Sort, ts.Filters, ts.ShowBar
 		for _, h := range ts.Hidden {
 			t.hidden[h] = true
 		}
+	} else if cfg.DefaultSort == "pk_asc" || cfg.DefaultSort == "pk_desc" {
+		t.wantPKSort, t.pkDesc = true, cfg.DefaultSort == "pk_desc"
+	}
+	switch cfg.FilterState { // "remember" keeps what the state file said
+	case "show":
+		t.showFilters = true
+	case "hide":
+		t.showFilters = false
 	}
 	return t
 }
@@ -182,19 +202,37 @@ func (t *tableTab) query() db.RowQuery {
 // one round trip of wall time instead of four in a row. Rows only wait for the columns when the
 // query itself needs their names (hidden columns, an Any-column filter).
 func (t *tableTab) load() tea.Cmd {
+	if t.cancel != nil {
+		t.cancel() // one load at a time: holding the sort or page key must not pile up queries
+	}
 	t.loading, t.err, t.counted = true, "", false
+	t.grid.Editable = false // the rows are about to be replaced; typing into them would be lost
 	t.seq++
 	if t.cols == nil {
 		t.cols = t.ws.meta[t.ref]
 	}
 	if t.cols != nil {
+		t.applyDefaultSort()
 		return tea.Batch(t.loadRows(), t.loadCount())
 	}
-	if t.needColsFirst() {
+	if t.needColsFirst() || t.wantPKSort {
 		t.waitCols = true
 		return t.loadCols()
 	}
 	return tea.Batch(t.loadCols(), t.loadRows(), t.loadCount())
+}
+
+// applyDefaultSort turns table.default_sort into a real sort once the primary key is known.
+func (t *tableTab) applyDefaultSort() {
+	if !t.wantPKSort || t.cols == nil {
+		return
+	}
+	t.wantPKSort = false
+	for _, c := range t.cols {
+		if c.PK {
+			t.sort = append(t.sort, db.Sort{Column: c.Name, Desc: t.pkDesc})
+		}
+	}
 }
 
 func (t *tableTab) needColsFirst() bool {
@@ -219,11 +257,33 @@ func (t *tableTab) loadCols() tea.Cmd {
 
 func (t *tableTab) loadRows() tea.Cmd {
 	seq, q := t.seq, t.query()
-	return t.ws.async(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
+	cmd, cancel := t.ws.asyncCancel(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
 		start := time.Now()
 		res, err := sess.Rows(ctx, q)
 		return tableLoadedMsg{seq: seq, res: res, err: err, took: time.Since(start)}
 	})
+	t.cancel = cancel
+	return cmd
+}
+
+// Close stops whatever the tab is loading; results for it are dropped by the tab lookup.
+func (t *tableTab) Close() {
+	t.closed = true
+	if t.cancel != nil {
+		t.cancel()
+	}
+}
+
+func (t *tableTab) Busy() bool { return t.loading }
+
+// CancelWork stops a running load (prefix . from any pane).
+func (t *tableTab) CancelWork() tea.Cmd {
+	if !t.loading || t.cancel == nil {
+		return nil
+	}
+	t.cancel()
+	t.loading, t.seq = false, t.seq+1
+	return t.ws.a.say("load of %s cancelled", t.ref.Name)
 }
 
 func (t *tableTab) loadCount() tea.Cmd { return t.countCmd(len(t.filters.Active()) == 0) }
@@ -255,6 +315,7 @@ func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		t.cols = m.cols
+		t.applyDefaultSort()
 		if t.waitCols && m.seq == t.seq {
 			t.waitCols = false
 			return tea.Batch(t.loadRows(), t.loadCount())
@@ -264,7 +325,7 @@ func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {
 		if m.seq != t.seq {
 			return nil
 		}
-		t.loading = false
+		t.loading, t.committing = false, false
 		if m.err != nil {
 			t.err = m.err.Error()
 			if len(t.filters.Active()) > 0 {
@@ -279,6 +340,10 @@ func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {
 	case tableCountMsg:
 		if m.seq == t.seq && m.err == nil {
 			t.count, t.counted = m.n, true
+			// an estimate is only worth showing for big tables; small ones get the exact number
+			if over := t.ws.a.d.Cfg.General.EstimateCountOver; !m.n.Exact && over > 0 && m.n.N < over {
+				return t.countCmd(false)
+			}
 		}
 	case structureLoadedMsg:
 		t.structLoaded = true
@@ -803,15 +868,20 @@ func (t *tableTab) Commit() tea.Cmd {
 	if !t.grid.HasPending() {
 		return t.ws.a.say("no pending changes")
 	}
+	if t.loading || t.committing {
+		return t.ws.a.say("still loading; wait before committing again")
+	}
 	stmts, err := t.Statements()
 	if err != nil {
 		return t.ws.a.fail(err)
 	}
 	send := func() tea.Cmd {
 		return t.ws.execute(stmts, func(err error) tea.Cmd {
-			if err != nil {
+			if err != nil || t.closed {
 				return nil
 			}
+			t.committing = true     // until the reload lands (the apply itself is covered by w.applying)
+			t.grid.DiscardPending() // the server has them now; a second commit must not resend the INSERTs
 			return tea.Batch(t.load(), t.ws.a.say("committed %d statement(s)", len(stmts)))
 		})
 	}

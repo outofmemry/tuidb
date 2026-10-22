@@ -26,7 +26,7 @@ func buildKeyTree(objs []db.Object) *keyNode {
 			if c == nil {
 				c = &keyNode{seg: seg, idx: map[string]*keyNode{}}
 				c.path = seg
-				if n.path != "" {
+				if n != root { // an empty segment (":x") must still get the parent's prefix
 					c.path = n.path + ":" + seg
 				}
 				n.idx[seg] = c
