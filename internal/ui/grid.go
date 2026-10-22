@@ -8,7 +8,6 @@ import (
 	"html"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -149,21 +148,6 @@ func (g *Grid) GoCol(c int, extend bool) {
 }
 
 func (g *Grid) Page(dir int, extend bool) { g.Move(dir*max(1, g.bodyH()-1), 0, extend) }
-
-// Wheel handles one mouse wheel tick: 3 rows up or down (the terminal convention) and one column
-// sideways, so a vertical scroll covers ground about as fast as a horizontal one.
-func (g *Grid) Wheel(b tea.MouseButton) {
-	switch b {
-	case tea.MouseWheelDown:
-		g.Move(3, 0, false)
-	case tea.MouseWheelUp:
-		g.Move(-3, 0, false)
-	case tea.MouseWheelRight:
-		g.Move(0, 1, false)
-	case tea.MouseWheelLeft:
-		g.Move(0, -1, false)
-	}
-}
 
 func (g *Grid) setSelecting(extend bool) {
 	if extend && !g.selecting {

@@ -1512,3 +1512,20 @@ func TestReviewCloseCancelsEveryLoadAndDDLBatchesAreNotCalledAtomic(t *testing.T
 		t.Error("hasDDL")
 	}
 }
+
+func TestWheelScrollsThreeRows(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	h.press("l") // focus the grid
+	_, cmd := h.a.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	h.pump(cmd)
+	if g := h.a.ws().tab().(*tableTab).grid; g.row != 2 { // 3 rows seeded: the cursor lands on the last
+		t.Fatalf("wheel down moved to row %d, want 2", g.row)
+	}
+	_, cmd = h.a.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	h.pump(cmd)
+	if g := h.a.ws().tab().(*tableTab).grid; g.row != 0 {
+		t.Fatalf("wheel up moved to row %d, want 0", g.row)
+	}
+}

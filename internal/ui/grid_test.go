@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
-
 	"tuidb/internal/db"
 )
 
@@ -346,26 +344,6 @@ func benchMoves(b *testing.B, dr, dc int) {
 			g.Move(dr, dc, false)
 			_ = g.View(th, true)
 		}
-	}
-}
-
-func TestGridWheel(t *testing.T) {
-	g := benchGrid()
-	g.Wheel(tea.MouseWheelDown)
-	g.Wheel(tea.MouseWheelRight)
-	if g.row != 3 || g.col != 1 {
-		t.Fatalf("wheel: %d,%d", g.row, g.col)
-	}
-	for range 20 {
-		g.Wheel(tea.MouseWheelDown)
-	}
-	if g.row != 63 || g.row < g.top || g.row >= g.top+g.bodyH() {
-		t.Errorf("cursor must stay visible: row %d top %d", g.row, g.top)
-	}
-	g.Wheel(tea.MouseWheelUp)
-	g.Wheel(tea.MouseWheelLeft)
-	if g.row != 60 || g.col != 0 {
-		t.Errorf("back: %d,%d", g.row, g.col)
 	}
 }
 

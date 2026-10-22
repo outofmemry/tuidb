@@ -313,6 +313,23 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 	case tea.KeyPressMsg:
 		return a, a.key(m)
+	case tea.MouseWheelMsg:
+		// the wheel is three arrow keys (the terminal convention), so every pane and dialog
+		// scrolls without knowing about the mouse; horizontal ticks move one column
+		code, n := tea.KeyDown, 3
+		switch m.Button {
+		case tea.MouseWheelUp:
+			code = tea.KeyUp
+		case tea.MouseWheelLeft:
+			code, n = tea.KeyLeft, 1
+		case tea.MouseWheelRight:
+			code, n = tea.KeyRight, 1
+		}
+		var cmds []tea.Cmd
+		for i := 0; i < n; i++ {
+			cmds = append(cmds, a.key(tea.KeyPressMsg{Code: code}))
+		}
+		return a, tea.Batch(cmds...)
 	case tea.ClipboardMsg:
 		if len(a.overlays) == 0 {
 			return a, a.forward(m)
@@ -470,6 +487,7 @@ func (a *App) pickWorkspace() tea.Cmd {
 func (a *App) View() tea.View {
 	v := tea.NewView(a.render())
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion // for the wheel; shift-drag still selects terminal text
 	v.WindowTitle = "tuidb"
 	return v
 }
