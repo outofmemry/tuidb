@@ -18,7 +18,7 @@ make build          # go build -o tuidb .
 Press `Ctrl+d ?` for the list for the pane you are in; in that list `/` fuzzy-searches by name,
 description or key (`fltr`, `commit`, `M-Enter`), and `Enter` runs the selected command. After the prefix a panel lists the keys that
 are valid right there; `Esc` cancels. `Ctrl+d Ctrl+d` sends a literal `Ctrl+d` to the focused widget.
-Typing, arrows, `j/k` and `Enter` inside a widget are never prefixed.
+Typing, arrows, `j/k` and `Enter` inside a widget are never prefixed. The mouse wheel scrolls any pane (three rows per tick); shift-drag selects terminal text.
 
 Move between panes with `Ctrl+h/j/k/l` (no prefix). Common prefixed ones (defaults): `p` open anything, `e` new SQL editor, `k` open database, `K` open connection,
 `s` commit, `P` preview the SQL, `Backspace` discard, `z`/`Z` undo/redo, `f` filters, `x` quick filter,
