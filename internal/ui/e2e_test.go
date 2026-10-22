@@ -94,7 +94,7 @@ func e2eSQL(t *testing.T, name, urlEnv, def string) {
 	h.typeText(tbl)
 	h.press("enter", "enter")
 	h.want("│b")
-	h.press("j", "l", "enter")
+	h.press("j", "l", "e")
 	h.typeText("Z")
 	h.press("enter")
 	h.prefix("s")
@@ -105,9 +105,9 @@ func e2eSQL(t *testing.T, name, urlEnv, def string) {
 
 	// 3. insert a row through the grid
 	h.prefix("i")
-	h.press("home", "enter") // first column of the new row: id
+	h.press("home", "e") // first column of the new row: id
 	h.typeText("3")
-	h.press("enter", "l", "enter") // then v
+	h.press("enter", "l", "e") // then v
 	h.typeText("c")
 	h.press("enter")
 	h.prefix("s")
@@ -150,7 +150,7 @@ func e2eSQL(t *testing.T, name, urlEnv, def string) {
 			g.GoCol(i, false)
 		}
 	}
-	h.press("enter")
+	h.press("e")
 	h.typeText("Y")
 	h.press("enter")
 	h.prefix("s")

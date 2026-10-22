@@ -33,7 +33,7 @@ func TestFlowEditPreviewCommit(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter") // second column, start editing "Ann"
+	h.press("l", "e") // second column, start editing "Ann"
 	h.typeText("ie")
 	h.press("enter")
 	h.want("customers ●")
@@ -60,7 +60,7 @@ func TestFlowDiscardAndUndo(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("zz")
 	h.press("enter")
 	h.want("Annzz")
@@ -78,7 +78,7 @@ func TestFlowAddAndDeleteRow(t *testing.T) {
 	h.connect()
 	h.openCustomers()
 	h.prefix("i") // add_row (grid context)
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Dee")
 	h.press("enter")
 	h.press("g", "j", "j") // first row, then down to Cy
@@ -101,7 +101,7 @@ func TestFlowSafeModeAlert2(t *testing.T) {
 	h.connect()
 	h.want("Alert Mode 2")
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("x")
 	h.press("enter")
 	h.prefix("s")
@@ -125,7 +125,7 @@ func TestFlowSafeMode1NeedsPassword(t *testing.T) {
 	h := newHarness(t, func(c *config.Connection, _ *config.Config) { c.SafeMode = "safe1" })
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("x")
 	h.press("enter")
 	h.prefix("s")
@@ -168,7 +168,7 @@ func TestFlowRebindFromConfig(t *testing.T) {
 	})
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("q")
 	h.press("enter")
 	h.press("ctrl+d", "x") // old prefix does nothing
@@ -299,7 +299,7 @@ func TestFlowQuitWithPendingChangesAsks(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("x")
 	h.press("enter")
 	h.prefix("q")
@@ -523,7 +523,7 @@ func TestFlowCloseDirtyTabAsks(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("x")
 	h.press("enter")
 	h.prefix("w")
@@ -577,7 +577,7 @@ func TestFlowEditingNullCellKeepsNull(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("j", "l", "l", "enter", "enter") // Bob's NULL email: open and close the editor untouched
+	h.press("j", "l", "l", "enter", "ctrl+s") // Bob's NULL email: open the popover and save it untouched
 	h.wantNot("customers ●")
 	h.prefix("s")
 	h.want("no pending changes")
@@ -616,7 +616,7 @@ func TestFlowPendingEditsAskBeforeBeingDropped(t *testing.T) {
 		h := newHarness(t, func(_ *config.Connection, c *config.Config) { c.General.RowLimit = 2 })
 		h.connect()
 		h.openCustomers()
-		h.press("l", "enter")
+		h.press("l", "e")
 		h.typeText("Q")
 		h.press("enter")
 		tc.do(h)
@@ -637,7 +637,7 @@ func TestFlowSwitchingDatabaseWithUnsavedChangesAsks(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Q")
 	h.press("enter")
 	h.a.ws().openDatabase("other")
@@ -653,7 +653,7 @@ func TestFlowNoSecondCommitOrEditWhileApplying(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Q")
 	h.press("enter")
 	h.a.ws().applying = true // a commit is in flight
@@ -688,7 +688,7 @@ func TestFlowPrefixActionWhileEditingSavesTheEditFirst(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Zed") // editor still open on Ann's name
 	h.prefix("i")     // add_row
 	g := h.a.ws().tab().(*tableTab).grid
@@ -768,7 +768,7 @@ func TestFlowKeylessTableWarnsBeforeUpdate(t *testing.T) {
 	defer func() { customerCols = saved }()
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Q")
 	h.press("enter")
 	h.prefix("s")
@@ -1154,7 +1154,7 @@ func TestFlowEditAndCommitAQueryResult(t *testing.T) {
 	h.want("Ann")
 	h.prefix("alt+j") // focus the results
 	h.want("edit")    // the hint says the result is editable
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Q")
 	h.press("enter")
 	h.want("SQL 1 ●") // the tab shows pending changes
@@ -1249,7 +1249,7 @@ func TestReviewCommitTwiceSendsOnce(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Q")
 	h.press("enter")
 	tab := h.a.ws().tab().(*tableTab)
@@ -1310,14 +1310,14 @@ func TestReviewResultCommitKeepsOtherResultsAndRerunAsks(t *testing.T) {
 		t.Fatalf("results %d", len(tab.res))
 	}
 	h.prefix("alt+j")
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Q")
 	h.press("enter") // edit in result 2 (focused)
 	h.prefix("s")
 	if len(h.fake.applied) != 1 || len(tab.res) != 2 {
 		t.Fatalf("commit refreshes one result in place: applied=%d results=%d", len(h.fake.applied), len(tab.res))
 	}
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("Z")
 	h.press("enter")
 	h.prefix("alt+k")
@@ -1333,7 +1333,7 @@ func TestReviewDangerConfirmNeedsY(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("x")
 	h.press("enter")
 	h.prefix("w")
@@ -1406,7 +1406,7 @@ func TestReviewSafeMode1WithoutStoredPasswordConfirms(t *testing.T) {
 	h := newHarness(t, func(c *config.Connection, _ *config.Config) { c.SafeMode = "safe1"; c.Password = "" })
 	h.connect()
 	h.openCustomers()
-	h.press("l", "enter")
+	h.press("l", "e")
 	h.typeText("x")
 	h.press("enter")
 	h.prefix("s")
@@ -1452,4 +1452,39 @@ func TestReviewQueryResultsSurviveAReload(t *testing.T) {
 	h.typeText("select 1")
 	h.prefix("alt+enter")
 	h.want("Query 1") // the result carries the current generation and is not dropped as stale
+}
+
+func TestFlowEnterOpensPopoverEditorForJSON(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	g := h.a.ws().tab().(*tableTab).grid
+	g.Rows[0].Cur[2] = `{"tier":"gold","tags":["a","b"]}`
+	g.GoCol(2, false)
+	h.press("enter")
+	h.want("Edit email")
+	h.want(`"tier": "gold"`) // pretty-printed for editing
+	h.press("ctrl+s")        // unchanged text: nothing becomes dirty
+	if g.HasPending() {
+		t.Fatal("saving unchanged JSON must not mark the cell")
+	}
+	h.press("enter")
+	h.press("ctrl+a", "x") // replace all with x
+	h.press("enter")       // Enter inside the popover is a newline, not save
+	h.typeText("y")
+	h.press("ctrl+s")
+	if got := g.Rows[0].Cur[2]; got != "x\ny" || !g.HasPending() {
+		t.Fatalf("saved %q", got)
+	}
+	h.press("enter")
+	h.typeText("zzz")
+	h.press("esc")
+	if g.Rows[0].Cur[2] != "x\ny" {
+		t.Fatal("esc cancels")
+	}
+	h.press("e") // inline editing is still there
+	if !g.Editing() {
+		t.Fatal("e edits inline")
+	}
+	h.press("esc")
 }

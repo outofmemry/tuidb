@@ -98,6 +98,7 @@ func lexLines(dialect string, lines []string) [][]tokKind {
 					kw = firstWord && redisCommands[strings.ToUpper(w)]
 				case "mongo":
 					kw = mongoWords[w]
+				case "text": // plain data: no keywords at all
 				default:
 					kw = sqlKeywords[strings.ToUpper(w)]
 				}

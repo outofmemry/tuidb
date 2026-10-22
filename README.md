@@ -40,7 +40,8 @@ run_all = ["M-Enter", "-n F5"] # a list binds several keys; "-n " means no prefi
 Unknown actions, unparsable keys, two of your bindings on the same key, and binding `esc`
 (it cancels the prefix) are reported at startup with the offending line.
 
-Also handy in a grid: `/` find (then `n` / `N`), `s` sort the column, `#` exact row count, `L` limit and offset,
+In a grid, `Enter` opens the cell in a popover editor (JSON is pretty-printed; `Ctrl+s` saves, `Esc` cancels)
+and `e` edits inline. Also handy: `/` find (then `n` / `N`), `s` sort the column, `#` exact row count, `L` limit and offset,
 paste rows (`v`) and cells (`V`), and in the results pane `p` pins a result so the next run keeps it. A query result
 is editable when it is a plain `SELECT ... FROM table` that includes the primary key.
 

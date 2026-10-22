@@ -549,10 +549,11 @@ func (t *tableTab) Input(msg tea.Msg) tea.Cmd {
 		g.GoRow(len(g.Rows)-1, false)
 	case "esc":
 		g.ClearSelection()
-	case "enter":
-		if !g.StartEdit() {
+	case "enter": // a popover: cells can hold a whole JSON document
+		if !g.Editable || g.cur() == nil || g.cur().State == rowDeleted {
 			return t.quickLook()
 		}
+		return editCellInPopover(t.ws, g)
 	case "space":
 		t.ws.showDetail = !t.ws.showDetail
 	case "s":

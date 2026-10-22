@@ -548,9 +548,13 @@ func (t *queryTab) resultsInput(msg tea.Msg) tea.Cmd {
 		return t.copyOut(g.CopyCells(FmtPlain, "result"), "cells")
 	case "y":
 		return t.copyOut(g.CopyRows(FmtCSV, "result"), "rows")
+	case "e":
+		if g.Editable {
+			g.StartEdit()
+		}
 	case "enter":
-		if g.Editable && g.StartEdit() {
-			return nil
+		if g.Editable && g.cur() != nil && g.cur().State != rowDeleted {
+			return editCellInPopover(t.ws, g)
 		}
 		if v, ok := g.CursorValue(); ok {
 			text := plain(v)
