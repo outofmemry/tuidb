@@ -1,0 +1,13 @@
+FLUSHALL
+SET user:1:name "Ann Lee"
+SET user:2:name "Bob O'Neil"
+SET counter 42
+SETEX session:abc 2592000 "token"
+HSET user:1 name "Ann Lee" email ann@example.com age 31
+RPUSH queue:jobs j1 j2 j3
+SADD tags:post:1 red green blue
+ZADD leaderboard 100 ann 250 bob 75 cy
+XADD events:stream * kind click user 1
+SET json:doc "{\"a\":1,\"b\":[1,2]}"
+SELECT 1
+SET other:db:key "in db 1"
