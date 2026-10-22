@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"tuidb/internal/db"
 )
@@ -306,3 +309,65 @@ func TestGridPasteAndFind(t *testing.T) {
 		t.Errorf("backwards from the top wraps to the last match: %d,%d", f.row, f.col)
 	}
 }
+
+func benchGrid() *Grid {
+	cols := make([]gridCol, 20)
+	for c := range cols {
+		cols[c] = gridCol{Name: fmt.Sprintf("column_%d", c)}
+	}
+	rows := make([][]any, 300)
+	for r := range rows {
+		row := make([]any, 20)
+		for c := range row {
+			switch c % 4 {
+			case 0:
+				row[c] = int64(r * c)
+			case 1:
+				row[c] = fmt.Sprintf("some text value %d-%d", r, c)
+			case 2:
+				row[c] = nil
+			default:
+				row[c] = float64(r) / 7
+			}
+		}
+		rows[r] = row
+	}
+	g := &Grid{W: 120, H: 40}
+	g.SetData(cols, rows)
+	return g
+}
+
+// One iteration = 100 cursor steps, each followed by a frame, as Bubble Tea renders after every key.
+func benchMoves(b *testing.B, dr, dc int) {
+	th := NewTheme(configTheme())
+	for b.Loop() {
+		g := benchGrid()
+		for range 100 {
+			g.Move(dr, dc, false)
+			_ = g.View(th, true)
+		}
+	}
+}
+
+func TestGridWheel(t *testing.T) {
+	g := benchGrid()
+	g.Wheel(tea.MouseWheelDown)
+	g.Wheel(tea.MouseWheelRight)
+	if g.row != 3 || g.col != 1 {
+		t.Fatalf("wheel: %d,%d", g.row, g.col)
+	}
+	for range 20 {
+		g.Wheel(tea.MouseWheelDown)
+	}
+	if g.row != 63 || g.row < g.top || g.row >= g.top+g.bodyH() {
+		t.Errorf("cursor must stay visible: row %d top %d", g.row, g.top)
+	}
+	g.Wheel(tea.MouseWheelUp)
+	g.Wheel(tea.MouseWheelLeft)
+	if g.row != 60 || g.col != 0 {
+		t.Errorf("back: %d,%d", g.row, g.col)
+	}
+}
+
+func BenchmarkGridDown(b *testing.B)  { benchMoves(b, 1, 0) }
+func BenchmarkGridRight(b *testing.B) { benchMoves(b, 0, 1) }
