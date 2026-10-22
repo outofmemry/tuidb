@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"tuidb/internal/safemode"
 )
 
 // Driver names. Aliases accepted in URLs are mapped in ParseURL.
@@ -72,12 +74,24 @@ func (c Connection) Validate() error {
 	if strings.TrimSpace(c.Name) == "" {
 		return errors.New("connection needs a name")
 	}
+	ok := false
 	for _, d := range Drivers {
-		if c.Driver == d {
-			return nil
-		}
+		ok = ok || c.Driver == d
 	}
-	return fmt.Errorf("connection %q: unknown driver %q (want %s)", c.Name, c.Driver, strings.Join(Drivers, "|"))
+	if !ok {
+		return fmt.Errorf("connection %q: unknown driver %q (want %s)", c.Name, c.Driver, strings.Join(Drivers, "|"))
+	}
+	// A typo here must not fail open: both settings decide whether a write is confirmed / encrypted.
+	if _, err := safemode.Parse(c.SafeMode); err != nil {
+		return fmt.Errorf("connection %q: safe_mode: %w", c.Name, err)
+	}
+	if c.SSLMode != "" && !contains(SSLModes, c.SSLMode) {
+		return fmt.Errorf("connection %q: unknown ssl_mode %q (want %s)", c.Name, c.SSLMode, strings.Join(SSLModes, "|"))
+	}
+	if c.SSH != nil && c.SSH.Host != "" && (c.SSH.Port < 0 || c.SSH.Port > 65535) {
+		return fmt.Errorf("connection %q: ssh port must be 1-65535", c.Name)
+	}
+	return nil
 }
 
 func (c Connection) EffectivePort() int {
@@ -94,23 +108,77 @@ func (c Connection) ResolvePassword(ctx context.Context) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	var out, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "sh", "-c", c.PasswordCmd)
-	cmd.Stdout, cmd.Stderr = &out, &stderr
+	argv, err := splitCommand(c.PasswordCmd)
+	if err != nil {
+		return "", fmt.Errorf("password_cmd for %q: %w", c.Name, err)
+	}
+	// Run the program directly: a shared connections.toml must not be able to run shell code.
+	var out bytes.Buffer
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("password_cmd for %q failed: %w: %s", c.Name, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("password_cmd for %q failed: %w", c.Name, err)
 	}
 	return strings.TrimRight(out.String(), "\r\n"), nil
+}
+
+// splitCommand splits a command line into argv with single and double quotes, no shell.
+func splitCommand(s string) ([]string, error) {
+	var argv []string
+	var cur strings.Builder
+	in, quote := false, rune(0)
+	for _, r := range s {
+		switch {
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote != 0:
+			cur.WriteRune(r)
+		case r == '\'' || r == '"':
+			quote, in = r, true
+		case r == ' ' || r == '\t' || r == '\n':
+			if in {
+				argv = append(argv, cur.String())
+				cur.Reset()
+				in = false
+			}
+		default:
+			cur.WriteRune(r)
+			in = true
+		}
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unbalanced quote in %q", s)
+	}
+	if in {
+		argv = append(argv, cur.String())
+	}
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("empty command")
+	}
+	return argv, nil
 }
 
 func ConnectionsPath() string { return filepath.Join(ConfigDir(), "connections.toml") }
 
 func LoadConnections(path string) ([]Connection, error) {
 	var f connectionsFile
-	if _, err := toml.DecodeFile(path, &f); errors.Is(err, os.ErrNotExist) {
+	md, err := toml.DecodeFile(path, &f)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	for _, k := range md.Undecoded() { // a misspelled ssl_mode or safe_mode must not vanish silently
+		if len(k) >= 3 && k[2] == "options" {
+			continue
+		}
+		return nil, fmt.Errorf("%s: unknown setting %q", path, k.String())
+	}
+	// The file holds plaintext passwords: it is only ever read with owner-only permissions.
+	if st, err := os.Stat(path); err == nil && st.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return nil, fmt.Errorf("%s is readable by other users and could not be fixed: %w", path, err)
+		}
 	}
 	seen := map[string]bool{}
 	for _, c := range f.Connection {
@@ -134,7 +202,14 @@ func SaveConnections(path string, conns []Connection) error {
 	if err := toml.NewEncoder(&buf).Encode(connectionsFile{Connection: conns}); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".connections-*")
+	return WriteFileAtomic(path, buf.Bytes())
+}
+
+// WriteFileAtomic writes data to a temp file in the same directory, fsyncs it, renames it over
+// path and fsyncs the directory, so a crash leaves either the old or the new file, never an empty one.
+func WriteFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
@@ -142,13 +217,23 @@ func SaveConnections(path string, conns []Connection) error {
 	if err := tmp.Chmod(0o600); err != nil {
 		return err
 	}
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
 var urlSchemes = map[string]string{

@@ -37,6 +37,8 @@ func Parse(spec string) (string, error) {
 	}
 	var base string
 	switch {
+	case spec == " ":
+		base = "space" // the terminal reports the space bar by name
 	case utf8.RuneCountInString(spec) == 1:
 		base = spec
 		if shift && !ctrl && !alt && base >= "a" && base <= "z" {

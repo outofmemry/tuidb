@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,8 +148,39 @@ func TestState(t *testing.T) {
 	if again.Table(k).Filters.Filters[0].Value == "mutated" || again.Table(k).Hidden[0] == "mutated" {
 		t.Error("Table() must return a copy")
 	}
+}
+
+func TestCorruptStateIsMovedAsideNotFatal(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.json")
 	os.WriteFile(p, []byte("{broken"), 0o600)
-	if _, err := LoadState(p); err == nil {
-		t.Error("corrupt state must error, not be silently replaced")
+	s, err := LoadState(p)
+	if err != nil || s.Recovered == "" {
+		t.Fatalf("corrupt state must start fresh with a notice: %v %q", err, s.Recovered)
+	}
+	if _, err := os.Stat(p + ".corrupt"); err != nil {
+		t.Error("the bad file is kept for inspection")
+	}
+	if err := s.SetRowLimit("c", 5); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := LoadState(p); again.RowLimit("c", 0) != 5 {
+		t.Error("the fresh state is usable")
+	}
+}
+
+func TestHistoryIsBounded(t *testing.T) {
+	h := &History{Dir: t.TempDir()}
+	big := strings.Repeat("x", 300) // ~ 400 bytes a line: 5000 lines is ~2 MB, well over the 1 MB floor
+	for i := 0; i < maxEntries*2+10; i++ {
+		if err := h.Append("c", HistoryEntry{SQL: fmt.Sprintf("%d %s", i, big)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, _ := h.List("c", "", 0)
+	if len(all) > maxEntries*2 || len(all) < maxEntries/2 { // trimmed back to the cap whenever it reaches twice the cap
+		t.Fatalf("history must stay between %d and %d entries, got %d", maxEntries/2, maxEntries*2, len(all))
+	}
+	if !strings.HasPrefix(all[0].SQL, fmt.Sprint(maxEntries*2+9)+" ") {
+		t.Errorf("the newest entry survives: %q", all[0].SQL[:10])
 	}
 }

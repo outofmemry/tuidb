@@ -157,3 +157,21 @@ func TestUserBindingWinsOverContextDefault(t *testing.T) {
 		t.Error("the old default key of an overridden action must be gone")
 	}
 }
+
+func TestBuildRejectsEscPrefixAndEmptyLists(t *testing.T) {
+	if _, err := Build("esc", nil); err == nil {
+		t.Error("esc cannot be the prefix")
+	}
+	if _, err := Build("C-d", map[string][]string{"reload": {"-n esc"}}); err == nil {
+		t.Error("esc cannot be a no-prefix binding either")
+	}
+	if _, err := Build("C-d", map[string][]string{"quit": {}}); err == nil {
+		t.Error("an empty list must not delete an action")
+	}
+	if _, err := Build("C-d", map[string][]string{"reload": {"-n C-d"}}); err == nil {
+		t.Error("the prefix key cannot be bound to an action")
+	}
+	if k, _ := Parse(" "); k != "space" {
+		t.Errorf("a space spec must mean the space bar, got %q", k)
+	}
+}

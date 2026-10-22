@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"tuidb/internal/config"
 )
 
 // Query is a saved query ("favorite"): a plain .sql file whose first lines may be
@@ -88,7 +90,7 @@ func (s *Queries) Save(folder, name string, keywords []string, sql string) (Quer
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return Query{}, err
 	}
-	if err := os.WriteFile(p, []byte(header(name, keywords)+sql), 0o600); err != nil {
+	if err := config.WriteFileAtomic(p, []byte(header(name, keywords)+sql)); err != nil {
 		return Query{}, err
 	}
 	return parse(rel, header(name, keywords)+sql), nil
@@ -113,7 +115,7 @@ func (s *Queries) Update(path, sql string) error {
 		return err
 	}
 	p, _ := s.abs(path)
-	return os.WriteFile(p, []byte(header(q.Name, q.Keywords)+sql), 0o600)
+	return config.WriteFileAtomic(p, []byte(header(q.Name, q.Keywords)+sql))
 }
 
 func (s *Queries) Delete(path string) error {

@@ -15,6 +15,8 @@ const (
 
 var All = []Level{Silent, Alert1, Alert2, Safe1, Safe2}
 
+// Parse accepts the level names; "" is Silent. An unknown value returns Safe2 with the error,
+// so a caller that ignores the error fails closed (asks for the password) instead of open.
 func Parse(s string) (Level, error) {
 	if s == "" {
 		return Silent, nil
@@ -24,7 +26,7 @@ func Parse(s string) (Level, error) {
 			return l, nil
 		}
 	}
-	return Silent, fmt.Errorf("unknown safe mode %q (want silent|alert1|alert2|safe1|safe2)", s)
+	return Safe2, fmt.Errorf("unknown safe mode %q (want silent|alert1|alert2|safe1|safe2)", s)
 }
 
 func (l Level) Label() string {

@@ -38,23 +38,14 @@ type General struct {
 
 type Editor struct {
 	Autocomplete      bool   `toml:"autocomplete"`
-	AddSpace          bool   `toml:"add_space"`
-	PrefixSchema      bool   `toml:"prefix_schema"`
 	UppercaseKeywords bool   `toml:"uppercase_keywords"`
 	CloseBraces       bool   `toml:"close_braces"`
 	CompleteKey       string `toml:"complete_key"` // enter_or_tab | enter | tab
 	Indent            string `toml:"indent"`       // spaces | tabs
 	IndentWidth       int    `toml:"indent_width"`
-	IndentType        string `toml:"indent_type"` // standard | tabular_left | tabular_right
 	ResultMode        string `toml:"result_mode"` // tabs | append
 	ReturnOnError     bool   `toml:"return_on_error"`
-	AutoSaveTabs      string `toml:"auto_save_tabs"` // none | first | all
 	AutoSaveQueries   bool   `toml:"auto_save_queries"`
-	QueryParams       bool   `toml:"query_params"`
-	ParamFormat       string `toml:"param_format"`
-	ParamsInStrings   bool   `toml:"params_in_strings"`
-	ShowInvisibles    bool   `toml:"show_invisibles"`
-	Wrap              bool   `toml:"wrap"`
 	HighlightCurrent  bool   `toml:"highlight_current"`
 }
 
@@ -74,14 +65,11 @@ type CSV struct {
 }
 
 type Sidebar struct {
-	ShowRecent        bool   `toml:"show_recent"`
-	ShowFunctions     bool   `toml:"show_functions"`
-	ShowSequences     bool   `toml:"show_sequences"`
-	ShowTypes         bool   `toml:"show_types"`
-	ShowColumns       bool   `toml:"show_columns"`
-	LoadSystemSchemas bool   `toml:"load_system_schemas"`
-	LazyLoad          bool   `toml:"lazy_load"`
-	Matching          string `toml:"matching"` // fuzzy | contains
+	ShowRecent    bool   `toml:"show_recent"`
+	ShowFunctions bool   `toml:"show_functions"`
+	ShowSequences bool   `toml:"show_sequences"`
+	ShowTypes     bool   `toml:"show_types"`
+	Matching      string `toml:"matching"` // fuzzy | contains
 }
 
 type Theme struct {
@@ -93,12 +81,11 @@ func Defaults() Config {
 	return Config{
 		General: General{Prefix: "C-d", ReopenWorkspaces: true, NewTabOpens: "query", QueryTimeoutSecs: 300, KeepAlive: true,
 			RowLimit: 300, EstimateCountOver: 1_000_000, DefaultSafeMode: "silent"},
-		Editor: Editor{Autocomplete: true, AddSpace: true, UppercaseKeywords: true, CloseBraces: true, CompleteKey: "enter_or_tab",
-			Indent: "spaces", IndentWidth: 4, IndentType: "standard", ResultMode: "tabs", AutoSaveTabs: "first",
-			AutoSaveQueries: true, ParamFormat: "colon", Wrap: true, HighlightCurrent: true},
+		Editor: Editor{Autocomplete: true, UppercaseKeywords: true, CloseBraces: true, CompleteKey: "enter_or_tab", Indent: "spaces", IndentWidth: 4, ResultMode: "tabs",
+			AutoSaveQueries: true, HighlightCurrent: true},
 		Table:   Table{AlternatingRows: true, FilterDefaultColumn: "pk", FilterDefaultOperator: "=", FilterState: "remember", DefaultSort: "none"},
 		CSV:     CSV{Delimiter: ",", Quote: `"`, LineBreak: "\n", Decimal: "."},
-		Sidebar: Sidebar{ShowRecent: true, ShowFunctions: true, ShowSequences: true, ShowTypes: true, LazyLoad: true, Matching: "fuzzy"},
+		Sidebar: Sidebar{ShowRecent: true, ShowFunctions: true, ShowSequences: true, ShowTypes: true, Matching: "fuzzy"},
 		Theme:   Theme{Name: "dark"},
 	}
 }

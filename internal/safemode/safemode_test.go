@@ -21,8 +21,8 @@ func TestGate(t *testing.T) {
 			t.Errorf("%s readOnly=%v: got confirm=%v password=%v", c.l, c.readOnly, gc, gp)
 		}
 	}
-	if _, err := Parse("bogus"); err == nil {
-		t.Error("bogus must fail")
+	if l, err := Parse("bogus"); err == nil || l != Safe2 {
+		t.Errorf("bogus must fail closed to Safe2, got %q %v", l, err)
 	}
 	if l, _ := Parse(""); l != Silent {
 		t.Error("empty is silent")

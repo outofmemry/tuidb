@@ -25,9 +25,12 @@ func Build(prefix string, overrides map[string][]string) (*Map, error) {
 	for _, b := range DefaultBindings() {
 		known[b.Action] = append(known[b.Action], b.Context)
 	}
-	for action := range overrides {
+	for action, specs := range overrides {
 		if _, ok := known[action]; !ok {
 			return nil, fmt.Errorf("[keys] unknown action %q", action)
+		}
+		if len(specs) == 0 {
+			return nil, fmt.Errorf("[keys] %s: an empty list would remove the action; give it a key", action)
 		}
 	}
 	// Deterministic order so errors are stable.
@@ -85,10 +88,16 @@ func descOf(action string) string {
 }
 
 func (m *Map) validate() error {
+	if m.Prefix == "esc" {
+		return fmt.Errorf("prefix: esc cancels the prefix and cannot be the prefix")
+	}
 	seen := map[string]string{} // ctx|noprefix|key -> action
 	for _, b := range m.bindings {
-		if b.Key == "esc" && !b.NoPrefix {
+		if b.Key == "esc" {
 			return fmt.Errorf("[keys] %s: esc cancels the prefix and cannot be bound", b.Action)
+		}
+		if b.Key == m.Prefix {
+			return fmt.Errorf("[keys] %s: %s is the prefix key and cannot be bound", b.Action, Display(b.Key))
 		}
 		id := fmt.Sprintf("%s|%t|%s", b.Context, b.NoPrefix, b.Key)
 		if prev, dup := seen[id]; dup && prev != b.Action {

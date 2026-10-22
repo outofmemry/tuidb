@@ -3,6 +3,7 @@ package store
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"tuidb/internal/config"
 )
 
 type HistoryEntry struct {
@@ -24,11 +27,13 @@ type HistoryEntry struct {
 	Original string        `json:"orig,omitempty"` // CSV pre-image when log_original_values is on
 }
 
-// History is one JSONL file per connection.
+// History is one JSONL file per connection, kept to the newest maxEntries.
 type History struct {
 	Dir string
 	mu  sync.Mutex
 }
+
+const maxEntries = 5000
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
@@ -54,9 +59,20 @@ func (h *History) Append(conn string, e HistoryEntry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(append(line, '\n'))
-	return err
+	n, werr := f.Write(append(line, '\n'))
+	f.Close()
+	if werr != nil {
+		return werr
+	}
+	// The file only ever grows, so trim it now and then: keep the newest maxEntries.
+	if st, err := os.Stat(h.path(conn)); err == nil && st.Size() > int64(n)*maxEntries*2 && st.Size() > 1<<20 {
+		all, err := h.readAll(conn)
+		if err == nil && len(all) > maxEntries {
+			drop := len(all) - maxEntries
+			return h.rewrite(conn, func(e HistoryEntry) bool { drop--; return drop < 0 })
+		}
+	}
+	return nil
 }
 
 func (h *History) readAll(conn string) ([]HistoryEntry, error) {
@@ -106,24 +122,16 @@ func (h *History) rewrite(conn string, keep func(HistoryEntry) bool) error {
 	if err != nil {
 		return err
 	}
-	tmp := h.path(conn) + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	enc := json.NewEncoder(f)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	for _, e := range all {
 		if keep(e) {
 			if err := enc.Encode(e); err != nil {
-				f.Close()
 				return err
 			}
 		}
 	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, h.path(conn))
+	return config.WriteFileAtomic(h.path(conn), buf.Bytes())
 }
 
 func (h *History) Delete(conn, id string) error {

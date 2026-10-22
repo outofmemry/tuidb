@@ -3,10 +3,12 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 
+	"tuidb/internal/config"
 	"tuidb/internal/db"
 )
 
@@ -34,9 +36,10 @@ type stateFile struct {
 
 // State is the JSON file with everything the UI remembers between runs.
 type State struct {
-	Path string
-	mu   sync.Mutex
-	d    stateFile
+	Path      string
+	Recovered string // set when a corrupt file was moved aside at load
+	mu        sync.Mutex
+	d         stateFile
 }
 
 func LoadState(path string) (*State, error) {
@@ -49,7 +52,13 @@ func LoadState(path string) (*State, error) {
 		return nil, err
 	}
 	if err := json.Unmarshal(b, &s.d); err != nil {
-		return nil, err // refuse to overwrite a file we could not read
+		// Keep the unreadable file for inspection and start fresh instead of refusing to launch.
+		bad := path + ".corrupt"
+		if renameErr := os.Rename(path, bad); renameErr != nil {
+			return nil, fmt.Errorf("%s is not valid JSON (%v) and could not be moved aside: %w", path, err, renameErr)
+		}
+		s.d = stateFile{}
+		s.Recovered = fmt.Sprintf("%s was not valid JSON and was moved to %s", path, bad)
 	}
 	return s, nil
 }
@@ -66,11 +75,7 @@ func (s *State) do(f func(*stateFile)) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
 		return err
 	}
-	tmp := s.Path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.Path)
+	return config.WriteFileAtomic(s.Path, b)
 }
 
 func TableKey(conn, database, table string) string { return conn + "\x00" + database + "\x00" + table }

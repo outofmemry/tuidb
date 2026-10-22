@@ -163,3 +163,77 @@ func TestURLTLSSettingsAreNeverDroppedSilently(t *testing.T) {
 		t.Error("mongodb+srv is unsupported and must say so instead of parsing as a plain host")
 	}
 }
+
+func TestConnectionsValidateSafetySettings(t *testing.T) {
+	for name, body := range map[string]string{
+		"safe_mode typo": "[[connection]]\nname='a'\ndriver='postgres'\nsafe_mode='Safe2'\n",
+		"ssl_mode typo":  "[[connection]]\nname='a'\ndriver='postgres'\nssl_mode='verifyfull'\n",
+		"misspelled key": "[[connection]]\nname='a'\ndriver='postgres'\nsslMode='require'\n",
+		"bad ssh port":   "[[connection]]\nname='a'\ndriver='postgres'\n[connection.ssh]\nhost='h'\nport=99999\n",
+	} {
+		if _, err := LoadConnections(write(t, body)); err == nil {
+			t.Errorf("%s: must be rejected, not silently ignored", name)
+		}
+	}
+	if _, err := LoadConnections(write(t, "[[connection]]\nname='a'\ndriver='mongodb'\n[connection.options]\nauthSource='admin'\n")); err != nil {
+		t.Errorf("options sub-table is fine: %v", err)
+	}
+}
+
+func TestLoadConnectionsFixesWorldReadablePermissions(t *testing.T) {
+	p := write(t, "[[connection]]\nname='a'\ndriver='redis'\npassword='pw'\n")
+	os.Chmod(p, 0o644)
+	if _, err := LoadConnections(p); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+		t.Errorf("a file with passwords must be made owner-only, got %v", st.Mode().Perm())
+	}
+}
+
+func TestPasswordCmdRunsWithoutAShell(t *testing.T) {
+	c := Connection{Name: "a", Driver: Redis, PasswordCmd: `printf 'a b'`}
+	if pw, err := c.ResolvePassword(context.Background()); err != nil || pw != "a b" {
+		t.Errorf("quoted argument: %q %v", pw, err)
+	}
+	marker := filepath.Join(t.TempDir(), "pwned")
+	c.PasswordCmd = "echo x; touch " + marker
+	c.ResolvePassword(context.Background())
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("shell metacharacters must not be interpreted")
+	}
+	c.PasswordCmd = `echo "unbalanced`
+	if _, err := c.ResolvePassword(context.Background()); err == nil {
+		t.Error("unbalanced quote is an error")
+	}
+	if argv, _ := splitCommand(`op read "op://Private/my item/password" --no-newline`); len(argv) != 4 || argv[2] != "op://Private/my item/password" {
+		t.Errorf("argv %q", argv)
+	}
+}
+
+func TestWriteFileAtomicKeepsOldFileOnFailure(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "f")
+	if err := WriteFileAtomic(p, []byte("one")); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(p, []byte("two")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "two" {
+		t.Errorf("%q", b)
+	}
+	if st, _ := os.Stat(p); st.Mode().Perm() != 0o600 {
+		t.Errorf("perm %v", st.Mode().Perm())
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(p)); len(entries) != 1 {
+		t.Errorf("temp files left behind: %d entries", len(entries))
+	}
+}
+
+func TestUnimplementedSettingsAreRejected(t *testing.T) {
+	for _, body := range []string{"[editor]\nwrap = true\n", "[sidebar]\nlazy_load = true\n", "[editor]\nquery_params = true\n"} {
+		if _, err := Load(write(t, body)); err == nil {
+			t.Errorf("%q is not implemented and must be reported, not ignored", body)
+		}
+	}
+}
