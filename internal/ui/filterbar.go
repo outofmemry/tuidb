@@ -226,8 +226,8 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 	if t.filters.Or {
 		join = "OR"
 	}
-	hint := fmt.Sprintf(" Filters (%s)  Enter apply · Tab field · ↑↓ row · Alt+n add · Alt+d remove · Alt+o and/or · Alt+c clear · Alt+s sql · Esc hide", join)
-	lines := []string{th.HeaderCell.Render(fit(hint, W))}
+	head := " " + th.Section.Render("Filters ("+join+")") + "   " + th.chips("↵", "apply", "Tab", "field", "M-n", "add", "M-d", "remove", "M-o", "and/or", "M-c", "clear", "M-s", "sql", "Esc", "hide")
+	lines := []string{fit(head, W)}
 	fs := t.filters.Filters
 	start := 0
 	if t.fb.sel >= 5 {
@@ -246,18 +246,21 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 		if f.Enabled {
 			chk = "[x]"
 		}
-		focus := func(field int, s string) string {
+		focus := func(field int, s string) string { // dropdowns look like buttons, the focused one selected
 			if t.fb.focus && i == t.fb.sel && t.fb.field == field {
 				return th.SelCell.Render(s)
 			}
-			return s
+			return th.TabIdle.Render(s)
 		}
 		val := f.Value
 		valW := max(8, W-width(col)-width(f.Op)-16)
 		var valStr string
-		if t.fb.focus && i == t.fb.sel && t.fb.field == ffValue {
+		switch {
+		case t.fb.focus && i == t.fb.sel && t.fb.field == ffValue:
 			valStr = t.fb.edit.View(valW, th, true)
-		} else {
+		case val == "":
+			valStr = th.Dim.Render(fit("value…", valW))
+		default:
 			valStr = fit(val, valW)
 		}
 		if f.Op == "IS NULL" || f.Op == "IS NOT NULL" {

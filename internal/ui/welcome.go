@@ -275,6 +275,7 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		title = "Edit connection"
 	}
 	f := newForm(title, []formField{
+		{Kind: fHeading, Value: "Server"},
 		{Key: "name", Label: "Name", Kind: fText, Value: c.Name},
 		{Key: "driver", Label: "Driver", Kind: fChoice, Value: c.Driver, Options: config.Drivers},
 		{Key: "host", Label: "Host", Kind: fText, Value: orDefault(c.Host, "127.0.0.1")},
@@ -283,10 +284,12 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		{Key: "password", Label: "Password", Kind: fSecret, Value: c.Password},
 		{Key: "password_cmd", Label: "Password cmd", Kind: fText, Value: c.PasswordCmd},
 		{Key: "database", Label: "Database", Kind: fText, Value: c.Database},
+		{Kind: fHeading, Value: "Workspace"},
 		{Key: "tag", Label: "Tag", Kind: fChoice, Value: c.Tag, Options: tags},
 		{Key: "color", Label: "Status color", Kind: fText, Value: c.Color},
 		{Key: "safe_mode", Label: "Safe mode", Kind: fChoice, Value: c.SafeMode, Options: safe},
 		{Key: "group", Label: "Group", Kind: fText, Value: c.Group},
+		{Kind: fHeading, Value: "Transport"},
 		{Key: "ssl_mode", Label: "SSL mode", Kind: fChoice, Value: c.SSLMode, Options: sslModes},
 		{Key: "ssl_ca", Label: "  CA cert", Kind: fText, Value: c.SSLCA, Show: showSSL},
 		{Key: "ssl_cert", Label: "  Client cert", Kind: fText, Value: c.SSLCert, Show: showSSL},
@@ -297,8 +300,9 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		{Key: "ssh_user", Label: "  SSH user", Kind: fText, Value: ssh.User, Show: showSSH},
 		{Key: "ssh_key", Label: "  SSH key file", Kind: fText, Value: ssh.Key, Show: showSSH},
 		{Key: "ssh_password", Label: "  SSH password", Kind: fSecret, Value: ssh.Password, Show: showSSH},
+		{Kind: fHeading, Value: "After connecting"},
 		{Key: "bootstrap", Label: "Bootstrap SQL", Kind: fText, Value: strings.Join(c.Bootstrap, " ;; ")},
-		{Key: "note", Label: "", Kind: fLabel, Value: "Bootstrap: statements run after connecting, separated by ' ;; '"},
+		{Key: "note", Label: "", Kind: fLabel, Value: "statements run on every new connection, separated by ' ;; '"},
 	}, func(v map[string]string) tea.Cmd { return w.save(v, idx) })
 	f.validate = func(v map[string]string) error {
 		_, err := w.build(v, idx)
@@ -483,7 +487,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			"",
 			"  "+th.Dim.Render("or start with one:  tuidb postgresql://user:pw@host:5432/db"))
 	} else {
-		list = append(list, " "+th.Section.Render(fit("NAME", 28)+fit("DRIVER", 12)+fit("HOST", 26)+"TAG"))
+		list = append(list, "   "+th.Section.Render(fit("NAME", 26)+fit("DRIVER", 12)+fit("HOST", 26)+"TAG"))
 	}
 	listW -= 0
 	listH := max(1, bodyH-2-len(list))
@@ -522,11 +526,12 @@ func (w *welcome) view(th Theme, W, H int) string {
 		if c.SSH != nil && c.SSH.Host != "" {
 			addr += " via ssh"
 		}
-		name := fit(ind+c.Name, 27)
+		name := fit(ind+c.Name, 26)
 		if i == w.sel {
 			name = th.Bold.Render(name)
 		}
-		line := cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, 26)) + tagS
+		// a stripe in the driver color leads each row, so a mixed list scans by engine
+		line := th.DriverStyle(c.Driver).Render("▎") + cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, 26)) + tagS
 		if i == w.sel {
 			line = th.SelRow.Render(fit(line, listW-4))
 		}

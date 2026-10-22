@@ -124,5 +124,7 @@ func (l *lineEdit) View(w int, th Theme, focused bool) string {
 	if !focused {
 		return fit(before+cur+after, w)
 	}
-	return fit(before+th.SelCell.Render(cur)+after, w)
+	// the focused field is drawn as a filled well so the input area is visible even when empty
+	well := th.CurRow
+	return well.Render(before) + th.SelCell.Render(cur) + well.Render(fit(after, w-width(before)-width(cur)))
 }

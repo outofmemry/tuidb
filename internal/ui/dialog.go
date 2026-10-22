@@ -128,7 +128,8 @@ const (
 	fSecret
 	fBool
 	fChoice
-	fLabel // read-only line
+	fLabel   // read-only line
+	fHeading // section header: Value in the section style, a blank line before it
 )
 
 type formField struct {
@@ -185,7 +186,7 @@ func (f *formDlg) values() map[string]string {
 
 func (f *formDlg) visible(i int) bool {
 	fl := f.fields[i]
-	return fl.Kind != fLabel && (fl.Show == nil || fl.Show(f.values()))
+	return fl.Kind < fLabel && (fl.Show == nil || fl.Show(f.values()))
 }
 
 func (f *formDlg) firstEditable(from, dir int) int {
@@ -278,32 +279,42 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 	var rows []string
 	focusRow := 0
 	for i, fl := range f.fields {
-		if fl.Kind != fLabel && !f.visible(i) {
+		if fl.Kind < fLabel && !f.visible(i) {
+			continue
+		}
+		if fl.Kind == fHeading {
+			if len(rows) > 0 {
+				rows = append(rows, "")
+			}
+			rows = append(rows, th.Section.Render(fl.Value))
 			continue
 		}
 		if i == f.idx {
 			focusRow = len(rows)
 		}
-		label := th.Dim.Render(fit(fl.Label, lw))
+		mark, label := "  ", th.Dim.Render(fit(fl.Label, lw))
 		if i == f.idx {
-			label = th.Accent.Render(fit(fl.Label, lw))
+			mark, label = th.Accent.Render("▸ "), th.Accent.Bold(true).Render(fit(fl.Label, lw))
 		}
-		vw := w - 4 - lw - 2
+		vw := w - 4 - lw - 4
 		var val string
 		switch fl.Kind {
 		case fText, fSecret:
 			val = fl.edit.View(vw, th, i == f.idx)
 		case fBool:
-			val = "[ ]"
+			val = th.Dim.Render("[ ]")
 			if fl.Value == "true" {
-				val = "[x]"
+				val = "[" + th.OK.Bold(true).Render("x") + "]"
 			}
 		case fChoice:
-			val = "‹ " + fl.Value + " ›"
+			val = th.Dim.Render("‹ ") + th.Bold.Render(fl.Value) + th.Dim.Render(" ›")
+			if i == f.idx {
+				val = th.Accent.Render("‹ ") + th.Accent.Bold(true).Render(fl.Value) + th.Accent.Render(" ›")
+			}
 		case fLabel:
 			val = th.Dim.Render(fl.Value)
 		}
-		rows = append(rows, label+"  "+val)
+		rows = append(rows, mark+label+"  "+val)
 	}
 	vis := max(4, maxH-9)
 	if focusRow < f.top {
@@ -317,7 +328,7 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 	if f.err != "" {
 		body = append(body, "", th.Err.Render(f.err))
 	}
-	hint := f.submit + "   Esc: cancel   Tab/↑↓: move   Space/←→: toggle"
+	hint := f.submit + "   Esc: cancel   Tab/↑↓: move   ←→: toggle"
 	if f.hotHint != "" {
 		hint += "   " + f.hotHint
 	}
