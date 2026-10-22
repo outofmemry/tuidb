@@ -56,8 +56,8 @@ type tableTab struct {
 	loadedRows  int
 	paste       string // "rows" or "cells" while the clipboard read is pending
 	findText    string
-	cancel      context.CancelFunc // stops the in-flight load
-	committing  bool               // a commit was sent and its reload has not landed yet
+	cancels     []context.CancelFunc // stop every in-flight load: rows, count and columns
+	committing  bool                 // a commit was sent and its reload has not landed yet
 	closed      bool
 	wantPKSort  bool // table.default_sort = pk_asc / pk_desc: applied once the key is known
 	pkDesc      bool
@@ -202,9 +202,7 @@ func (t *tableTab) query() db.RowQuery {
 // one round trip of wall time instead of four in a row. Rows only wait for the columns when the
 // query itself needs their names (hidden columns, an Any-column filter).
 func (t *tableTab) load() tea.Cmd {
-	if t.cancel != nil {
-		t.cancel() // one load at a time: holding the sort or page key must not pile up queries
-	}
+	t.cancelLoads() // one load at a time: holding the sort or page key must not pile up queries
 	t.loading, t.err, t.counted = true, "", false
 	t.grid.Editable = false // the rows are about to be replaced; typing into them would be lost
 	t.seq++
@@ -249,10 +247,12 @@ func (t *tableTab) needColsFirst() bool {
 
 func (t *tableTab) loadCols() tea.Cmd {
 	ref, caps, seq := t.ref, t.ws.caps, t.seq
-	return t.ws.async(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
+	cmd, cancel := t.ws.asyncCancel(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
 		cols, err := fetchColumns(ctx, sess, caps, ref)
 		return colsMetaMsg{ref: ref, cols: cols, err: err, seq: seq}
 	})
+	t.cancels = append(t.cancels, cancel)
+	return cmd
 }
 
 func (t *tableTab) loadRows() tea.Cmd {
@@ -262,26 +262,31 @@ func (t *tableTab) loadRows() tea.Cmd {
 		res, err := sess.Rows(ctx, q)
 		return tableLoadedMsg{seq: seq, res: res, err: err, took: time.Since(start)}
 	})
-	t.cancel = cancel
+	t.cancels = append(t.cancels, cancel)
 	return cmd
+}
+
+func (t *tableTab) cancelLoads() {
+	for _, c := range t.cancels {
+		c()
+	}
+	t.cancels = nil
 }
 
 // Close stops whatever the tab is loading; results for it are dropped by the tab lookup.
 func (t *tableTab) Close() {
 	t.closed = true
-	if t.cancel != nil {
-		t.cancel()
-	}
+	t.cancelLoads()
 }
 
 func (t *tableTab) Busy() bool { return t.loading }
 
 // CancelWork stops a running load (prefix . from any pane).
 func (t *tableTab) CancelWork() tea.Cmd {
-	if !t.loading || t.cancel == nil {
+	if !t.loading || len(t.cancels) == 0 {
 		return nil
 	}
-	t.cancel()
+	t.cancelLoads()
 	t.loading, t.seq = false, t.seq+1
 	return t.ws.a.say("load of %s cancelled", t.ref.Name)
 }
@@ -299,10 +304,12 @@ func (t *tableTab) loadCountExact() tea.Cmd {
 func (t *tableTab) countCmd(estimate bool) tea.Cmd {
 	seq, q := t.seq, t.query()
 	q.Limit, q.Offset, q.Sort = 0, 0, nil
-	return t.ws.async(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
+	cmd, cancel := t.ws.asyncCancel(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
 		n, err := sess.Count(ctx, q, estimate)
 		return tableCountMsg{seq: seq, n: n, err: err}
 	})
+	t.cancels = append(t.cancels, cancel)
+	return cmd
 }
 
 func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {

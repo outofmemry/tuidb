@@ -1234,11 +1234,10 @@ func TestReviewLoadsAreCancelledAndTabsClose(t *testing.T) {
 	h.openCustomers()
 	tab := h.a.ws().tab().(*tableTab)
 	h.prefix("alt+r")
-	first := tab.cancel
-	h.prefix("alt+r") // a second load cancels the first
-	if first == nil {
+	if len(tab.cancels) == 0 {
 		t.Fatal("loads must be cancellable")
 	}
+	h.prefix("alt+r") // a second load cancels the first
 	h.prefix("w")
 	if !tab.closed {
 		t.Error("closing the tab marks it closed so late callbacks are no-ops")
@@ -1487,4 +1486,29 @@ func TestFlowEnterOpensPopoverEditorForJSON(t *testing.T) {
 		t.Fatal("e edits inline")
 	}
 	h.press("esc")
+}
+
+func TestReviewCloseCancelsEveryLoadAndDDLBatchesAreNotCalledAtomic(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	tab := h.a.ws().tab().(*tableTab)
+	tab.cols = nil
+	delete(h.a.ws().meta, tab.ref)
+	tab.load() // rows, count and columns are all in flight
+	if n := len(tab.cancels); n != 3 {
+		t.Fatalf("every load must be cancellable, got %d cancel funcs", n)
+	}
+	called := 0
+	for i := range tab.cancels {
+		orig := tab.cancels[i]
+		tab.cancels[i] = func() { called++; orig() }
+	}
+	tab.Close()
+	if called != 3 {
+		t.Fatalf("Close cancelled %d of 3 loads", called)
+	}
+	if hasDDL([]db.Statement{{Text: `UPDATE "t" SET a = 1`}}) || !hasDDL([]db.Statement{{Text: "update t set a=1"}, {Text: "ALTER TABLE t ADD b int"}}) || !hasDDL([]db.Statement{{Text: "CREATE INDEX CONCURRENTLY i ON t(a)"}}) {
+		t.Error("hasDDL")
+	}
 }

@@ -311,13 +311,32 @@ func (w *Workspace) execute(stmts []db.Statement, then func(err error) tea.Cmd) 
 	}
 	return w.gate(stmts, func() tea.Cmd {
 		w.applying = true
-		id, sess, atomic := w.id, w.sess, w.caps.Transactions
+		id, sess, atomic := w.id, w.sess, w.caps.Transactions && !hasDDL(stmts)
 		return func() tea.Msg { // no deadline: a commit must never be cut off half way
 			start := time.Now()
 			err := sess.Apply(context.Background(), stmts)
 			return wsMsg{ws: id, tab: -2, msg: applyDoneMsg{stmts: stmts, err: err, dur: time.Since(start), then: then, atomic: atomic}}
 		}
 	})
+}
+
+// hasDDL: schema statements commit implicitly on MySQL and some run outside a transaction on
+// PostgreSQL (CREATE DATABASE, CONCURRENTLY), so a failed batch with them may be partly applied.
+func hasDDL(stmts []db.Statement) bool {
+	for _, s := range stmts {
+		f := strings.Fields(strings.ToUpper(s.Text))
+		if len(f) == 0 {
+			continue
+		}
+		switch f[0] {
+		case "CREATE", "ALTER", "DROP", "RENAME", "TRUNCATE", "VACUUM", "REFRESH", "CLUSTER":
+			return true
+		}
+		if strings.Contains(strings.ToUpper(s.Text), "CONCURRENTLY") {
+			return true
+		}
+	}
+	return false
 }
 
 type applyDoneMsg struct {
