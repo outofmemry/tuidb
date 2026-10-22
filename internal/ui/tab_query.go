@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"tuidb/internal/db"
 	"tuidb/internal/keymap"
@@ -387,7 +388,7 @@ func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
 		if m.err != nil && t.ws.a.d.Cfg.Editor.ReturnOnError {
 			t.queue = nil
 		}
-		t.status = fmt.Sprintf("%d statement(s) · %s", len(t.res), time.Since(t.started).Round(time.Millisecond))
+		t.status = tookStr(time.Since(t.started)) // the run bar adds the statement and failure counts
 		cmd := tea.Batch(t.next(), t.makeEditable(len(t.res)-1))
 		if !t.running && m.err != nil && len(t.res) == 1 {
 			return tea.Batch(cmd, t.ws.a.fail(m.err))
@@ -415,7 +416,7 @@ func (t *queryTab) toResult(m queryDoneMsg) *resultView {
 	rv.trunc, rv.msg = r.Truncated, r.Message
 	if !r.HasRows {
 		if rv.msg == "" {
-			rv.msg = fmt.Sprintf("%d row(s) affected", r.Affected)
+			rv.msg = plural(int(r.Affected), "row") + " affected"
 		}
 		return rv
 	}
@@ -716,7 +717,7 @@ func (t *queryTab) saveAs() tea.Cmd {
 // ---- view -------------------------------------------------------------------------------
 
 func (t *queryTab) View(th Theme, W, H int) string {
-	showRes := !t.hideResults && (len(t.res) > 0 || t.running)
+	showRes := !t.hideResults // an empty results pane says how to fill it
 	edH := H - 1
 	resH := 0
 	if showRes {
@@ -736,31 +737,71 @@ func (t *queryTab) View(th Theme, W, H int) string {
 }
 
 func (t *queryTab) runBar(th Theme, W int) string {
-	pre := keymap.Display(t.ws.a.d.Keys.Prefix)
-	key := func(action string) string {
-		for _, b := range t.ws.a.d.Keys.Bindings(keymap.Editor) {
-			if b.Action == action {
-				return pre + " " + keymap.Display(b.Key)
-			}
-		}
-		return "?"
-	}
+	key := t.editorKey
 	limit := "no limit"
 	if t.limit > 0 {
 		limit = fmt.Sprintf("limit %d", t.limit)
 	}
-	left := " " + th.chips(key("run_current"), "run", key("run_all"), "run all", key("set_limit"), limit)
-	status := th.Dim.Render(t.status)
-	if t.running {
-		status = th.Warn.Render(fmt.Sprintf("⏳ running %s · %s cancels", time.Since(t.started).Round(100*time.Millisecond), key("cancel_query")))
-	} else if t.status == "" && len(t.res) == 0 {
-		status = th.Dim.Render("type SQL, then run the statement under the cursor")
+	left := th.chips(key("run_current"), "run", key("run_all"), "run all", key("set_limit"), limit)
+	status := ""
+	switch {
+	case t.running:
+		status = th.Warn.Render("⏳ running "+tookStr(time.Since(t.started))) + "  " + th.chips(key("cancel_query"), "cancel")
+	case t.status == "cancelled":
+		status = th.Warn.Render("⚠ cancelled")
+	case t.status != "":
+		failed := 0
+		for _, r := range t.res {
+			if r.isErr {
+				failed++
+			}
+		}
+		switch {
+		case failed == 0:
+			status = th.OK.Render("✓ ") + th.Dim.Render(plural(len(t.res), "statement")+" · "+t.status)
+		case len(t.res) == 1:
+			status = th.Err.Render("✗ failed") + th.Dim.Render(" · "+t.status)
+		default:
+			status = th.Err.Render(fmt.Sprintf("✗ %d of %d failed", failed, len(t.res))) + th.Dim.Render(" · "+t.status)
+		}
 	}
-	gap := W - width(left) - width(status) - 1
+	// a hairline between the keys and the status separates the editor from the results
+	if status != "" {
+		status = " " + status
+	}
+	gap := W - width(left) - width(status) - 2
 	if gap < 1 {
-		return th.HeaderCell.Render(fit(left, W))
+		return fit(left, W)
 	}
-	return th.HeaderCell.Render(left + strings.Repeat(" ", gap) + status + " ")
+	return left + " " + th.Border.Render(strings.Repeat("─", gap)) + status + " "
+}
+
+// editorKey is the prefixed key bound to an editor action, as shown in hints ("C-d ↵").
+func (t *queryTab) editorKey(action string) string {
+	for _, b := range t.ws.a.d.Keys.Bindings(keymap.Editor) {
+		if b.Action == action {
+			return strings.Replace(keymap.Display(t.ws.a.d.Keys.Prefix)+" "+keymap.Display(b.Key), "Enter", "↵", 1)
+		}
+	}
+	return "?"
+}
+
+// tookStr rounds a duration to what a person reads: 455µs, 1.5ms, 1.23s.
+func tookStr(d time.Duration) string {
+	switch {
+	case d < time.Millisecond:
+		return d.Round(time.Microsecond).String()
+	case d < time.Second:
+		return d.Round(100 * time.Microsecond).String()
+	}
+	return d.Round(10 * time.Millisecond).String()
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
 }
 
 // Hint is shown in the frame's bottom edge.
@@ -774,41 +815,52 @@ func (t *queryTab) Hint(th Theme) string {
 
 func (t *queryTab) resultsView(th Theme, W, H int) string {
 	if len(t.res) == 0 {
-		return pad(th.Dim.Render("  running…"), W, H+1)
+		msg := th.Dim.Render("run a statement with ") + th.chip(t.editorKey("run_current"))
+		if t.running {
+			msg = th.Warn.Render("⏳ ") + th.Dim.Render("running…")
+		}
+		return emptyState(msg, W, H+1)
 	}
 	var tabs []string
 	for i, r := range t.res {
-		label := " " + r.title + " "
-		if r.isErr {
-			label = " ✗ " + r.title + " "
-		}
-		if r.pinned {
-			label = " ◆ " + label[1:]
-		}
+		st := th.TabIdle
 		switch {
 		case i == t.rc && t.focusResults:
-			tabs = append(tabs, th.TabActive.Render(label))
+			st = th.TabActive
 		case i == t.rc:
-			tabs = append(tabs, th.TabActive.Faint(true).Render(label))
-		default:
-			tabs = append(tabs, th.TabIdle.Render(label))
+			st = th.TabActive.Faint(true)
 		}
+		label := st.Render(" " + r.title + " ")
+		if r.isErr { // the mark keeps the tab's background; on an idle tab it also takes the error color
+			mark := st.Render(" ✗")
+			if i != t.rc {
+				mark = th.Err.Inherit(st).Render(" ✗")
+			}
+			label = mark + label
+		}
+		if r.pinned {
+			mark := st.Render(" ◆")
+			if i != t.rc {
+				mark = th.Warn.Inherit(st).Render(" ◆")
+			}
+			label = mark + label
+		}
+		tabs = append(tabs, label)
 	}
 	rv := t.res[t.rc]
-	info := rv.took.Round(time.Microsecond).String()
+	info := th.Dim.Render(tookStr(rv.took))
 	if rv.hasRows {
-		info = fmt.Sprintf("%d rows · %s", rv.rows, info)
+		info = th.Dim.Render(plural(rv.rows, "row") + " · " + tookStr(rv.took))
 		if rv.trunc {
-			info += " (limit reached)"
+			info = th.Warn.Render("⚠ limit reached") + th.Dim.Render(" · ") + info
 		}
 	}
-	bar := fit(strings.Join(tabs, ""), W-width(info)-2) + " " + th.Dim.Render(info) + " "
+	bar := fit(strings.Join(tabs, " "), W-width(info)-2) + " " + info + " "
 	lines := []string{fit(bar, W)}
 	switch {
 	case rv.isErr:
-		for _, l := range wrapText(rv.msg, W-4) {
-			lines = append(lines, "  "+th.Err.Render(l))
-		}
+		lines = append(lines, "")
+		lines = append(lines, errorLines(th, rv.msg, W)...)
 	case rv.hasRows:
 		rv.grid.W, rv.grid.H = W, H
 		lines = append(lines, rv.grid.View(th, t.focusResults))
@@ -816,8 +868,13 @@ func (t *queryTab) resultsView(th Theme, W, H int) string {
 			lines = append(lines, th.Dim.Render(fit(" "+rv.msg, W)))
 		}
 	default:
-		for _, l := range wrapText(rv.msg, W-4) {
-			lines = append(lines, "  "+th.OK.Render(l))
+		lines = append(lines, "")
+		for i, l := range wrapText(rv.msg, W-6) {
+			if i == 0 {
+				lines = append(lines, "  "+th.OK.Render("✓ ")+l+th.Dim.Render(" · "+tookStr(rv.took)))
+			} else {
+				lines = append(lines, "    "+l)
+			}
 		}
 	}
 	out := strings.Split(strings.Join(lines, "\n"), "\n")
@@ -825,6 +882,50 @@ func (t *queryTab) resultsView(th Theme, W, H int) string {
 		out = append(out, strings.Repeat(" ", W))
 	}
 	return strings.Join(out[:H+1], "\n")
+}
+
+// emptyState centers a one-line message a little above the middle of a W x H area.
+func emptyState(msg string, W, H int) string {
+	return lipgloss.Place(W, H, lipgloss.Center, 0.4, msg)
+}
+
+var (
+	sqlStateRe = regexp.MustCompile(`\s*\((SQLSTATE \w+)\)\s*$`)
+	errHintRe  = regexp.MustCompile(`(?i)^\s*(line \d|hint|detail|position|where|context|\^)`)
+)
+
+// errorLines renders a failed statement: the first line bold in the error color, the rest dim,
+// position / hint lines indented further, and a trailing "(SQLSTATE x)" moved to its own dim line.
+func errorLines(th Theme, msg string, W int) []string {
+	head, rest, _ := strings.Cut(strings.TrimSpace(msg), "\n")
+	code := ""
+	if m := sqlStateRe.FindStringSubmatchIndex(head); m != nil {
+		code, head = head[m[2]:m[3]], head[:m[0]]
+	}
+	bold := th.Err.Bold(true)
+	var out []string
+	for i, l := range wrapText(head, W-6) {
+		lead := "    "
+		if i == 0 {
+			lead = "  " + bold.Render("✗") + " "
+		}
+		out = append(out, lead+bold.Render(l))
+	}
+	if rest != "" {
+		for _, l := range strings.Split(rest, "\n") {
+			ind := "    "
+			if errHintRe.MatchString(l) {
+				ind = "      "
+			}
+			for _, w := range wrapText(strings.TrimRight(l, " \t\r"), W-len(ind)-2) {
+				out = append(out, ind+th.Dim.Render(w))
+			}
+		}
+	}
+	if code != "" {
+		out = append(out, "    "+th.Dim.Render(code))
+	}
+	return out
 }
 
 var _ = sort.Strings

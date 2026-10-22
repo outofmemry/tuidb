@@ -264,6 +264,26 @@ func TestEditorViewFits(t *testing.T) {
 	}
 }
 
+func TestErrorLines(t *testing.T) {
+	th := NewTheme(configTheme())
+	got := errorLines(th, "ERROR: relation \"nope\" does not exist (SQLSTATE 42P01)\nHINT: check the name\nmore detail", 80)
+	for i := range got {
+		got[i] = stripANSI(got[i])
+	}
+	want := []string{`  ✗ ERROR: relation "nope" does not exist`, "      HINT: check the name", "    more detail", "    SQLSTATE 42P01"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestEditorSelectionWinsOverCursorLine(t *testing.T) {
+	th := NewTheme(configTheme())
+	key := int(tkKeyword) | keyStmt | keyCurLine | keySel
+	if bg := newEd().styleFor(th, key).GetBackground(); bg != th.SelRow.GetBackground() {
+		t.Errorf("selection background lost: %v", bg)
+	}
+}
+
 func TestRankCandidates(t *testing.T) {
 	all := []Candidate{{Text: "order_items", Kind: "table"}, {Text: "orders", Kind: "table"}, {Text: "audit_records", Kind: "table"}}
 	got := RankCandidates("ord", all, 0)
