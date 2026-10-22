@@ -97,8 +97,8 @@ func TestEditableDDLAndTriggerSQL(t *testing.T) {
 	if got := editableDDL("postgres", fn, "CREATE OR REPLACE FUNCTION f() ..."); strings.Contains(got, "DROP") || !strings.Contains(got, "CREATE OR REPLACE FUNCTION f()") {
 		t.Errorf("postgres functions replace in place: %q", got)
 	}
-	if got := editableDDL("mysql", db.ObjRef{Name: "f", Kind: db.KindFunction}, "CREATE FUNCTION f() ..."); !strings.Contains(got, "DROP FUNCTION IF EXISTS `f`;\nCREATE FUNCTION") {
-		t.Errorf("mysql routines are dropped first: %q", got)
+	if got := editableDDL("mysql", db.ObjRef{Name: "f", Kind: db.KindFunction}, "CREATE DEFINER=`u`@`%` FUNCTION `f`() RETURNS int BEGIN RETURN 1; END"); !strings.Contains(got, "DELIMITER $$\nCREATE FUNCTION `f__tuidb_new`() RETURNS int BEGIN RETURN 1; END$$\nDROP FUNCTION IF EXISTS `f`$$") || strings.Index(got, "DROP") < strings.Index(got, "CREATE") {
+		t.Errorf("mysql routines are created under a new name first, then the old one dropped, with a DELIMITER: %q", got)
 	}
 	if got := editableDDL("mysql", db.ObjRef{Name: "v", Kind: db.KindView}, "CREATE ALGORITHM=UNDEFINED VIEW v AS select 1"); !strings.Contains(got, "CREATE OR REPLACE ALGORITHM") {
 		t.Errorf("mysql views: %q", got)

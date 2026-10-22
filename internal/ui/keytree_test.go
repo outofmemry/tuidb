@@ -92,3 +92,18 @@ func TestFlowRedisSidebarFolders(t *testing.T) {
 	h.typeText("email")
 	h.want("user:1:email") // search lists full key names, flat
 }
+
+func TestKeyTreeEmptySegmentsKeepTheirPrefix(t *testing.T) {
+	s := &sidebar{open: map[string]bool{}}
+	var rows []sbRow
+	s.flattenKeys(buildKeyTree(keys(":x", ":x:y", "x", "x:q")), 0, &rows)
+	paths := map[string]bool{}
+	for _, r := range rows {
+		if r.kind == sbFolder {
+			paths[r.path] = true
+		}
+	}
+	if !paths[":x"] || !paths["x"] || len(paths) != 2 {
+		t.Errorf("folder paths must differ: %v", paths)
+	}
+}

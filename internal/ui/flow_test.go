@@ -1043,7 +1043,7 @@ func TestFlowPasteRowsAndCells(t *testing.T) {
 	h.prefix("v") // paste_rows waits for the clipboard
 	h.a.Update(tea.ClipboardMsg{Content: "7,Dee,dee@x.io\n8,Eve,NULL"})
 	g := h.a.ws().tab().(*tableTab).grid
-	if len(g.Rows) != 5 || g.Rows[1].Cur[1] != "Dee" || g.Rows[2].Cur[2] != db.Null {
+	if len(g.Rows) != 5 || g.Rows[1].Cur[1] != "Dee" || g.Rows[2].Cur[2] != "NULL" {
 		t.Fatalf("rows pasted after the cursor: %d", len(g.Rows))
 	}
 	h.want("customers ●")
@@ -1186,4 +1186,270 @@ func TestFlowQueryResultStaysReadOnlyWithoutItsKey(t *testing.T) {
 	h.press("esc")
 	h.prefix("i")
 	h.want("is not available here") // add_row does nothing on a read-only result
+}
+
+func TestFlowDefaultSafeModeAppliesToConnectionsWithoutOne(t *testing.T) {
+	h := newHarness(t, func(c *config.Connection, cfg *config.Config) {
+		c.SafeMode = ""
+		cfg.General.DefaultSafeMode = "alert2"
+	})
+	h.connect()
+	h.want("Alert Mode 2")
+	h2 := newHarness(t, func(c *config.Connection, _ *config.Config) { c.SafeMode = "Safe-2" })
+	h2.connect()
+	h2.want("Safe Mode 2") // an invalid level fails closed
+}
+
+func TestFlowInterruptSavesSessionAndCloses(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.a.Update(tea.InterruptMsg{})
+	if !h.a.quit || len(h.a.d.State.LastSession()) != 1 {
+		t.Fatal("SIGINT/Ctrl+C must save the session and tear down")
+	}
+}
+
+// ---- second review round ------------------------------------------------------------------
+
+func TestReviewStaleGenerationMessagesAreDropped(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	ws := h.a.ws()
+	ref := db.ObjRef{Schema: "public", Name: "customers", Kind: db.KindTable}
+	old := ws.gen
+	ws.forget(nil) // what a database switch or reconnect does
+	ws.handle(wsMsg{ws: ws.id, tab: -1, gen: old, msg: colsMetaMsg{ref: ref, cols: customerCols}})
+	if _, ok := ws.meta[ref]; ok {
+		t.Fatal("metadata from a previous session must not enter the cache")
+	}
+	ws.handle(wsMsg{ws: ws.id, tab: -1, gen: ws.gen, msg: colsMetaMsg{ref: ref, cols: customerCols}})
+	if _, ok := ws.meta[ref]; !ok {
+		t.Fatal("current-generation metadata is cached")
+	}
+}
+
+func TestReviewLoadsAreCancelledAndTabsClose(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	tab := h.a.ws().tab().(*tableTab)
+	h.prefix("alt+r")
+	first := tab.cancel
+	h.prefix("alt+r") // a second load cancels the first
+	if first == nil {
+		t.Fatal("loads must be cancellable")
+	}
+	h.prefix("w")
+	if !tab.closed {
+		t.Error("closing the tab marks it closed so late callbacks are no-ops")
+	}
+}
+
+func TestReviewCommitTwiceSendsOnce(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	h.press("l", "enter")
+	h.typeText("Q")
+	h.press("enter")
+	tab := h.a.ws().tab().(*tableTab)
+	_, cmd := h.a.Update(keyMsg("ctrl+d"))
+	_, cmd = h.a.Update(keyMsg("s")) // commit sent, nothing landed yet
+	if !h.a.ws().applying {
+		t.Fatal("applying flag")
+	}
+	h.prefix("s")
+	h.want("still being sent")
+	h.pump(cmd)
+	if len(h.fake.applied) != 1 {
+		t.Fatalf("applied %d times", len(h.fake.applied))
+	}
+	if tab.grid.HasPending() {
+		t.Error("committed rows are no longer pending")
+	}
+}
+
+func TestReviewGridReadOnlyWhileLoading(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	tab := h.a.ws().tab().(*tableTab)
+	tab.load() // not pumped: still loading
+	if tab.grid.Editable {
+		t.Fatal("edits typed during a reload would be thrown away: the grid is read-only until it lands")
+	}
+}
+
+func TestReviewRunBlockedWhileApplyingAndCancelFromSidebar(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("e")
+	h.typeText("select 1")
+	h.a.ws().applying = true
+	h.prefix("alt+enter")
+	h.want("still being sent")
+	h.a.ws().applying = false
+	tab := h.a.ws().tab().(*queryTab)
+	tab.running = true
+	tab.cancel = func() {}
+	h.prefix("alt+h") // sidebar focused
+	h.prefix(".")
+	if tab.running {
+		t.Error("cancel must reach the running tab from any pane")
+	}
+}
+
+func TestReviewResultCommitKeepsOtherResultsAndRerunAsks(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("e")
+	h.typeText("select * from customers; select * from customers")
+	h.prefix("alt+enter")
+	tab := h.a.ws().tab().(*queryTab)
+	if len(tab.res) != 2 {
+		t.Fatalf("results %d", len(tab.res))
+	}
+	h.prefix("alt+j")
+	h.press("l", "enter")
+	h.typeText("Q")
+	h.press("enter") // edit in result 2 (focused)
+	h.prefix("s")
+	if len(h.fake.applied) != 1 || len(tab.res) != 2 {
+		t.Fatalf("commit refreshes one result in place: applied=%d results=%d", len(h.fake.applied), len(tab.res))
+	}
+	h.press("l", "enter")
+	h.typeText("Z")
+	h.press("enter")
+	h.prefix("alt+k")
+	h.prefix("alt+enter") // re-running with pending result edits asks first
+	h.want("Discard pending result edits?")
+	h.press("n")
+	if !tab.Dirty() {
+		t.Error("n keeps the edits")
+	}
+}
+
+func TestReviewDangerConfirmNeedsY(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	h.press("l", "enter")
+	h.typeText("x")
+	h.press("enter")
+	h.prefix("w")
+	h.want("Close customers with unsaved changes?")
+	h.press("enter")
+	if len(h.a.ws().tabs) != 1 {
+		t.Fatal("Enter on a destructive confirm must cancel")
+	}
+	h.prefix("w")
+	h.press("y")
+	if len(h.a.ws().tabs) != 0 {
+		t.Fatal("y confirms")
+	}
+}
+
+func TestReviewDropTableNeedsTheNameTyped(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("delete") // delete_item in the sidebar context
+	h.want("Delete customers?")
+	h.press("enter")
+	h.want(`type "customers" to confirm`)
+	if len(h.fake.applied) != 0 {
+		t.Fatal("nothing may run before the name is typed")
+	}
+	h.typeText("customers")
+	h.press("enter")
+	if len(h.fake.applied) != 1 || h.fake.applied[0][0].Text != "-- drop customers" {
+		t.Fatalf("applied %+v", h.fake.applied)
+	}
+}
+
+func TestReviewAsyncResultsWaitForOpenDialogs(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("?") // a dialog is open
+	ws := h.a.ws()
+	h.a.Update(wsMsg{ws: ws.id, tab: -1, gen: ws.gen, msg: colsMetaMsg{ref: db.ObjRef{Name: "x"}, cols: customerCols}})
+	if _, ok := ws.meta[db.ObjRef{Name: "x"}]; ok {
+		t.Fatal("a result must wait while a dialog is open")
+	}
+	h.press("esc") // closing the dialog replays it
+	if _, ok := ws.meta[db.ObjRef{Name: "x"}]; !ok {
+		t.Fatal("the deferred result is applied once the dialog closes")
+	}
+}
+
+func TestReviewPrefixResetWhenDialogOpens(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	h.press("ctrl+d") // prefix pending...
+	h.a.push(&textViewDlg{title: "async", lines: []string{"x"}})
+	h.press("esc")
+	h.press("D") // ...must not be read as prefix+D (duplicate rows); a plain D does nothing
+	if len(h.a.ws().tab().(*tableTab).grid.Rows) != 3 {
+		t.Fatal("a stale prefix survived the dialog")
+	}
+}
+
+func TestReviewCopyURLLeavesPasswordOut(t *testing.T) {
+	h := newHarness(t, nil)
+	h.press("u")
+	h.want("without the password")
+	h.press("U")
+	h.want("Copy the URL with the password")
+}
+
+func TestReviewSafeMode1WithoutStoredPasswordConfirms(t *testing.T) {
+	h := newHarness(t, func(c *config.Connection, _ *config.Config) { c.SafeMode = "safe1"; c.Password = "" })
+	h.connect()
+	h.openCustomers()
+	h.press("l", "enter")
+	h.typeText("x")
+	h.press("enter")
+	h.prefix("s")
+	h.want("no stored password")
+	h.press("enter") // danger: Enter cancels
+	if len(h.fake.applied) != 0 {
+		t.Fatal("an empty password must not pass Safe Mode")
+	}
+}
+
+func TestReviewShortTerminalWithConsoleDoesNotPanic(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("ctrl+c")
+	for _, hh := range []int{6, 8, 12, 14} {
+		h.a.Update(tea.WindowSizeMsg{Width: 60, Height: hh})
+		_ = h.a.render()
+	}
+}
+
+func TestReviewDefaultSortAndStripesSettings(t *testing.T) {
+	h := newHarness(t, func(_ *config.Connection, c *config.Config) {
+		c.Table.DefaultSort = "pk_desc"
+		c.Table.AlternatingRows = false
+		c.Table.FilterState = "show"
+	})
+	h.connect()
+	h.openCustomers()
+	if s := h.fake.lastQuery.Sort; len(s) != 1 || s[0].Column != "id" || !s[0].Desc {
+		t.Errorf("default_sort = pk_desc: %+v", s)
+	}
+	h.want("Filters (AND)")
+	if !h.a.ws().tab().(*tableTab).grid.NoStripes {
+		t.Error("alternating_rows = false")
+	}
+}
+
+func TestReviewQueryResultsSurviveAReload(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("r") // bumps the workspace generation
+	h.prefix("e")
+	h.typeText("select 1")
+	h.prefix("alt+enter")
+	h.want("Query 1") // the result carries the current generation and is not dropped as stale
 }

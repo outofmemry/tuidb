@@ -264,8 +264,8 @@ func TestGridPasteAndFind(t *testing.T) {
 	if !g.PasteRows([][]string{{"9", "Zed", "NULL"}, {"10", "Yan"}}) || len(g.Rows) != 5 || g.Rows[2].State != rowNew {
 		t.Fatalf("rows: %d", len(g.Rows))
 	}
-	if g.Rows[2].Cur[2] != db.Null || g.Rows[3].Cur[2] != db.Default || g.Rows[3].Dirty[2] {
-		t.Errorf("NULL maps to NULL; uncovered columns stay DEFAULT and are not inserted: %+v", g.Rows[3])
+	if g.Rows[2].Cur[2] != "NULL" || g.Rows[3].Cur[2] != db.Default || g.Rows[3].Dirty[2] {
+		t.Errorf("pasted text stays text (the word NULL included); uncovered columns stay DEFAULT: %+v", g.Rows[3])
 	}
 	if n := len(g.Changes(db.ObjRef{Name: "t"})); n != 2 {
 		t.Errorf("two inserts: %d", n)

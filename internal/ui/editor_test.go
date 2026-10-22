@@ -309,3 +309,62 @@ func TestEditorShiftTabOutdents(t *testing.T) {
 		t.Error("shift+tab must not start a selection")
 	}
 }
+
+func TestEditorReviewRound(t *testing.T) {
+	// a shift-move that goes nowhere must not leave a stale anchor behind
+	e := newEd()
+	e.SetText("abc")
+	e.cur = pos{0, 3}
+	press(e, tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift}, kBack, kBack)
+	if e.Text() != "a" || e.anchor != nil {
+		t.Errorf("after shift+down at the end then two backspaces: %q anchor=%v", e.Text(), e.anchor)
+	}
+	// accepting a completion replaces the selection and splits multi-line text into lines
+	e = newEd()
+	all := []Candidate{{Text: "ro", Kind: "saved", Insert: "SELECT 1\nFROM t\n"}}
+	e.Complete = func(p string) []Candidate { return RankCandidates(p, all, 10) }
+	typ(e, "ro")
+	press(e, kTab)
+	if len(e.lines) != 2 || e.lines[1] != "FROM t" || strings.Contains(e.lines[0], "\n") {
+		t.Errorf("lines %q", e.lines)
+	}
+	for _, l := range strings.Split(e.View(NewTheme(configTheme()), true), "\n") {
+		if width(l) != 60 {
+			t.Errorf("view line width %d", width(l))
+		}
+	}
+	// a lone CR and invalid UTF-8 are normalized, and Offset counts stored bytes
+	e = newEd()
+	e.SetText("select 1;\rdrop table x;")
+	if len(e.lines) != 2 {
+		t.Errorf("lone CR is a newline: %q", e.lines)
+	}
+	e = newEd()
+	e.SetText("select 1;\n\xff\xfe;\ndrop table x;")
+	e.cur = pos{1, 1}
+	if s, _ := e.CurrentStatement(); strings.Contains(s.Text, "drop") {
+		t.Errorf("cursor on the middle line must not run the DROP: %q", s.Text)
+	}
+	// typing after a cursor move still coalesces into one undo step
+	e = newEd()
+	typ(e, "ab")
+	press(e, kLeft)
+	typ(e, "c")
+	press(e, kUndo)
+	if e.Text() != "" {
+		t.Errorf("typing runs coalesce across cursor moves: %q", e.Text())
+	}
+}
+
+func TestLineEditWideRunes(t *testing.T) {
+	l := newLine("日本語日本語")
+	th := NewTheme(configTheme())
+	for _, w := range []int{6, 8, 10, 13} {
+		for p := 0; p <= 6; p++ {
+			l.pos = p
+			if got := width(l.View(w, th, true)); got != w {
+				t.Errorf("w=%d pos=%d: rendered %d cells", w, p, got)
+			}
+		}
+	}
+}

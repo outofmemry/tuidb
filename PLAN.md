@@ -23,6 +23,21 @@ reconnecting to the wrong database, several panics, stale editor selections, a d
 safe-mode bypasses in the read-only classifier (MongoDB shell methods, PostgreSQL `#` / `E''` / `$$`, MySQL `/*! */`),
 plus identifier escaping for ClickHouse, Redis list deletes by index, TLS URL options being ignored. Each has a regression test.
 
+**Second review (review.md, 78 P1 + 16 P2/P3): all P1 items fixed.** Safety: safe_mode / ssl_mode / unknown keys in
+connections.toml are rejected, default_safe_mode applies, unknown levels fail closed, Enter never confirms a destructive
+dialog, drop and truncate need the name typed, an empty stored password cannot pass Safe Mode, Copy-URL leaves the password
+out unless asked (`U`), password_cmd runs without a shell, the connections file is forced to 0600, the read-only classifier
+handles `a$$b$$` identifiers, JavaScript comments and template literals, EXECUTE/CALL/DO, and the MongoDB raw filter is
+parsed as a pure document in a helper-only runtime. Data: atomic fsynced writes for every file, a bounded history, a
+corrupt state.json is moved aside, committed rows are cleared before the reload, one commit at a time, query results
+refresh in place, loads are cancellable and read-only while in flight, a workspace generation drops results from a
+previous database or session, MySQL DDL runs outside transactions and keeps comments/collations/generated columns,
+MySQL routines are created under a new name before the old one is dropped (with DELIMITER support in the splitter),
+PostgreSQL serial columns copy as identity columns and timestamptz keeps its offset, Redis pages streams by id and
+checks key types before MULTI, ClickHouse `USE` switches the session. Memory: copy-on-write grid snapshots, cached
+editor text and lexing, cached document views, capped quick look, bounded Redis replies. Compose binds to loopback with
+a Redis password; CI runs the full suite. Settings nothing read were removed from config.toml (they now error).
+
 **Known limits (documented, not fixed):** each editor statement runs on its own pooled connection, so `BEGIN` / `SET` do not
 carry over to the next statement; MySQL DDL commits implicitly, so a failed multi-statement structure change can be partly applied;
 `ssl_mode = prefer` means plaintext on engines without opportunistic TLS (ClickHouse, Redis, MongoDB); the editor and text fields
