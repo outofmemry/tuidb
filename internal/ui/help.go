@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"tuidb/internal/keymap"
 )
@@ -182,41 +184,78 @@ func (h *helpDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 
 func (h *helpDlg) View(th Theme, maxW, maxH int) string {
 	w := min(maxW-4, 90)
+	cw := w - 4
 	rows := h.shown()
+	q := strings.TrimSpace(h.q.Value())
+	slash := th.Accent.Bold(true).Render("/ ")
 	var body []string
 	if h.searching || h.q.Value() != "" {
-		body = append(body, th.Accent.Render("/ ")+h.q.View(w-8, th, h.searching), "")
+		noun := "commands match"
+		if len(rows) == 1 {
+			noun = "command matches"
+		}
+		body = append(body, slash+h.q.View(cw-2, th, h.searching),
+			th.Dim.Render(fmt.Sprintf("%d %s · Enter runs the selected one", len(rows), noun)))
 	} else {
-		body = append(body, th.Dim.Render(fmt.Sprintf("Every action is %s then a key · %s %s sends the raw key · Esc cancels the prefix", h.pre, h.pre, h.pre)), "")
+		body = append(body, slash+th.Dim.Render("search commands by name, description or key"),
+			th.Dim.Render(fmt.Sprintf("Every action is %s then a key · %s %s sends the raw key · Esc cancels the prefix", h.pre, h.pre, h.pre)))
 	}
-	vis := max(3, maxH-12)
-	if h.sel < h.top {
-		h.top = h.sel
+	body = append(body, "")
+	// a fixed key column sized to the longest key, and a context column on the right
+	keyW, ctxW := 0, 0
+	for _, r := range h.rows {
+		keyW, ctxW = max(keyW, width(h.pre+" "+r.key)), max(ctxW, width(r.ctx))
 	}
-	if h.sel >= h.top+vis {
-		h.top = h.sel - vis + 1
-	}
-	if len(rows) == 0 {
-		body = append(body, th.Dim.Render("no command matches"))
-	}
-	for i := h.top; i < min(len(rows), h.top+vis); i++ {
-		r := rows[i]
+	keyW = min(keyW, 18)
+	// lay every row out, then window by lines so the blank lines between sections scroll too
+	var lines []string
+	head := map[int]bool{}
+	selLine := 0
+	for i, r := range rows {
 		if r.header != "" {
-			body = append(body, th.Bold.Render(r.header))
+			if len(lines) > 0 {
+				lines = append(lines, "")
+			}
+			head[len(lines)] = true
+			lines = append(lines, th.Section.Render(r.header))
 			continue
 		}
-		key := fit(h.pre+" "+r.key, 14)
-		line := "  " + th.Accent.Render(key) + " " + fit(r.desc, w-30) + " " + th.Dim.Render(r.ctx)
-		if i == h.sel {
-			line = th.SelRow.Render(fit("  "+key+" "+fit(r.desc, w-30)+" "+r.ctx, w-4))
+		sel := i == h.sel
+		if sel {
+			selLine = len(lines)
 		}
-		body = append(body, line)
+		on := rowStyle(th, sel)
+		plain := on(lipgloss.NewStyle())
+		k := ansi.Truncate(h.pre+" "+r.key, keyW, "…")
+		d := ansi.Truncate(r.desc, max(0, cw-2-(keyW+4)-ctxW-2), "…")
+		desc := plain.Render(d)
+		if _, ok := fuzzy(q, r.desc); ok && q != "" {
+			desc = fuzzyMark(q, d, plain, on(th.Accent.Bold(true)))
+		}
+		left := th.chip(k) + plain.Render(strings.Repeat(" ", keyW-width(k)+2)) + desc
+		lines = append(lines, listRow(th, sel, left, on(th.Dim).Render(r.ctx), cw))
 	}
-	hint := "/ search · ↑↓ move · Enter run · Esc close"
+	vis := max(3, maxH-13)
+	if selLine < h.top {
+		h.top = selLine
+		if h.top > 0 && head[h.top-1] { // keep a section's title in view with its first command
+			h.top--
+		}
+	}
+	if selLine >= h.top+vis {
+		h.top = selLine - vis + 1
+	}
+	h.top = clamp(h.top, 0, max(0, len(lines)-vis))
+	body = append(body, lines[h.top:min(len(lines), h.top+vis)]...)
+	if len(rows) == 0 {
+		body = append(body, th.Dim.Render("  no command matches"))
+	}
+	body = append(body, "", th.Dim.Render("Rebind any key in ~/.config/tuidb/config.toml under [keys]"))
+	hint := "/: search   ↑↓: move   Enter: run   Esc: close"
 	if h.searching {
-		hint = "type to search name, description or key · ↑↓ move · Enter run · Esc clear/stop"
+		hint = "↑↓: move   Enter: run   Esc: clear/stop"
 	}
-	return box(th, "Key bindings", body, hint+"   ·   rebind in ~/.config/tuidb/config.toml [keys]", w)
+	return box(th, "Key bindings", body, hint, w)
 }
 
 // runActionMsg runs a prefix action chosen from the help list.

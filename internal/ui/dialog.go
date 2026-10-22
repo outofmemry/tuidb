@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -96,27 +97,122 @@ func (d *confirmDlg) View(th Theme, maxW, maxH int) string {
 	w := min(maxW-4, 80)
 	var body []string
 	for _, l := range d.lines {
-		body = append(body, wrapText(l, w-4)...)
+		wrapped := wrapText(l, w-4)
+		if sqlish(l) {
+			// postgres rules: only '…' is a literal, so quoted identifiers do not read as strings
+			for i, k := range lexLines("postgres", wrapped) {
+				wrapped[i] = highlight(th, wrapped[i], k)
+			}
+		}
+		body = append(body, wrapped...)
 	}
-	vis := max(3, maxH-10)
+	vis := max(3, maxH-12)
 	d.scroll = clamp(d.scroll, 0, max(0, len(body)-vis))
-	more := ""
+	hint := ""
 	if len(body) > vis {
-		more = fmt.Sprintf("  (%d-%d of %d lines, ↑/↓ scroll)", d.scroll+1, min(len(body), d.scroll+vis), len(body))
+		hint = fmt.Sprintf("↑↓: scroll   (%d-%d of %d lines)", d.scroll+1, min(len(body), d.scroll+vis), len(body))
 		body = body[d.scroll:min(len(body), d.scroll+vis)]
 	}
 	label := d.yes
 	if label == "" {
 		label = "Yes"
 	}
-	hint := "y/Enter: " + label + "   n/Esc: cancel" + more
+	// the choices are buttons: the action filled (red when destructive), cancel quiet, keys on both
+	yes, no := th.TabActive, th.TabIdle
+	yk, nk := "↵/y", "Esc/n"
 	if d.danger {
-		hint = "y: " + label + "   Enter/n/Esc: cancel" + more
+		yes = yes.Background(th.Err.GetForeground())
+		yk, nk = "y", "↵/Esc/n"
 	}
+	btns := yes.Render(" "+label+"  "+yk+" ") + "  " + no.Render(" Cancel  "+nk+" ")
+	if len(body) > 0 {
+		body = append(body, "")
+	}
+	body = append(body, padLeft(btns, w-4))
 	if d.danger {
 		return boxEdge(th, th.Err, "⚠ "+d.title, body, hint, w)
 	}
 	return box(th, d.title, body, hint, w)
+}
+
+// sqlish reports whether a confirm line is a statement rather than prose: it starts with a SQL
+// keyword typed in one case ("UPDATE …", "select …"), which prose ("All of its tabs…") does not.
+func sqlish(l string) bool {
+	f := strings.Fields(l)
+	if len(f) == 0 {
+		return false
+	}
+	w := strings.TrimLeft(f[0], "(")
+	return sqlKeywords[strings.ToUpper(w)] && (w == strings.ToUpper(w) || w == strings.ToLower(w))
+}
+
+// rowStyle puts st on the selection background for the selected row, so the styled pieces of a
+// highlighted list row keep their colors without punching holes in the highlight.
+func rowStyle(th Theme, sel bool) func(lipgloss.Style) lipgloss.Style {
+	return func(st lipgloss.Style) lipgloss.Style {
+		if sel {
+			return st.Inherit(th.SelRow)
+		}
+		return st
+	}
+}
+
+// listRow lays out one list line cw cells wide: a ▸ marker on the selected row, left, and right
+// pushed to the right edge. Callers pre-truncate both parts so they fit.
+func listRow(th Theme, sel bool, left, right string, cw int) string {
+	on := rowStyle(th, sel)
+	mark := "  "
+	if sel {
+		mark = on(th.Accent.Bold(true)).Render("▸ ")
+	}
+	return mark + left + on(lipgloss.NewStyle()).Render(strings.Repeat(" ", max(0, cw-2-width(left)-width(right)))) + right
+}
+
+// moreLine says how many list rows are scrolled out of view, or "" when all fit.
+func moreLine(th Theme, above, below int) string {
+	var p []string
+	if above > 0 {
+		p = append(p, fmt.Sprintf("↑ %d above", above))
+	}
+	if below > 0 {
+		p = append(p, fmt.Sprintf("↓ %d more", below))
+	}
+	if len(p) == 0 {
+		return ""
+	}
+	return th.Dim.Render("  (" + strings.Join(p, " · ") + ")")
+}
+
+// fuzzyMark renders s in base with the runes a fuzzy search for q matched (greedily, the way
+// fuzzy() matches) in hit.
+func fuzzyMark(q, s string, base, hit lipgloss.Style) string {
+	p := []rune(strings.ToLower(q))
+	var sb strings.Builder
+	var run []rune
+	on, pi := false, 0
+	flush := func() {
+		if len(run) > 0 {
+			st := base
+			if on {
+				st = hit
+			}
+			sb.WriteString(st.Render(string(run)))
+			run = run[:0]
+		}
+	}
+	for _, c := range s {
+		m := pi < len(p) && unicode.ToLower(c) == p[pi]
+		if m {
+			pi++
+		}
+		if m != on {
+			flush()
+			on = m
+		}
+		run = append(run, c)
+	}
+	flush()
+	return sb.String()
 }
 
 // ---- form -------------------------------------------------------------------------------
@@ -313,6 +409,10 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 			}
 		case fLabel:
 			val = th.Dim.Render(fl.Value)
+			if sqlish(fl.Value) { // the statement a password prompt guards
+				v := ansi.Truncate(fl.Value, vw, "…")
+				val = highlight(th, v, lexLines("postgres", []string{v})[0])
+			}
 		}
 		rows = append(rows, mark+label+"  "+val)
 	}
@@ -326,16 +426,38 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 	end := min(len(rows), f.top+vis)
 	body := rows[f.top:end]
 	if f.err != "" {
-		body = append(body, "", th.Err.Render(f.err))
+		body = append(body, "", th.Err.Render("✗ "+f.err))
 	}
-	hint := f.submit + "   Esc: cancel   Tab/↑↓: move   ←→: toggle"
+	title, secrets, inputs, toggles := f.title, 0, 0, 0
+	for _, fl := range f.fields {
+		if fl.Kind < fLabel {
+			inputs++
+		}
+		switch fl.Kind {
+		case fSecret:
+			secrets++
+		case fBool, fChoice:
+			toggles++
+		}
+	}
+	// only the keys this form can use: a one-field prompt has no fields to move between
+	hint := f.submit + "   Esc: cancel"
+	if inputs > 1 {
+		hint += "   Tab/↑↓: move"
+	}
+	if toggles > 0 {
+		hint += "   ←→: toggle"
+	}
 	if f.hotHint != "" {
 		hint += "   " + f.hotHint
 	}
 	if len(rows) > vis {
 		hint += fmt.Sprintf("   (%d/%d)", focusRow+1, len(rows))
 	}
-	return box(th, f.title, body, hint, w)
+	if secrets > 0 && secrets == inputs { // a password prompt, not a form that happens to hold one
+		title = "🔒 " + title
+	}
+	return box(th, title, body, hint, w)
 }
 
 // ---- picker -----------------------------------------------------------------------------
@@ -430,6 +552,17 @@ func (p *pickerDlg) refresh() {
 func (p *pickerDlg) View(th Theme, maxW, maxH int) string {
 	w := min(maxW-4, 78)
 	items := p.shown()
+	hint := p.hint
+	if hint == "" {
+		hint = "Enter: select   Esc: cancel   ↑↓: move"
+	}
+	if !p.filter { // a fixed menu is sized to its content; a filtered list keeps a steady width as it narrows
+		need := max(width(p.title)+8, width(th.hintChips(hint))+8, 44)
+		for _, it := range items {
+			need = max(need, width(it.Label)+8+min(width(it.Detail), 40)+2)
+		}
+		w = min(w, need)
+	}
 	vis := clamp(maxH-10, 3, 14)
 	p.sel = clamp(p.sel, 0, max(0, len(items)-1))
 	if p.sel < p.top {
@@ -438,32 +571,39 @@ func (p *pickerDlg) View(th Theme, maxW, maxH int) string {
 	if p.sel >= p.top+vis {
 		p.top = p.sel - vis + 1
 	}
+	cw := w - 4
 	var body []string
 	if p.filter {
-		body = append(body, th.Accent.Render("› ")+p.q.View(w-8, th, true), "")
+		body = append(body, th.Accent.Bold(true).Render("› ")+p.q.View(cw-2, th, true), "")
 	}
-	for i := p.top; i < min(len(items), p.top+vis); i++ {
-		it := items[i]
-		line := fit(it.Label, w-4)
+	q := p.q.Value()
+	mark := p.filter && q != "" && !strings.HasPrefix(q, "^") && !strings.HasSuffix(q, "$")
+	end := min(len(items), p.top+vis)
+	for i := p.top; i < end; i++ {
+		it, sel := items[i], i == p.sel
+		on := rowStyle(th, sel)
+		lw, det := cw-2, ""
 		if it.Detail != "" {
-			dl := width(it.Detail)
-			line = fit(it.Label, max(8, w-4-dl-2)) + "  " + th.Dim.Render(it.Detail)
+			d := ansi.Truncate(it.Detail, max(0, cw-16), "…")
+			lw -= width(d) + 2
+			det = on(th.Dim).Render(d)
 		}
-		if i == p.sel {
-			line = th.SelRow.Render(fit(ansi.Strip(line), w-4))
+		lbl := ansi.Truncate(ansi.Strip(it.Label), lw, "…")
+		left := on(lipgloss.NewStyle()).Render(lbl)
+		if mark {
+			left = fuzzyMark(q, lbl, on(lipgloss.NewStyle()), on(th.Accent.Bold(true)))
 		}
-		body = append(body, line)
+		body = append(body, listRow(th, sel, left, det, cw))
+	}
+	if m := moreLine(th, p.top, len(items)-end); m != "" {
+		body = append(body, m)
 	}
 	if len(items) == 0 {
 		e := p.empty
 		if e == "" {
 			e = "no matches"
 		}
-		body = append(body, th.Dim.Render(e))
-	}
-	hint := p.hint
-	if hint == "" {
-		hint = "Enter: select   Esc: cancel   ↑↓: move"
+		body = append(body, th.Dim.Render("  "+e))
 	}
 	return box(th, p.title, body, hint, w)
 }
@@ -590,17 +730,21 @@ func (c *checklistDlg) View(th Theme, maxW, maxH int) string {
 	if c.sel >= c.top+vis {
 		c.top = c.sel - vis + 1
 	}
+	cw := w - 4
 	var body []string
-	for i := c.top; i < min(len(c.items), c.top+vis); i++ {
-		mark := "[ ] "
+	end := min(len(c.items), c.top+vis)
+	for i := c.top; i < end; i++ {
+		on := rowStyle(th, i == c.sel)
+		plain := on(lipgloss.NewStyle())
+		chk := on(th.Dim).Render("[ ]")
 		if c.items[i].Checked {
-			mark = "[x] "
+			chk = plain.Render("[") + on(th.OK.Bold(true)).Render("x") + plain.Render("]")
 		}
-		line := fit(mark+c.items[i].Label, w-4)
-		if i == c.sel {
-			line = th.SelRow.Render(line)
-		}
-		body = append(body, line)
+		left := chk + plain.Render(" "+ansi.Truncate(c.items[i].Label, cw-6, "…"))
+		body = append(body, listRow(th, i == c.sel, left, "", cw))
 	}
-	return box(th, c.title, body, "Space: toggle   a: all/none   Enter: apply   Esc: cancel", w)
+	if m := moreLine(th, c.top, len(c.items)-end); m != "" {
+		body = append(body, m)
+	}
+	return box(th, c.title, body, "Space: toggle   a: all   Enter: apply   Esc: cancel", w)
 }
