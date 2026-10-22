@@ -252,7 +252,8 @@ func (e *Editor) scroll() {
 	}
 }
 
-func (e *Editor) gutterW() int { return max(3, len(fmt.Sprint(len(e.lines)))) + 1 }
+// gutterW is the line-number column plus " │ " before the text.
+func (e *Editor) gutterW() int { return max(3, len(fmt.Sprint(len(e.lines)))) + 3 }
 func (e *Editor) textW() int   { return max(1, e.W-e.gutterW()) }
 
 func wordStart(r []rune, col int) int {
@@ -684,9 +685,18 @@ func (e *Editor) FirstWord() string {
 	return strings.ToLower(f[0])
 }
 
-// styleFor maps a run key (token kind, current-statement bit, selection bit, cursor bit) to a style.
+// Run key bits above the token kind (key & 7).
+const (
+	keyStmt    = 1 << 3 // inside the statement under the cursor
+	keySel     = 1 << 4 // selected
+	keyCursor  = 1 << 5 // the cursor cell (used alone)
+	keyCurLine = 1 << 6 // on the cursor line
+)
+
+// styleFor maps a run key to a style. One background wins: selection, then cursor line, then statement
+// (Inherit never overwrites a background that is already set, so they cannot be stacked).
 func (e *Editor) styleFor(th Theme, key int) lipgloss.Style {
-	if key == 1<<5 {
+	if key == keyCursor {
 		return th.SelCell
 	}
 	st := th.Cell
@@ -700,11 +710,13 @@ func (e *Editor) styleFor(th Theme, key int) lipgloss.Style {
 	case tkNumber:
 		st = th.Number
 	}
-	if key&(1<<3) != 0 {
-		st = st.Inherit(th.AltRow)
-	}
-	if key&(1<<4) != 0 {
+	switch {
+	case key&keySel != 0:
 		st = st.Inherit(th.SelRow)
+	case key&keyCurLine != 0:
+		st = st.Inherit(th.CurRow)
+	case key&keyStmt != 0:
+		st = st.Inherit(th.AltRow)
 	}
 	return st
 }
@@ -743,20 +755,22 @@ func (e *Editor) View(th Theme, focused bool) string {
 	}
 	a, b, hasSel := e.selRange()
 	gw, tw := e.gutterW(), e.textW()
+	rule := th.Border.Render("│") + " "
 	var out []string
 	for vi := 0; vi < e.H; vi++ {
 		ri := e.top + vi
 		if ri >= len(e.lines) {
-			out = append(out, strings.Repeat(" ", e.W))
+			out = append(out, strings.Repeat(" ", gw-2)+rule+strings.Repeat(" ", max(0, e.W-gw)))
 			continue
 		}
 		r := e.runes(ri)
 		var sb strings.Builder
-		lineNo := th.Dim.Render(padLeft(fmt.Sprint(ri+1), gw-1) + " ")
+		num := th.Dim.Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
 		if ri == e.cur.row {
-			lineNo = th.Accent.Render(padLeft(fmt.Sprint(ri+1), gw-1) + " ")
+			num = th.Accent.Bold(true).Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
 		}
-		sb.WriteString(lineNo)
+		sb.WriteString(num + rule)
+		curLine := focused && e.Opts.Highlight && ri == e.cur.row
 		end := min(len(r), e.left+tw)
 		bytePos := 0
 		if curStmt != nil {
@@ -774,13 +788,16 @@ func (e *Editor) View(th Theme, focused bool) string {
 		for ci := e.left; ci < end; ci++ {
 			key := int(kinds[ri][ci])
 			if curStmt != nil && bytePos >= curStmt.Start && bytePos < curStmt.End {
-				key |= 1 << 3
+				key |= keyStmt
+			}
+			if curLine {
+				key |= keyCurLine
 			}
 			if hasSel && (ri > a.row || ri == a.row && ci >= a.col) && (ri < b.row || ri == b.row && ci < b.col) {
-				key |= 1 << 4
+				key |= keySel
 			}
 			if focused && ri == e.cur.row && ci == e.cur.col {
-				key = 1 << 5
+				key = keyCursor
 			}
 			if key != runKey {
 				flush()
@@ -799,7 +816,11 @@ func (e *Editor) View(th Theme, focused bool) string {
 		}
 		line := ansi.Truncate(sb.String(), e.W, "")
 		if pad := e.W - width(line); pad > 0 {
-			line += strings.Repeat(" ", pad)
+			if curLine { // the cursor-line tint runs to the right edge
+				line += th.CurRow.Render(strings.Repeat(" ", pad))
+			} else {
+				line += strings.Repeat(" ", pad)
+			}
 		}
 		out = append(out, line)
 	}
@@ -815,26 +836,28 @@ func (e *Editor) overlayComplete(th Theme, out []string, gw int) {
 	if e.ac.sel < start {
 		start = e.ac.sel
 	}
-	w := 0
+	tw, kw := 0, 0
 	for _, c := range e.ac.items[start : start+n] {
-		w = max(w, width(c.Text)+width(c.Kind)+3)
+		tw, kw = max(tw, width(c.Text)), max(kw, width(c.Kind))
 	}
+	tw = min(tw, 40)
+	w := min(2+tw+2+kw+1, e.W-gw) // "› text  kind "
+	tw = max(1, w-5-kw)
 	_, st := e.prefixAtCursor()
-	x := clamp(gw+st-e.left, gw, max(gw, e.W-w))
+	x := clamp(gw+st-e.left-2, gw, max(gw, e.W-w)) // the text column lines up with the word being completed
 	y := e.cur.row - e.top + 1
 	if y+n > e.H {
 		y = max(0, e.cur.row-e.top-n)
 	}
 	for i := 0; i < n && y+i < len(out); i++ {
 		c := e.ac.items[start+i]
-		cell := fit(" "+c.Text+" ", w-width(c.Kind)-1) + th.Dim.Render(c.Kind) + " "
-		style := th.Popup
+		bg, txt, mark := th.Popup, th.Popup, "  "
 		if start+i == e.ac.sel {
-			style = th.SelCell
-			cell = fit(" "+c.Text+" ", w-width(c.Kind)-1) + c.Kind + " "
+			bg, txt, mark = th.SelRow, th.SelRow.Bold(true), "› "
 		}
+		cell := th.Accent.Inherit(bg).Bold(true).Render(mark) + txt.Render(fit(c.Text, tw)+"  ") + th.Dim.Inherit(bg).Render(padLeft(c.Kind, kw)+" ")
 		line := out[y+i]
-		out[y+i] = ansi.Truncate(line, x, "") + style.Render(cell) + ansi.TruncateLeft(line, x+w, "")
+		out[y+i] = ansi.Truncate(line, x, "") + ansi.Truncate(cell, w, "") + ansi.TruncateLeft(line, x+w, "")
 	}
 }
 
