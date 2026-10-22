@@ -341,3 +341,79 @@ func TestMongoPlainDocument(t *testing.T) {
 		t.Error("code inside a read command must make it not read-only")
 	}
 }
+
+// Second review round: identifiers with $, JavaScript comment rules, EXECUTE, sentinels, casts.
+func TestClassifierSecondRound(t *testing.T) {
+	for _, c := range []struct {
+		d, q string
+		want bool
+	}{
+		{"postgres", `WITH a$$b$$ AS (SELECT 1), y AS (DELETE FROM t RETURNING *) SELECT 1 FROM y`, false},
+		{"postgres", `SELECT 1 AS a$$b$$ INTO x`, false},
+		{"postgres", `SELECT $$'$$ AS a`, true},
+		{"postgres", `EXPLAIN ANALYZE EXECUTE d`, false},
+		{"postgres", `EXPLAIN ANALYZE SELECT 1`, true},
+		{"postgres", `WITH x AS (SELECT 1) SELECT * FROM x WHERE a = (CALL f())`, false},
+		{"mongo", `db.c.find((x=1, x--, db.c.drop()))`, false},
+		{"mongo", "db.c.find() // db.c.drop()", true},
+		{"mongo", "db.c.find`${db.c.deleteMany({})}`", false},
+		{"mongo", "db.c.find({a: `x`})", false}, // any template literal is refused: it can run code
+		{"mysql", "SELECT 1 -- INTO @x", true},
+	} {
+		if got := IsReadOnly(c.d, c.q); got != c.want {
+			t.Errorf("IsReadOnly(%s, %q) = %v, want %v", c.d, c.q, got, c.want)
+		}
+	}
+	if MongoPlainDocument("{a: `x`}") {
+		t.Error("plain documents have no template literals")
+	}
+}
+
+func TestSplitSecondRound(t *testing.T) {
+	for _, c := range []struct {
+		d, in string
+		want  []string
+	}{
+		{"postgres", `SELECT a$$b$$ FROM t; SELECT 2`, []string{`SELECT a$$b$$ FROM t`, `SELECT 2`}},
+		{"mysql", `SELECT 1--1; DROP TABLE t`, []string{`SELECT 1--1`, `DROP TABLE t`}},
+		{"mongo", "db.a.find() // x; y\n; db.b.find()", []string{"db.a.find() // x; y", "db.b.find()"}},
+		{"mongo", "x--; db.b.find()", []string{"x--", "db.b.find()"}},
+	} {
+		var got []string
+		for _, s := range Split(c.d, c.in) {
+			got = append(got, s.Text)
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s %q:\n got  %q\n want %q", c.d, c.in, got, c.want)
+		}
+	}
+}
+
+func TestFormatValueSentinels(t *testing.T) {
+	if FormatValue(Default) != "DEFAULT" || FormatValue(Empty) != "" || FormatValue(Null) != "NULL" || FormatValue(Expr("now()")) != "now()" {
+		t.Errorf("%q %q %q", FormatValue(Default), FormatValue(Empty), FormatValue(Null))
+	}
+}
+
+func TestAnyColumnCastsOnlyForLike(t *testing.T) {
+	gt := FilterSet{Filters: []Filter{{Column: AnyColumn, Op: ">", Value: "9", Enabled: true}}}
+	if sql, _, _ := gt.Where(PG, []string{"qty"}, 1); sql != `("qty" > $1)` {
+		t.Errorf("comparisons stay native: %s", sql)
+	}
+	like := FilterSet{Filters: []Filter{{Column: AnyColumn, Op: "Contains", Value: "x", Enabled: true}}}
+	if sql, _, _ := like.Where(PG, []string{"qty"}, 1); sql != `(CAST("qty" AS TEXT) ILIKE $1)` {
+		t.Errorf("LIKE casts: %s", sql)
+	}
+}
+
+func TestSplitMySQLDelimiter(t *testing.T) {
+	in := "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END$$\nDROP PROCEDURE q$$\nDELIMITER ;\nSELECT 3; SELECT 4"
+	var got []string
+	for _, s := range Split("mysql", in) {
+		got = append(got, s.Text)
+	}
+	want := []string{"CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END", "DROP PROCEDURE q", "SELECT 3", "SELECT 4"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}

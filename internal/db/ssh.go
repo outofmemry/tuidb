@@ -20,8 +20,29 @@ import (
 // Tunnel is an open SSH connection; Dial routes driver connections through it.
 type Tunnel struct{ client *ssh.Client }
 
-func (t *Tunnel) Dial(_ context.Context, network, addr string) (net.Conn, error) {
-	return t.client.Dial(network, addr)
+// Dial opens a channel through the tunnel; the ssh client has no context-aware dial, so a
+// cancelled ctx returns early and the late channel (if any) is closed when it arrives.
+func (t *Tunnel) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	type res struct {
+		c   net.Conn
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		c, err := t.client.Dial(network, addr)
+		ch <- res{c, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.c, r.err
+	case <-ctx.Done():
+		go func() {
+			if r := <-ch; r.c != nil {
+				r.c.Close()
+			}
+		}()
+		return nil, ctx.Err()
+	}
 }
 
 func (t *Tunnel) Close() error { return t.client.Close() }
@@ -77,6 +98,13 @@ func OpenTunnel(ctx context.Context, cfg *config.SSH) (*Tunnel, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ssh.NewClientConn ignores ClientConfig.Timeout: bound the handshake with a socket deadline
+	deadline := time.Now().Add(20 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	raw.SetDeadline(deadline)
+	defer raw.SetDeadline(time.Time{})
 	cc, chans, reqs, err := ssh.NewClientConn(raw, addr, &ssh.ClientConfig{User: cfg.User, Auth: auth, HostKeyCallback: hostKey, Timeout: 15 * time.Second})
 	if err != nil {
 		raw.Close()

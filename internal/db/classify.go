@@ -22,18 +22,22 @@ type tok struct {
 func scan(dialect, s string) []tok {
 	var out []tok
 	n := len(s)
-	pg, my := dialect == "postgres", dialect == "mysql"
+	pg, my, js := dialect == "postgres", dialect == "mysql", dialect == "mongo"
 	execComment := 0 // inside /*! ... */: the text is code, only the delimiters are skipped
 	for i := 0; i < n; {
 		c := s[i]
 		switch {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			i++
-		case c == '-' && i+1 < n && s[i+1] == '-' && (!my || i+2 >= n || s[i+2] == ' ' || s[i+2] == '\t' || s[i+2] == '\n' || s[i+2] == '\r'):
+		case js && c == '/' && i+1 < n && s[i+1] == '/': // JavaScript: // comments, and -- is the decrement operator
 			for i < n && s[i] != '\n' {
 				i++
 			}
-		case c == '#' && !pg:
+		case !js && c == '-' && i+1 < n && s[i+1] == '-' && (!my || i+2 >= n || s[i+2] == ' ' || s[i+2] == '\t' || s[i+2] == '\n' || s[i+2] == '\r'):
+			for i < n && s[i] != '\n' {
+				i++
+			}
+		case c == '#' && !pg && !js:
 			for i < n && s[i] != '\n' {
 				i++
 			}
@@ -87,7 +91,7 @@ func scan(dialect, s string) []tok {
 			i++
 		case isWord(c) || c > 127:
 			j := i
-			for j < n && (isWord(s[j]) || s[j] > 127) {
+			for j < n && (isWord(s[j]) || s[j] > 127 || pg && s[j] == '$') { // PostgreSQL identifiers may contain $ after the first char
 				j++
 			}
 			out = append(out, tok{s: s[i:j], word: true})
@@ -109,7 +113,8 @@ func upper(ts []tok) []string {
 }
 
 var writeWords = map[string]bool{"INSERT": true, "UPDATE": true, "DELETE": true, "MERGE": true, "CREATE": true, "DROP": true,
-	"ALTER": true, "TRUNCATE": true, "REPLACE": true, "UPSERT": true, "INTO": true, "GRANT": true, "REVOKE": true, "COPY": true}
+	"ALTER": true, "TRUNCATE": true, "REPLACE": true, "UPSERT": true, "INTO": true, "GRANT": true, "REVOKE": true, "COPY": true,
+	"EXECUTE": true, "CALL": true, "DO": true} // standalone VACUUM/SET/... are already non-SELECT first tokens
 
 // hasWrite reports a write keyword; REPLACE( is the string function, not the statement.
 func hasWrite(ts []tok) bool {
@@ -184,12 +189,16 @@ func callsOnly(ts []tok, allowed map[string]bool) bool {
 // no calls except BSON helpers like ObjectId(), no functions, no $where. The MongoDB driver uses
 // it before evaluating relaxed (shell-style) filter text.
 func MongoPlainDocument(text string) bool {
-	return !mongoWriteStr.MatchString(text) && callsOnly(scan("mongo", text), mongoHelpers)
+	return !strings.ContainsAny(text, "`") && !mongoWriteStr.MatchString(text) && callsOnly(scan("mongo", text), mongoHelpers)
 }
 
 func mongoReadOnly(stmt string) bool {
 	if mongoShow.MatchString(stmt) {
 		return true
+	}
+	// Template literals run ${...} before any tag is called, so nothing with a backtick is read-only.
+	if strings.ContainsAny(stmt, "`") {
+		return false
 	}
 	if mongoWriteStr.MatchString(stmt) { // checked on the raw text: strings and keys count too
 		return false
@@ -242,7 +251,7 @@ func IsReadOnly(dialect, stmt string) bool {
 		return !hasWrite(ts)
 	case "EXPLAIN":
 		if hasAny(up[1:], "ANALYZE", "ANALYSE") {
-			return !hasWrite(ts[1:])
+			return !hasWrite(ts[1:]) // EXPLAIN ANALYZE runs the statement; EXECUTE/CALL/DO count as writes
 		}
 		return true
 	}

@@ -24,6 +24,7 @@ func Split(dialect, text string) []Stmt {
 	}
 	var out []Stmt
 	start, i, n := 0, 0, len(text)
+	term := ";" // MySQL scripts switch it with DELIMITER so routine bodies can contain ';'
 	flush := func(end int) {
 		seg := text[start:end]
 		if hasCode(dialect, seg) {
@@ -39,7 +40,12 @@ func Split(dialect, text string) []Stmt {
 	for i < n {
 		c := text[i]
 		switch {
-		case c == '-' && i+1 < n && text[i+1] == '-', c == '#' && (dialect == "mysql" || dialect == "clickhouse"):
+		case dialect == "mongo" && c == '/' && i+1 < n && text[i+1] == '/': // JavaScript line comment; -- is an operator there
+			for i < n && text[i] != '\n' {
+				i++
+			}
+		case dialect != "mongo" && c == '-' && i+1 < n && text[i+1] == '-' && (dialect != "mysql" || i+2 >= n || text[i+2] == ' ' || text[i+2] == '\t' || text[i+2] == '\n' || text[i+2] == '\r'),
+			c == '#' && (dialect == "mysql" || dialect == "clickhouse"):
 			for i < n && text[i] != '\n' {
 				i++
 			}
@@ -64,6 +70,10 @@ func Split(dialect, text string) []Stmt {
 				backslash = true // E'...' strings treat backslash as an escape
 			}
 			i = skipQuoted(text, i, backslash)
+		case dialect == "postgres" && (isWord(c) || c > 127):
+			for i < n && (isWord(text[i]) || text[i] > 127 || text[i] == '$') { // a$$b$$ is one identifier, not a dollar quote
+				i++
+			}
 		case c == '$' && dialect == "postgres":
 			if tag := dollarTag(text, i); tag != "" {
 				if j := strings.Index(text[i+len(tag):], tag); j >= 0 {
@@ -74,9 +84,20 @@ func Split(dialect, text string) []Stmt {
 				continue
 			}
 			i++
-		case c == ';':
+		case dialect == "mysql" && (i == 0 || text[i-1] == '\n') && len(text) >= i+10 && strings.EqualFold(text[i:i+9], "DELIMITER") && (text[i+9] == ' ' || text[i+9] == '\t'):
 			flush(i)
-			i++
+			j := i + 9
+			for j < n && text[j] != '\n' {
+				j++
+			}
+			if t := strings.TrimSpace(text[i+9 : j]); t != "" {
+				term = t
+			}
+			i = j
+			start = i
+		case strings.HasPrefix(text[i:], term):
+			flush(i)
+			i += len(term)
 			start = i
 		default:
 			i++

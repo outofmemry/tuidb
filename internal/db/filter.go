@@ -93,7 +93,11 @@ func (fs FilterSet) Where(d Dialect, cols []string, startArg int) (string, []any
 			}
 			var ors []string
 			for _, c := range cols {
-				s, err := cond(d.CastText(d.Quote(c)))
+				col := d.Quote(c)
+				if isLikeOp(f.Op) { // LIKE needs text; =, <, > must compare natively or 10 < 9 as strings
+					col = d.CastText(col)
+				}
+				s, err := cond(col)
 				if err != nil {
 					return "", nil, err
 				}

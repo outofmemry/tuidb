@@ -10,6 +10,16 @@ func FormatValue(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return "NULL"
+	case special:
+		switch x {
+		case Default:
+			return "DEFAULT"
+		case Empty:
+			return ""
+		}
+		return "NULL"
+	case Expr:
+		return string(x)
 	case string:
 		return x
 	case []byte:
