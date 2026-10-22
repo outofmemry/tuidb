@@ -453,7 +453,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 		th.Hint.Render("every action is ") + th.chip(keymap.Display(w.a.d.Keys.Prefix)) + th.Hint.Render(" then a key; ") + th.chip(keymap.Display(w.a.d.Keys.Prefix)+" ?") + th.Hint.Render(" lists them."),
 	}
 	for i, l := range Logo {
-		line := "  " + th.Accent.Bold(true).Render(l)
+		line := "  " + th.LogoStyle(i, len(Logo)).Render(l)
 		if W >= logoW+50 && i < len(tag) {
 			line += "   " + tag[i]
 		}

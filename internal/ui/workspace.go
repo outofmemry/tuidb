@@ -892,39 +892,45 @@ func (w *Workspace) statusContext() string {
 	return strings.Join(parts, "  ·  ")
 }
 
-func (w *Workspace) statusParts(th Theme) []string {
+// crumbs is the top bar's content: the path on the left (connection ▸ database ▸ tab), the
+// state badges on the right (safe mode, unsaved edits, sending, workspace index).
+func (w *Workspace) crumbs(th Theme) (left, right []string) {
 	c := w.conn
 	bg := lipgloss.Color(th.pal["status_bg"])
-	dot := th.OK.Background(bg).Render("●")
+	dot := th.OK.Background(bg).Render("● ")
 	if w.lost {
-		dot = th.Err.Background(bg).Render("●")
+		dot = th.Err.Background(bg).Render("● ")
 	} else if w.busy() || w.applying {
-		dot = th.Warn.Background(bg).Render("●")
+		dot = th.Warn.Background(bg).Render("● ")
 	}
-	parts := []string{th.StatusBar.Render(" ") + dot + th.StatusKey.Render(" "+c.Name+" ")}
+	name := dot + th.StatusKey.Render(c.Name)
 	if c.Tag != "" || c.Color != "" {
-		parts = append(parts, th.TagStyle(c.Tag, c.Color).Render(" "+strings.ToUpper(orDefault(c.Tag, "●"))+" "))
+		name += th.StatusBar.Render(" ") + th.TagStyle(c.Tag, c.Color).Render(" "+strings.ToUpper(orDefault(c.Tag, "●"))+" ")
 	}
+	left = append(left, name)
 	where := w.sess.CurrentDatabase()
 	if w.caps.Schemas && w.sb.schema != "" {
 		where += "." + w.sb.schema
 	}
-	parts = append(parts, th.StatusBar.Render(th.DriverStyle(c.Driver).Background(lipgloss.Color(th.pal["status_bg"])).Render(c.Driver)+" "+where))
+	left = append(left, th.DriverStyle(c.Driver).Background(bg).Render(c.Driver)+th.StatusBar.Render(" "+where))
+	if t := w.tab(); t != nil {
+		left = append(left, th.StatusBar.Bold(true).Render(t.Title()))
+	}
 	if w.level == safemode.Silent {
-		parts = append(parts, th.StatusBar.Foreground(lipgloss.Color(th.pal["dim"])).Render("safe: off"))
+		right = append(right, th.StatusBar.Foreground(lipgloss.Color(th.pal["dim"])).Render("safe mode off"))
 	} else {
-		parts = append(parts, th.Warn.Background(bg).Bold(true).Render("⚠ "+w.level.Label()))
+		right = append(right, th.Warn.Background(bg).Bold(true).Render("⚠ "+w.level.Label()))
 	}
 	if w.dirty() {
-		parts = append(parts, th.Warn.Background(bg).Bold(true).Render("● unsaved"))
+		right = append(right, th.Warn.Background(bg).Bold(true).Render("● unsaved"))
 	}
 	if w.applying {
-		parts = append(parts, th.Accent.Background(bg).Render("sending…"))
+		right = append(right, th.Accent.Background(bg).Render("sending…"))
 	}
 	if len(w.a.wss) > 1 {
-		parts = append(parts, th.StatusBar.Render(fmt.Sprintf("workspace %d/%d", w.a.active+1, len(w.a.wss))))
+		right = append(right, th.StatusBar.Render(fmt.Sprintf("workspace %d/%d", w.a.active+1, len(w.a.wss))))
 	}
-	return parts
+	return left, right
 }
 
 func (w *Workspace) view(th Theme, W, H int) string {
@@ -940,12 +946,18 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	}
 	mainH := H - conH
 	mainW := W - sbW - detW
+	if sbW > 0 { // one blank column between panes keeps the borders from doubling up
+		mainW--
+	}
+	if detW > 0 {
+		mainW--
+	}
 	if mainW < 20 {
 		mainW, sbW, detW = W, 0, 0
 	}
 	var cols []string
 	if sbW > 0 {
-		cols = append(cols, frame(th, w.sb.title(), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB))
+		cols = append(cols, frame(th, w.sb.title(), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
 	}
 	mainTitle := w.conn.Name
 	var mainHint string
@@ -960,7 +972,7 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	}
 	cols = append(cols, frame(th, mainTitle, mainHint, w.mainView(th, mainW-4, mainH-2), mainW, mainH, !w.focusSB))
 	if detW > 0 {
-		cols = append(cols, frame(th, "Row details", "", w.detailView(th, detW-4, mainH-2), detW, mainH, false))
+		cols = append(cols, " ", frame(th, "Row details", "", w.detailView(th, detW-4, mainH-2), detW, mainH, false))
 	}
 	out := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	if conH > 0 {

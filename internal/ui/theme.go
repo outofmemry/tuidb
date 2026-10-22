@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -86,6 +87,28 @@ func NewTheme(t config.Theme) Theme {
 		Hint:      fg("dim"),
 		Section:   fg("dim").Bold(true),
 	}
+}
+
+// LogoStyle colors line i of n of the wordmark: a gradient from the accent to the keyword color.
+func (t Theme) LogoStyle(i, n int) lipgloss.Style {
+	f := 0.0
+	if n > 1 {
+		f = float64(i) / float64(n-1)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(blend(t.pal["accent"], t.pal["keyword"], f))).Bold(true)
+}
+
+// blend mixes two #rrggbb colors; anything else (a named color override) returns a unchanged.
+func blend(a, b string, f float64) string {
+	var ar, ag, ab, br, bg, bb int
+	if _, err := fmt.Sscanf(a, "#%02x%02x%02x", &ar, &ag, &ab); err != nil {
+		return a
+	}
+	if _, err := fmt.Sscanf(b, "#%02x%02x%02x", &br, &bg, &bb); err != nil {
+		return a
+	}
+	mix := func(x, y int) int { return x + int(float64(y-x)*f) }
+	return fmt.Sprintf("#%02x%02x%02x", mix(ar, br), mix(ag, bg), mix(ab, bb))
 }
 
 // DriverStyle colors a driver name (postgres blue, mysql orange, ...).

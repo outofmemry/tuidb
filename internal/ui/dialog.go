@@ -15,19 +15,24 @@ type Overlay interface {
 	View(th Theme, maxW, maxH int) string
 }
 
-// box wraps content in a rounded border with a title.
+// box wraps content in an accent frame with the title in the top edge and the key hints in the
+// bottom edge (or as a last line when they are too long for it), so dialogs read like panes.
 func box(th Theme, title string, content []string, hint string, w int) string {
+	return boxEdge(th, th.Accent, title, content, hint, w)
+}
+
+func boxEdge(th Theme, edge lipgloss.Style, title string, content []string, hint string, w int) string {
 	inner := w - 4
-	var lines []string
-	lines = append(lines, th.Title.Render(fit(title, inner)))
-	lines = append(lines, "")
-	for _, l := range content {
-		lines = append(lines, fit(l, inner))
-	}
+	lines := append([]string{""}, content...)
 	if hint != "" {
-		lines = append(lines, "", fit(th.hintChips(hint), inner))
+		hint = th.hintChips(hint)
+		if width(hint) > inner-2 {
+			lines = append(lines, "", fit(hint, inner))
+			hint = ""
+		}
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(th.Border.GetForeground()).Padding(0, 1).Render(strings.Join(lines, "\n"))
+	lines = append(lines, "")
+	return frameEdge(th, edge, edge.Bold(true), title, hint, strings.Join(lines, "\n"), w, len(lines)+2)
 }
 
 // composite draws box centered over base (both multi-line, base is W x H).
@@ -108,11 +113,10 @@ func (d *confirmDlg) View(th Theme, maxW, maxH int) string {
 	if d.danger {
 		hint = "y: " + label + "   Enter/n/Esc: cancel" + more
 	}
-	t := d.title
 	if d.danger {
-		t = th.Err.Render("⚠ ") + t
+		return boxEdge(th, th.Err, "⚠ "+d.title, body, hint, w)
 	}
-	return box(th, t, body, hint, w)
+	return box(th, d.title, body, hint, w)
 }
 
 // ---- form -------------------------------------------------------------------------------
@@ -463,6 +467,7 @@ type viewAction struct {
 
 type textViewDlg struct {
 	title   string
+	danger  bool // an error: red frame
 	lines   []string
 	actions []viewAction
 	top     int
@@ -512,6 +517,9 @@ func (t *textViewDlg) View(th Theme, maxW, maxH int) string {
 	}
 	if len(all) > vis {
 		hint += fmt.Sprintf("   (%d-%d/%d)", t.top+1, t.top+len(body), len(all))
+	}
+	if t.danger {
+		return boxEdge(th, th.Err, t.title, body, hint, w)
 	}
 	return box(th, t.title, body, hint, w)
 }

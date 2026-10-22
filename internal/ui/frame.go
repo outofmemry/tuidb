@@ -21,14 +21,20 @@ const logoW = 26
 // The result is exactly w cells wide and h lines tall; content is clipped or padded to fit.
 // A focused frame uses the accent color so the active pane is always obvious.
 func frame(th Theme, title, hint, content string, w, h int, focused bool) string {
-	if w < 4 || h < 2 {
-		return strings.Join(padLines(nil, w, h), "\n")
-	}
 	edge := th.Border
 	ttl := th.Dim.Bold(true)
 	if focused {
 		edge = th.Accent
 		ttl = th.Accent.Bold(true)
+	}
+	return frameEdge(th, edge, ttl, title, hint, content, w, h)
+}
+
+// frameEdge is frame with explicit edge and title styles (dialogs use the accent or, for
+// destructive ones, the error color).
+func frameEdge(th Theme, edge, ttl lipgloss.Style, title, hint, content string, w, h int) string {
+	if w < 4 || h < 2 {
+		return strings.Join(padLines(nil, w, h), "\n")
 	}
 	inner := w - 2
 	top := "╭─"

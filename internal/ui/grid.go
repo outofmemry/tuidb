@@ -8,6 +8,7 @@ import (
 	"html"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"tuidb/internal/db"
@@ -664,20 +665,23 @@ func (g *Grid) View(th Theme, focused bool) string {
 	gw := g.gutterW()
 	var hdr strings.Builder
 	hdr.WriteString(th.HeaderCell.Render(fit("", gw)))
+	sep := th.HeaderCell.Foreground(lipgloss.Color(th.pal["border"])).Render("│")
 	for i := g.left; i < len(g.Cols); i++ {
 		c := g.Cols[i]
-		name := c.Name
-		if c.PK {
-			name = "⚷" + name
-		}
-		if g.SortCol == c.Name {
+		name, st := c.Name, th.HeaderCell
+		if g.SortCol == c.Name { // the sorted column is the one the eye looks for
+			st = st.Foreground(lipgloss.Color(th.pal["accent"]))
 			if g.SortDesc {
 				name += " ▼"
 			} else {
 				name += " ▲"
 			}
 		}
-		hdr.WriteString(th.HeaderCell.Render("│" + fit(name, c.Width)))
+		cell := st.Render(fit(name, c.Width))
+		if c.PK {
+			cell = th.HeaderCell.Foreground(lipgloss.Color(th.pal["warn"])).Render("⚷") + st.Render(fit(name, c.Width-1))
+		}
+		hdr.WriteString(sep + cell)
 		if width(hdr.String()) >= g.W {
 			break
 		}

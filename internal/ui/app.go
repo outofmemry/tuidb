@@ -144,7 +144,7 @@ func (a *App) notify(isErr bool, text string) tea.Cmd {
 }
 
 func (a *App) errorDialog(title string, err error) {
-	a.push(&textViewDlg{title: a.th.Err.Render("✗ " + title), lines: strings.Split(err.Error(), "\n")})
+	a.push(&textViewDlg{title: "✗ " + title, danger: true, lines: strings.Split(err.Error(), "\n")})
 }
 
 func (a *App) ws() *Workspace {
@@ -190,7 +190,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.w, a.h = m.Width, m.Height
 		for _, w := range a.wss {
-			w.resize(a.w, a.h-1)
+			w.resize(a.w, a.h-2)
 		}
 		return a, nil
 	case runActionMsg:
@@ -226,7 +226,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.nextID++
 		w := newWorkspace(a, a.nextID, c, m.o)
-		w.resize(a.w, a.h-1)
+		w.resize(a.w, a.h-2)
 		a.wss = append(a.wss, w)
 		a.active, a.inWS = len(a.wss)-1, true
 		return a, tea.Batch(a.say("connected to %s", c.Name), w.init())
@@ -437,7 +437,7 @@ func (a *App) render() string {
 	if a.w < 20 || a.h < 6 {
 		return fmt.Sprintf("tuidb needs at least 20×6 cells (this terminal is %d×%d)", a.w, a.h)
 	}
-	bodyH := a.h - 1
+	bodyH := a.h - 2
 	var body string
 	if w := a.ws(); w != nil {
 		body = w.view(a.th, a.w, bodyH)
@@ -449,7 +449,7 @@ func (a *App) render() string {
 		wk := a.whichKey(a.w)
 		lines = append(lines[:max(0, len(lines)-len(wk))], wk...)
 	}
-	out := strings.Join(lines, "\n") + "\n" + a.statusLine()
+	out := a.topBar() + "\n" + strings.Join(lines, "\n") + "\n" + a.statusLine()
 	for _, o := range a.overlays {
 		out = composite(out, o.View(a.th, a.w, a.h), a.w, a.h)
 	}
@@ -522,37 +522,60 @@ func (a *App) whichKey(w int) []string {
 	return out
 }
 
-func (a *App) statusLine() string {
-	var left []string
-	if a.machine.Pending() {
-		left = append(left, a.th.Prefix.Render(" PREFIX "))
-	}
+// topBar is the first line: the wordmark, then where you are (connection ▸ database ▸ tab)
+// with the connection's badges, and the workspace state on the right.
+func (a *App) topBar() string {
+	th := a.th
+	bar := th.StatusBar
+	l := th.TabActive.Render(" ◆ tuidb ") + bar.Render(" ")
+	var right string
 	if w := a.ws(); w != nil {
-		left = append(left, w.statusParts(a.th)...)
+		left, rightParts := w.crumbs(th)
+		l += strings.Join(left, bar.Foreground(lipgloss.Color(th.pal["dim"])).Render(" ▸ "))
+		right = strings.Join(rightParts, bar.Render("  "))
 	} else {
-		left = append(left, a.th.StatusKey.Render(" tuidb "), a.th.StatusBar.Render(fmt.Sprintf(" %d connections", len(a.d.Conns))))
+		l += bar.Render(fmt.Sprintf("%d connections", len(a.d.Conns)))
 	}
-	l := strings.Join(left, a.th.StatusBar.Render(" "))
-	center := ""
+	if right != "" {
+		right += bar.Render(" ")
+	}
+	gap := a.w - width(l) - width(right)
+	if gap < 1 {
+		right, gap = "", 0
+		l = bar.Render(fit(l, a.w))
+	}
+	return l + bar.Render(strings.Repeat(" ", gap)) + right
+}
+
+// statusLine is the last line: the prefix badge and the table context on the left, the keys
+// for the focused pane (or the latest toast) on the right.
+func (a *App) statusLine() string {
+	var l string
+	if a.machine.Pending() {
+		l = a.th.Prefix.Render(" PREFIX ")
+	}
 	if w := a.ws(); w != nil {
-		center = a.th.StatusBar.Foreground(lipgloss.Color(a.th.pal["dim"])).Render(w.statusContext())
+		if c := w.statusContext(); c != "" {
+			l += a.th.StatusBar.Foreground(lipgloss.Color(a.th.pal["dim"])).Render(" " + c + " ")
+		}
 	}
 	var right string
 	switch {
 	case a.toast != "":
 		st := a.th.StatusBar
+		icon := "✓ "
 		if a.toastErr {
-			st = st.Foreground(lipgloss.Color(a.th.pal["error"])).Bold(true)
+			st, icon = st.Foreground(lipgloss.Color(a.th.pal["error"])).Bold(true), "✗ "
 		} else {
 			st = st.Foreground(lipgloss.Color(a.th.pal["ok"]))
 		}
-		right = st.Render(" " + a.toast + " ")
+		right = st.Render(" " + icon + a.toast + " ")
 	default:
-		// hints give way to the context zone: drop pairs from the end until both fit (help stays)
+		// hints give way to the context: drop pairs from the end until both fit (help stays)
 		pairs := a.contextHintPairs()
 		for {
 			right = a.th.StatusBar.Render(" " + a.renderHints(pairs) + " ")
-			if len(pairs) <= 2 || a.w-width(l)-width(right) >= width(center)+4 {
+			if len(pairs) <= 2 || a.w-width(l)-width(right) >= 0 {
 				break
 			}
 			pairs = append(pairs[:len(pairs)-4], pairs[len(pairs)-2:]...)
@@ -562,10 +585,6 @@ func (a *App) statusLine() string {
 	if gap < 0 {
 		right = fit(right, max(0, a.w-width(l)))
 		gap = 0
-	}
-	if cw := width(center); cw > 0 && cw+4 <= gap { // centered between the two zones when it fits
-		pre := (gap - cw) / 2
-		return l + a.th.StatusBar.Render(strings.Repeat(" ", pre)) + center + a.th.StatusBar.Render(strings.Repeat(" ", gap-pre-cw)) + right
 	}
 	return l + a.th.StatusBar.Render(strings.Repeat(" ", gap)) + right
 }
