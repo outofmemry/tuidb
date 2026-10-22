@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/ast"
+	"github.com/dop251/goja/token"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	mdb "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -21,7 +23,13 @@ import (
 //go:embed shim.js
 var shimSrc string
 
-var shimProg = sync.OnceValues(func() (*goja.Program, error) { return goja.Compile("shim.js", shimSrc, false) })
+//go:embed values.js
+var valuesSrc string
+
+var (
+	shimProg   = sync.OnceValues(func() (*goja.Program, error) { return goja.Compile("shim.js", shimSrc, false) })
+	valuesProg = sync.OnceValues(func() (*goja.Program, error) { return goja.Compile("values.js", valuesSrc, false) })
+)
 
 // shortcut: toArray/forEach on a cursor stop at this many documents, raise it if people need more.
 const maxScript = 50000
@@ -30,7 +38,8 @@ type shell struct {
 	s    *session
 	ctx  context.Context
 	vm   *goja.Runtime
-	err  error // first error raised by a native op
+	fin  goja.Callable // __finish, captured before user code can replace it
+	err  error         // first error raised by a native op
 	aff  int64
 	out  []string
 	done chan struct{}
@@ -56,6 +65,10 @@ type finished struct {
 
 // newShell prepares a goja runtime bound to the session's current database; Close stops its watcher.
 func (s *session) newShell(ctx context.Context) (*shell, error) {
+	vals, err := valuesProg()
+	if err != nil {
+		return nil, err
+	}
 	prog, err := shimProg()
 	if err != nil {
 		return nil, err
@@ -66,9 +79,16 @@ func (s *session) newShell(ctx context.Context) (*shell, error) {
 	sh.vm.Set("__oid", func() string { return bson.NewObjectID().Hex() })
 	sh.vm.Set("__print", func(t string) { sh.out = append(sh.out, t) })
 	sh.vm.Set("__db", s.CurrentDatabase())
-	if _, err := sh.vm.RunProgram(prog); err != nil {
-		return nil, err
+	for _, p := range []*goja.Program{vals, prog} {
+		if _, err := sh.vm.RunProgram(p); err != nil {
+			return nil, err
+		}
 	}
+	fin, ok := goja.AssertFunction(sh.vm.Get("__finish"))
+	if !ok {
+		return nil, errors.New("shell: __finish is not callable")
+	}
+	sh.fin = fin
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -82,12 +102,15 @@ func (s *session) newShell(ctx context.Context) (*shell, error) {
 func (sh *shell) Close() { close(sh.done) }
 
 // eval runs JS and returns the __finish envelope for its completion value.
-func (sh *shell) eval(src string) (*finished, error) {
+func (sh *shell) eval(src string) (_ *finished, err error) {
+	defer func() { // a goja panic must fail this statement, not kill the TUI
+		if r := recover(); r != nil {
+			err = fmt.Errorf("shell: %v", r)
+		}
+	}()
 	v, err := sh.vm.RunString(src)
 	if err == nil {
-		var fn goja.Callable
-		fn, _ = goja.AssertFunction(sh.vm.Get("__finish"))
-		v, err = fn(goja.Undefined(), v)
+		v, err = sh.fin(goja.Undefined(), v)
 	}
 	if err != nil {
 		if sh.err != nil {
@@ -107,6 +130,110 @@ func (sh *shell) eval(src string) (*finished, error) {
 		return nil, fmt.Errorf("shell result: %w", err)
 	}
 	return &f, nil
+}
+
+// valueHelpers are the only functions shell-syntax documents may call (Date and RegExp also with new).
+var valueHelpers = map[string]bool{"ObjectId": true, "ISODate": true, "NumberLong": true, "NumberInt": true, "NumberDecimal": true,
+	"Date": true, "RegExp": true, "UUID": true, "BinData": true, "Timestamp": true, "MinKey": true, "MaxKey": true}
+
+// plainValue reports whether e is literal data: literals, object/array literals and value-helper calls.
+// Anything else (identifiers, member access, templates, functions, assignments...) is rejected.
+func plainValue(e ast.Expression) bool {
+	switch x := e.(type) {
+	case nil: // array hole
+		return true
+	case *ast.StringLiteral, *ast.NumberLiteral, *ast.BooleanLiteral, *ast.NullLiteral, *ast.RegExpLiteral:
+		return true
+	case *ast.UnaryExpression:
+		return !x.Postfix && (x.Operator == token.MINUS || x.Operator == token.PLUS) && plainValue(x.Operand)
+	case *ast.ArrayLiteral:
+		return allPlain(x.Value)
+	case *ast.ObjectLiteral:
+		for _, p := range x.Value {
+			k, ok := p.(*ast.PropertyKeyed)
+			if !ok || k.Computed || k.Kind != ast.PropertyKindValue || !plainValue(k.Value) {
+				return false
+			}
+		}
+		return true
+	case *ast.CallExpression:
+		return helperCall(x.Callee, x.ArgumentList)
+	case *ast.NewExpression:
+		return helperCall(x.Callee, x.ArgumentList)
+	}
+	return false
+}
+
+func allPlain(es []ast.Expression) bool {
+	for _, e := range es {
+		if !plainValue(e) {
+			return false
+		}
+	}
+	return true
+}
+
+func helperCall(callee ast.Expression, args []ast.Expression) bool {
+	id, ok := callee.(*ast.Identifier)
+	return ok && valueHelpers[id.Name.String()] && allPlain(args)
+}
+
+var errNotPlain = errors.New("not a plain document: only values and BSON helpers like ObjectId() are allowed here")
+
+// parseDoc reads a document written as extended JSON or in shell syntax ({status: 'paid', _id: ObjectId('...')}).
+// This text comes from the filter bar and must never have side effects, so shell syntax must be literal data
+// (checked on the parsed AST) and is evaluated in a fresh runtime that has only the BSON value helpers.
+func parseDoc(text string) (bson.D, error) {
+	var d bson.D
+	if err := bson.UnmarshalExtJSON([]byte(text), false, &d); err == nil {
+		return d, nil
+	}
+	if !db.MongoPlainDocument(text) { // cheap first check; the AST check below is the real gate
+		return nil, errNotPlain
+	}
+	prg, err := goja.Parse("document", "("+text+"\n)")
+	if err != nil {
+		return nil, err
+	}
+	if len(prg.Body) != 1 {
+		return nil, errNotPlain
+	}
+	st, ok := prg.Body[0].(*ast.ExpressionStatement)
+	if !ok || !plainValue(st.Expression) {
+		return nil, errNotPlain
+	}
+	if _, ok := st.Expression.(*ast.ObjectLiteral); !ok {
+		return nil, errors.New("not a document")
+	}
+	vals, err := valuesProg()
+	if err != nil {
+		return nil, err
+	}
+	p, err := goja.CompileAST(prg, false)
+	if err != nil {
+		return nil, err
+	}
+	vm := goja.New()
+	if _, err := vm.RunProgram(vals); err != nil {
+		return nil, err
+	}
+	ser, ok := goja.AssertFunction(vm.Get("__ser"))
+	if !ok {
+		return nil, errors.New("__ser is not callable")
+	}
+	v, err := vm.RunProgram(p)
+	if err == nil {
+		v, err = ser(goja.Undefined(), v)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if jv, ok := parseJSONValue(v.String()); ok {
+		if d, ok := jv.(bson.D); ok {
+			return d, nil
+		}
+	}
+	return nil, errors.New("not a document")
 }
 
 func (sh *shell) fail(err error) error {
@@ -257,7 +384,8 @@ func (sh *shell) dispatch(dbn, coll, op string, a argv) (any, string, error) {
 			return nil, "", err
 		}
 		var vals bson.A
-		return vals, "", c.Distinct(ctx, field, f).Decode(&vals)
+		err = c.Distinct(ctx, field, f).Decode(&vals)
+		return vals, "", err
 	case "insertOne":
 		d, err := a.doc(0)
 		if err != nil {
@@ -478,6 +606,17 @@ func (s *session) runCursor(ctx context.Context, sp curSpec, max int) ([]bson.D,
 	if sp.Kind == "aggregate" {
 		if arg0 == nil {
 			arg0 = bson.A{}
+		}
+		// cursor .sort/.skip become trailing stages (sort first, as in mongosh); the read loop applies the limit,
+		// so a pipeline ending in $out is untouched unless the user chained them
+		if pipe, ok := arg0.(bson.A); ok {
+			if len(sp.Sort) > 0 {
+				pipe = append(pipe, bson.D{{Key: "$sort", Value: sp.Sort}})
+			}
+			if sp.Skip > 0 {
+				pipe = append(pipe, bson.D{{Key: "$skip", Value: sp.Skip}})
+			}
+			arg0 = pipe
 		}
 		cur, err = c.Aggregate(ctx, arg0)
 	} else {

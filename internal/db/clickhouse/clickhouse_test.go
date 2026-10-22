@@ -184,3 +184,17 @@ func TestSearchableSkipsHeavyTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestUseRe(t *testing.T) {
+	for stmt, want := range map[string]string{"USE system": "system", " use `my db` ; ": "my db", `USE "x"`: "x", "use\ntuidb;": "tuidb"} {
+		m := useRe.FindStringSubmatch(stmt)
+		if m == nil || m[1]+m[2]+m[3] != want {
+			t.Errorf("%q: %q", stmt, m)
+		}
+	}
+	for _, stmt := range []string{"SELECT 1", "USE a b", "user_table", "USE"} {
+		if useRe.MatchString(stmt) {
+			t.Errorf("%q matched", stmt)
+		}
+	}
+}

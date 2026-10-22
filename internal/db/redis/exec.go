@@ -226,6 +226,10 @@ func render(res *db.Result, v any, limit int) {
 	case []any:
 		res.Columns = []db.ResultColumn{{Name: "index", Type: "int"}, {Name: "value"}}
 		for i, e := range x {
+			if limit > 0 && i == limit {
+				res.Truncated = true
+				break
+			}
 			res.Rows = append(res.Rows, []any{int64(i), replyCell(e)})
 		}
 		if len(x) == 0 {
@@ -233,18 +237,27 @@ func render(res *db.Result, v any, limit int) {
 		}
 	case map[any]any:
 		res.Columns = []db.ResultColumn{{Name: "key"}, {Name: "value"}}
-		for k, e := range x {
-			res.Rows = append(res.Rows, []any{fmt.Sprint(k), replyCell(e)})
+		type entry struct {
+			k string
+			v any
 		}
-		sort.Slice(res.Rows, func(i, j int) bool { return res.Rows[i][0].(string) < res.Rows[j][0].(string) })
+		es := make([]entry, 0, len(x))
+		for k, e := range x {
+			es = append(es, entry{fmt.Sprint(k), e})
+		}
+		sort.Slice(es, func(i, j int) bool { return es[i].k < es[j].k })
+		for i, e := range es {
+			if limit > 0 && i == limit {
+				res.Truncated = true
+				break
+			}
+			res.Rows = append(res.Rows, []any{e.k, replyCell(e.v)})
+		}
 		if len(x) == 0 {
 			res.Message = "(empty map)"
 		}
 	default:
 		res.Columns, res.Rows = []db.ResultColumn{{Name: "value"}}, [][]any{{replyCell(v)}}
-	}
-	if limit > 0 && len(res.Rows) > limit {
-		res.Rows, res.Truncated = res.Rows[:limit], true
 	}
 }
 

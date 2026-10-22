@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -153,6 +154,12 @@ func coerceTyped(s, typ string) (v any, ok bool, err error) {
 	case "objectId":
 		o, e := bson.ObjectIDFromHex(t)
 		return o, true, e
+	case "decimal":
+		d, e := bson.ParseDecimal128(t)
+		return d, true, e
+	case "binData": // the grid shows binary as \x<hex> (db.FormatValue); the subtype is not kept, so it is generic
+		b, e := hex.DecodeString(strings.TrimPrefix(t, `\x`))
+		return bson.Binary{Data: b}, true, e
 	}
 	return nil, false, nil
 }
@@ -177,6 +184,9 @@ func coerceSet(v any, typ, field string) (any, error) {
 		}
 		return rawJS(x), nil
 	case []byte:
+		if typ == "binData" {
+			return bson.Binary{Data: x}, nil
+		}
 		return string(x), nil
 	case string:
 		tv, ok, err := coerceTyped(x, typ)

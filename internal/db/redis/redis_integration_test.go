@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"tuidb/internal/config"
 	"tuidb/internal/db"
 )
@@ -22,13 +24,15 @@ func open(t *testing.T) *session {
 	}
 	url := os.Getenv("TUIDB_TEST_URL_REDIS")
 	if url == "" {
-		url = "redis://127.0.0.1:56379/0"
+		url = "redis://:tuidb@127.0.0.1:56379/0"
 	}
 	conn, err := config.ParseURL(url)
 	if err != nil {
 		t.Fatal(err)
 	}
-	conn.Password, _ = os.LookupEnv("TUIDB_TEST_PASSWORD_REDIS")
+	if pw, ok := os.LookupEnv("TUIDB_TEST_PASSWORD_REDIS"); ok {
+		conn.Password = pw
+	}
 	sess, err := driver{}.Open(context.Background(), conn, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -500,4 +504,113 @@ func TestExecSelectSwitchesDatabase(t *testing.T) {
 	}
 	s.UseDatabase(context.Background(), "1")
 	s.c().Del(context.Background(), k)
+}
+
+// Filtered loads report the maxLoad cap (P1-58, P1-59) and hash/set paging is bounded (P1-57).
+func TestBoundedLoads(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	old := maxLoad
+	maxLoad = 10
+	t.Cleanup(func() { maxLoad = old })
+	big := tmpKey(t, s, "hash")
+	small := big + "2"
+	for i := 0; i < 15; i++ {
+		s.c().HSet(ctx, big, "f"+strconv.Itoa(i), "v")
+		if i < 10 {
+			s.c().HSet(ctx, small, "f"+strconv.Itoa(i), "v")
+		}
+	}
+	f := db.FilterSet{Filters: []db.Filter{{Column: "field", Op: "Has prefix", Value: "f", Enabled: true}}}
+	for key, capped := range map[string]bool{big: true, small: false} {
+		r, err := s.Rows(ctx, db.RowQuery{ObjRef: ref(key), Filters: f})
+		if err != nil || len(r.Rows) != 10 || r.Truncated != capped {
+			t.Errorf("%s filtered rows %d truncated %v err %v", key, len(r.Rows), r.Truncated, err)
+		}
+		if n, err := s.Count(ctx, db.RowQuery{ObjRef: ref(key), Filters: f}, false); err != nil || n != (db.Count{N: 10, Exact: !capped}) {
+			t.Errorf("%s filtered count %v %v", key, n, err)
+		}
+	}
+	seen := map[any]bool{}
+	for off := 0; off <= 10; off += 5 {
+		for _, r := range rowsOf(t, s, db.RowQuery{ObjRef: ref(big), Offset: off, Limit: 5}) {
+			seen[r[0]] = true
+		}
+	}
+	if len(seen) != 15 {
+		t.Errorf("pages covered %d fields", len(seen))
+	}
+	set := tmpKey(t, s, "set")
+	s.c().SAdd(ctx, set, "a", "b", "c")
+	for _, key := range []string{big, set} {
+		if _, err := s.Rows(ctx, db.RowQuery{ObjRef: ref(key), Offset: 11, Limit: 5}); err == nil || !strings.Contains(err.Error(), "too deep") {
+			t.Errorf("%s deep offset: %v", key, err)
+		}
+	}
+}
+
+// Stream pages continue from the last-seen ID (P1-62).
+func TestStreamPaging(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	key := tmpKey(t, s, "stream")
+	var ids []string
+	for i := 0; i < 25; i++ {
+		ids = append(ids, s.c().XAdd(ctx, &goredis.XAddArgs{Stream: key, Values: []string{"n", strconv.Itoa(i)}}).Val())
+	}
+	page := func(off, n int) []string {
+		var out []string
+		for _, r := range rowsOf(t, s, db.RowQuery{ObjRef: ref(key), Offset: off, Limit: n}) {
+			out = append(out, r[0].(string))
+		}
+		return out
+	}
+	for off := 0; off < 25; off += 10 {
+		if got := page(off, 10); !reflect.DeepEqual(got, ids[off:min(off+10, 25)]) {
+			t.Errorf("page %d = %v", off, got)
+		}
+		if off == 10 && s.marks[key][1] != (streamMark{20, "(" + ids[19]}) {
+			t.Errorf("marks %v", s.marks[key])
+		}
+	}
+	if got := page(7, 3); !reflect.DeepEqual(got, ids[7:10]) { // backwards jump skips from the head
+		t.Errorf("jump = %v", got)
+	}
+	if got := page(23, 10); !reflect.DeepEqual(got, ids[23:]) {
+		t.Errorf("tail = %v", got)
+	}
+	if got := page(30, 10); got != nil {
+		t.Errorf("past end = %v", got)
+	}
+}
+
+// Apply refuses keys whose type changed since planning and reports partial runtime failures (P1-63).
+func TestApplyPreconditions(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	h, other := tmpKey(t, s, "h"), tmpKey(t, s, "o")
+	s.c().HSet(ctx, h, "a", "1")
+	stmts, err := s.Plan([]db.Change{
+		{Kind: db.Insert, ObjRef: ref(other), Set: kv("value", "x")},
+		{Kind: db.Insert, ObjRef: ref(h), Set: []db.KeyVal{{Col: "field", Val: "b"}, {Col: "value", Val: "2"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.c().Del(ctx, h)
+	s.c().Set(ctx, h, "now a string", 0)
+	if err := s.Apply(ctx, stmts); err == nil || !strings.Contains(err.Error(), "nothing was applied") {
+		t.Errorf("changed type: %v", err)
+	}
+	if n := s.c().Exists(ctx, other).Val(); n != 0 {
+		t.Error("statement applied despite failed precondition")
+	}
+	a, b, c := tmpKey(t, s, "a"), tmpKey(t, s, "b"), tmpKey(t, s, "c")
+	err = s.Apply(ctx, []db.Statement{{Text: "SET " + a + " 1"}, {Text: "LSET " + b + " 0 x"}, {Text: "SET " + c + " 3"}})
+	if err == nil || !strings.Contains(err.Error(), "statement 2 ") || !strings.Contains(err.Error(), "statements 1, 3 were applied") {
+		t.Errorf("partial failure: %v", err)
+	}
+	if s.c().Get(ctx, a).Val() != "1" || s.c().Get(ctx, c).Val() != "3" {
+		t.Error("applied statements missing")
+	}
 }

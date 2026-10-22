@@ -211,6 +211,7 @@ func TestIntegrationRows(t *testing.T) {
 		{f("balance", "=", "5"), 1},
 		{f(db.AnyColumn, "Contains", "oslo"), 0}, // address is an object, not a string field
 		{f(db.AnyColumn, "Contains", "example.com"), 2},
+		{f(db.AnyColumn, "Not contains", "example.com"), 1}, // no column contains it: only _id 3
 		{f(db.RawColumn, "", `{"_id": {"$gt": 1}}`), 2},
 		{f(db.RawColumn, "", `{_id: 2, name: /^bob/i}`), 1},
 	}
@@ -280,7 +281,7 @@ func TestIntegrationExec(t *testing.T) {
 		t.Errorf("count %+v", r)
 	}
 	r = exec(t, s, ctx, `db.orders.distinct("status")`, 0)
-	if len(r.Rows) != 2 {
+	if len(r.Rows) != 2 || r.Rows[0][0] != "new" || r.Rows[1][0] != "paid" {
 		t.Errorf("distinct %+v", r)
 	}
 	r = exec(t, s, ctx, `db.getCollection('customers').find({_id: NumberInt(1)}).count()`, 0)
@@ -481,6 +482,103 @@ func TestIntegrationWritesAndPlan(t *testing.T) {
 		if o.Name == clone {
 			t.Error("drop did not remove collection")
 		}
+	}
+}
+
+// TestIntegrationRawFilterIsInert proves that filter-bar text cannot run shell code (P1-44).
+func TestIntegrationRawFilterIsInert(t *testing.T) {
+	s, ctx := open(t)
+	name := tempColl(t, s, ctx)
+	exec(t, s, ctx, `db.`+name+`.insertMany([{_id: 1, status: "paid", d: ISODate("2024-01-01")}, {_id: 2, status: "new"}])`, 0)
+	ref := db.ObjRef{Name: name}
+	raw := func(v string) db.RowQuery {
+		return db.RowQuery{ObjRef: ref, Filters: db.FilterSet{Filters: []db.Filter{{Column: db.RawColumn, Value: v, Enabled: true}}}}
+	}
+	for _, b := range []string{"{a: db." + name + ".drop()}", "db.dropDatabase`x`", "new db." + name + ".drop", "{a: (function(){return 1})()}", `{$where: "1"}`,
+		"{a: db." + name + ".deleteMany({})}", "{a: `${db." + name + ".drop()}`}"} {
+		if _, err := s.Rows(ctx, raw(b)); err == nil {
+			t.Errorf("%s: accepted", b)
+		}
+		if _, err := s.Count(ctx, raw(b), false); err == nil {
+			t.Errorf("count %s: accepted", b)
+		}
+	}
+	if n, _ := s.Count(ctx, db.RowQuery{ObjRef: ref}, false); n.N != 2 {
+		t.Errorf("documents changed: %d", n.N)
+	}
+	if names, _ := s.client.Database("tuidb").ListCollectionNames(ctx, bson.D{}); !contains(names, "customers") || !contains(names, name) {
+		t.Errorf("collections changed: %v", names)
+	}
+	r, err := s.Rows(ctx, raw(`{status: 'paid', _id: {$ne: ObjectId('507f1f77bcf86cd799439011')}, d: ISODate('2024-01-01')}`))
+	if err != nil || len(r.Rows) != 1 {
+		t.Errorf("relaxed filter: %+v %v", r, err)
+	}
+	if r, err := s.Rows(ctx, raw(`{status: 'paid', _id: ObjectId('507f1f77bcf86cd799439011'), d: ISODate('2024-01-01')}`)); err != nil || len(r.Rows) != 0 {
+		t.Errorf("relaxed filter with ObjectId: %+v %v", r, err)
+	}
+}
+
+func TestIntegrationCursorsAndTypes(t *testing.T) {
+	s, ctx := open(t)
+	name := tempColl(t, s, ctx)
+	exec(t, s, ctx, `db.`+name+`.insertMany([{_id: 1, n: 1}, {_id: 2, n: 5}, {_id: 3, n: 3}, {_id: 4, n: 2}, {_id: 5, n: 4}])`, 0)
+
+	// .sort()/.skip() on an aggregate cursor
+	r := exec(t, s, ctx, `db.`+name+`.aggregate([{$match: {}}]).skip(1).sort({n: -1}).limit(2)`, 0)
+	if len(r.Rows) != 2 || r.Rows[0][col(r, "n")] != int64(4) || r.Rows[1][col(r, "n")] != int64(3) {
+		t.Errorf("aggregate sort/skip %+v", r.Rows)
+	}
+
+	// raw find command: later batches are read, and no server cursor is left open
+	cmd := `{"find": "` + name + `", "sort": {"_id": 1}, "batchSize": 2}`
+	if r := exec(t, s, ctx, cmd, 0); len(r.Rows) != 5 || r.Truncated {
+		t.Errorf("all batches %d %v", len(r.Rows), r.Truncated)
+	}
+	if r := exec(t, s, ctx, cmd, 3); len(r.Rows) != 3 || !r.Truncated || r.Rows[2][0] != int64(3) {
+		t.Errorf("limited %+v", r)
+	}
+	if r := exec(t, s, ctx, cmd, 5); len(r.Rows) != 5 || r.Truncated {
+		t.Errorf("exact limit %d %v", len(r.Rows), r.Truncated)
+	}
+	if r := exec(t, s, ctx, cmd, 1); len(r.Rows) != 1 || !r.Truncated { // first batch suffices: the cursor must be killed
+		t.Errorf("limit 1 %+v", r)
+	}
+	cur, err := s.client.Database("admin").Aggregate(ctx, bson.A{
+		bson.D{{Key: "$currentOp", Value: bson.D{{Key: "idleCursors", Value: true}}}},
+		bson.D{{Key: "$match", Value: bson.D{{Key: "cursor.originatingCommand.find", Value: name}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []bson.D
+	if err := cur.All(ctx, &left); err != nil || len(left) != 0 {
+		t.Errorf("open cursors %v %v", left, err)
+	}
+
+	// Decimal128 and Binary cells round-trip through a grid edit
+	exec(t, s, ctx, `db.`+name+`.insertOne({_id: 9, dec: NumberDecimal("1.10"), bin: BinData(0, "AAE=")})`, 0)
+	ref := db.ObjRef{Name: name}
+	if _, err := s.Columns(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Plan([]db.Change{{Kind: db.Update, ObjRef: ref, Key: []db.KeyVal{{Col: "_id", Val: "9"}},
+		Set: []db.KeyVal{{Col: "dec", Val: "12345678901234567890.123456789"}, {Col: "bin", Val: `\x0203ff`}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Apply(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	var got bson.D
+	if err := s.client.Database("tuidb").Collection(name).FindOne(ctx, bson.D{{Key: "_id", Value: 9}}).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	dec, _ := lookup(got, "dec")
+	bin, _ := lookup(got, "bin")
+	if d, ok := dec.(bson.Decimal128); !ok || d.String() != "12345678901234567890.123456789" {
+		t.Errorf("decimal %#v", dec)
+	}
+	if b, ok := bin.(bson.Binary); !ok || string(b.Data) != "\x02\x03\xff" {
+		t.Errorf("binary %#v", bin)
 	}
 }
 

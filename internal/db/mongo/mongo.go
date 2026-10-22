@@ -368,28 +368,39 @@ func (s *session) Indexes(ctx context.Context, ref db.ObjRef) ([]db.Index, error
 	}
 	var out []db.Index
 	for _, d := range docs {
-		name, _ := lookup(d, "name")
-		key, _ := lookup(d, "key")
-		ix := db.Index{Name: fmt.Sprint(name), Columns: keysOf(key), Algorithm: "btree"}
-		ix.Primary = ix.Name == "_id_"
-		if u, _ := lookup(d, "unique"); u == true {
-			ix.Unique = true
+		if ix, ok := indexOf(d); ok {
+			out = append(out, ix)
 		}
-		for _, e := range key.(bson.D) {
-			switch e.Value {
-			case "text", "2dsphere", "2d", "hashed":
-				ix.Algorithm = e.Value.(string)
-			}
-		}
-		if w, ok := lookup(d, "weights"); ok && ix.Algorithm == "text" {
-			ix.Columns = keysOf(w)
-		}
-		if p, ok := lookup(d, "partialFilterExpression"); ok {
-			ix.Condition = extJSON(p)
-		}
-		out = append(out, ix)
 	}
 	return out, nil
+}
+
+// indexOf converts a listIndexes spec; ok is false for a spec without a key document.
+func indexOf(d bson.D) (db.Index, bool) {
+	name, _ := lookup(d, "name")
+	v, _ := lookup(d, "key")
+	key, ok := v.(bson.D)
+	if !ok {
+		return db.Index{}, false
+	}
+	ix := db.Index{Name: fmt.Sprint(name), Columns: keysOf(key), Algorithm: "btree"}
+	ix.Primary = ix.Name == "_id_"
+	if u, _ := lookup(d, "unique"); u == true {
+		ix.Unique = true
+	}
+	for _, e := range key {
+		switch e.Value {
+		case "text", "2dsphere", "2d", "hashed":
+			ix.Algorithm = e.Value.(string)
+		}
+	}
+	if w, ok := lookup(d, "weights"); ok && ix.Algorithm == "text" {
+		ix.Columns = keysOf(w)
+	}
+	if p, ok := lookup(d, "partialFilterExpression"); ok {
+		ix.Condition = extJSON(p)
+	}
+	return ix, true
 }
 
 // nameRef renders db.<coll> or db.getCollection("<coll>") when the name is not a plain identifier.
@@ -467,30 +478,34 @@ func (s *session) Script(ctx context.Context, kind db.ScriptKind, ref db.ObjRef)
 	return "", fmt.Errorf("unknown script kind %q", kind)
 }
 
-func (s *session) rawFilter(ctx context.Context, text string) (bson.D, error) {
-	var d bson.D
-	if err := bson.UnmarshalExtJSON([]byte(text), false, &d); err == nil {
-		return d, nil
-	}
-	// Relaxed shell syntax ({status: 'paid', _id: ObjectId('...')}) is evaluated, so refuse anything
-	// that could run code: this text comes from the filter bar and must never have side effects.
-	if !db.MongoPlainDocument(text) {
-		return nil, errors.New("not a plain document: only values and BSON helpers like ObjectId() are allowed here")
-	}
-	sh, err := s.newShell(ctx)
+// rawFilter parses the filter bar's raw document; operators that run JavaScript on the server are refused.
+func rawFilter(text string) (bson.D, error) {
+	d, err := parseDoc(text)
 	if err != nil {
 		return nil, err
 	}
-	defer sh.Close()
-	f, err := sh.eval("(" + text + ")")
-	if err != nil {
-		return nil, err
-	}
-	d, ok := f.V.(bson.D)
-	if !ok {
-		return nil, errors.New("not a document")
+	if serverJS(d) {
+		return nil, errors.New("$where, $function and $accumulator are not allowed in a filter")
 	}
 	return d, nil
+}
+
+func serverJS(v any) bool {
+	switch x := v.(type) {
+	case bson.D:
+		for _, e := range x {
+			if e.Key == "$where" || e.Key == "$function" || e.Key == "$accumulator" || serverJS(e.Value) {
+				return true
+			}
+		}
+	case bson.A:
+		for _, e := range x {
+			if serverJS(e) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
@@ -498,7 +513,7 @@ func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	filter, err := buildFilter(q.Filters, ci, func(t string) (bson.D, error) { return s.rawFilter(ctx, t) })
+	filter, err := buildFilter(q.Filters, ci, rawFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -542,7 +557,7 @@ func (s *session) Count(ctx context.Context, q db.RowQuery, estimate bool) (db.C
 	if err != nil {
 		return db.Count{}, err
 	}
-	filter, err := buildFilter(q.Filters, ci, func(t string) (bson.D, error) { return s.rawFilter(ctx, t) })
+	filter, err := buildFilter(q.Filters, ci, rawFilter)
 	if err != nil {
 		return db.Count{}, err
 	}
@@ -571,7 +586,7 @@ func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result,
 }
 
 func (s *session) execCommand(ctx context.Context, text string, limit int) (*db.Result, error) {
-	cmd, err := s.rawFilter(ctx, strings.TrimSuffix(text, ";"))
+	cmd, err := parseDoc(strings.TrimSuffix(text, ";"))
 	if err != nil {
 		return nil, fmt.Errorf("command: %w", err)
 	}
@@ -580,30 +595,47 @@ func (s *session) execCommand(ctx context.Context, text string, limit int) (*db.
 		return nil, err
 	}
 	docs := []bson.D{out}
-	trunc := false
 	if fb, ok := lookup(out, "cursor.firstBatch"); ok {
-		docs = nil
-		arr, _ := fb.(bson.A)
-		for _, e := range arr {
-			if d, ok := e.(bson.D); ok {
-				docs = append(docs, d)
+		docs = batch(nil, fb)
+		// a non-zero cursor id means the server has more batches: read them up to one past the limit,
+		// then kill the cursor so it does not stay open on the server
+		id, _ := lookup(out, "cursor.id")
+		ns, _ := lookup(out, "cursor.ns")
+		dbn, coll, _ := strings.Cut(fmt.Sprint(ns), ".")
+		d := s.client.Database(dbn)
+		cid := toInt(id)
+		for cid != 0 && (limit <= 0 || len(docs) <= limit) {
+			var more bson.D
+			if err := d.RunCommand(ctx, bson.D{{Key: "getMore", Value: cid}, {Key: "collection", Value: coll}}).Decode(&more); err != nil {
+				_ = d.RunCommand(context.WithoutCancel(ctx), bson.D{{Key: "killCursors", Value: coll}, {Key: "cursors", Value: bson.A{cid}}}).Err()
+				return nil, err
 			}
+			nb, _ := lookup(more, "cursor.nextBatch")
+			docs = batch(docs, nb)
+			id, _ = lookup(more, "cursor.id")
+			cid = toInt(id)
 		}
-		if limit > 0 && len(docs) > limit {
-			docs, trunc = docs[:limit], true
+		if cid != 0 {
+			_ = d.RunCommand(context.WithoutCancel(ctx), bson.D{{Key: "killCursors", Value: coll}, {Key: "cursors", Value: bson.A{cid}}}).Err()
 		}
 	}
-	if id, ok := lookup(out, "cursor.id"); ok { // a non-zero cursor id means the server has more batches
-		switch v := id.(type) {
-		case int64:
-			trunc = trunc || v != 0
-		case int32:
-			trunc = trunc || v != 0
-		}
+	trunc := limit > 0 && len(docs) > limit
+	if trunc {
+		docs = docs[:limit]
 	}
 	r := render(docs, nil, nil)
 	r.Truncated = trunc
 	return r, nil
+}
+
+func batch(docs []bson.D, v any) []bson.D {
+	arr, _ := v.(bson.A)
+	for _, e := range arr {
+		if d, ok := e.(bson.D); ok {
+			docs = append(docs, d)
+		}
+	}
+	return docs
 }
 
 func (s *session) collectionExists(name string) (bool, error) {

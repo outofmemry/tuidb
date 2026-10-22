@@ -23,10 +23,11 @@ import (
 	"tuidb/internal/db"
 )
 
-const (
-	maxKeys = 10000  // Objects stops listing here
-	maxLoad = 100000 // shortcut: filtering/sorting loads at most this many elements of one key
-)
+const maxKeys = 10000 // Objects stops listing here
+
+// shortcut: filtering/sorting loads at most this many elements of one key, and hash/set pages
+// cannot start deeper than this; a var so tests can lower it.
+var maxLoad = 100000
 
 func init() { db.Register(driver{}) }
 
@@ -192,6 +193,9 @@ type session struct {
 	opt  goredis.Options
 	db   int
 	info string
+	// marks remembers, per stream key, where the last pages started and ended so the next page
+	// continues from an entry ID instead of re-reading the stream from its head.
+	marks map[string][2]streamMark
 }
 
 func (s *session) c() *goredis.Client {
@@ -245,7 +249,7 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 	}
 	s.mu.Lock()
 	old := s.cl
-	s.cl, s.db = cl, n
+	s.cl, s.db, s.marks = cl, n, nil
 	s.mu.Unlock()
 	return old.Close()
 }

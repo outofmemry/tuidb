@@ -447,3 +447,41 @@ func TestProcesses(t *testing.T) {
 		t.Error("killed query still running")
 	}
 }
+
+// USE switches the whole session (P1-60), and overlapping switches keep opts, conn and cur paired (P1-61).
+func TestExecUseSwitchesSession(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	r, err := s.Exec(ctx, "USE system", 0)
+	if err != nil || r.Message != "Database changed" || s.CurrentDatabase() != "system" {
+		t.Fatalf("use: %+v %v current %s", r, err, s.CurrentDatabase())
+	}
+	for i := 0; i < 5; i++ { // every pooled connection now resolves unqualified names in system
+		r, err := s.Exec(ctx, "SELECT currentDatabase()", 0)
+		if err != nil || r.Rows[0][0] != "system" {
+			t.Fatalf("currentDatabase %v %v", r, err)
+		}
+	}
+	if _, err := s.Exec(ctx, "USE tuidb_test_missing_db", 0); err == nil || s.CurrentDatabase() != "system" {
+		t.Errorf("bad USE: %v current %s", err, s.CurrentDatabase())
+	}
+	done := make(chan error, 2)
+	for _, name := range []string{"tuidb", "system"} {
+		go func() { done <- s.UseDatabase(ctx, name) }()
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	cs := s.(*session)
+	cs.mu.RLock()
+	opt, cur := cs.opts.Auth.Database, cs.cur
+	cs.mu.RUnlock()
+	if opt != cur {
+		t.Errorf("opts database %q, current %q", opt, cur)
+	}
+	if r, err := s.Exec(ctx, "SELECT currentDatabase()", 0); err != nil || r.Rows[0][0] != cur {
+		t.Errorf("conn database %v %v, current %q", r, err, cur)
+	}
+}

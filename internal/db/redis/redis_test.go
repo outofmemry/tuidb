@@ -95,6 +95,23 @@ func TestRender(t *testing.T) {
 	if r.Rows[0][0] != "a" || r.Rows[1][1] != "2" {
 		t.Errorf("map: %+v", r)
 	}
+	// rows past the limit are never built (P1-56)
+	big := make([]any, 10000)
+	bigMap := map[any]any{}
+	for i := range big {
+		big[i] = []any{"nested", i}
+		bigMap[i] = "v"
+	}
+	r = db.Result{}
+	render(&r, big, 5)
+	if len(r.Rows) != 5 || cap(r.Rows) > 16 || !r.Truncated {
+		t.Errorf("big array: len %d cap %d truncated %v", len(r.Rows), cap(r.Rows), r.Truncated)
+	}
+	r = db.Result{}
+	render(&r, bigMap, 5)
+	if len(r.Rows) != 5 || cap(r.Rows) > 16 || !r.Truncated || r.Rows[0][0] != "0" {
+		t.Errorf("big map: len %d cap %d truncated %v %v", len(r.Rows), cap(r.Rows), r.Truncated, r.Rows[0])
+	}
 	r = db.Result{}
 	render(&r, int64(7), 0)
 	if !r.HasRows || r.Rows[0][0] != int64(7) {

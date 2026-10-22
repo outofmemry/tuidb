@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dop251/goja"
+	"github.com/dop251/goja/ast"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
 	"tuidb/internal/config"
@@ -66,6 +68,11 @@ func TestCoerceSet(t *testing.T) {
 		{db.Null, "string", nil, false},
 		{db.Empty, "int32", "", false},
 		{nil, "string", nil, false},
+		{"12345678901234567890.123456789", "decimal", mustDec("12345678901234567890.123456789"), false},
+		{"x", "decimal", nil, true},
+		{`\x0102ff`, "binData", bson.Binary{Data: []byte{1, 2, 0xff}}, false},
+		{[]byte{7}, "binData", bson.Binary{Data: []byte{7}}, false},
+		{"zz", "binData", nil, true},
 	}
 	for _, c := range cases {
 		got, err := coerceSet(c.v, c.typ, "f")
@@ -80,6 +87,14 @@ func TestCoerceSet(t *testing.T) {
 	if v, _ := coerceSet(db.Expr("NOW()"), "date", "f"); v != rawJS("new Date()") {
 		t.Errorf("NOW(): %v", v)
 	}
+}
+
+func mustDec(s string) bson.Decimal128 {
+	d, err := bson.ParseDecimal128(s)
+	if err != nil {
+		panic(err)
+	}
+	return d
 }
 
 func TestLikeRegex(t *testing.T) {
@@ -115,6 +130,10 @@ func TestBuildFilter(t *testing.T) {
 			bson.D{{Key: "_id", Value: bson.D{{Key: "$eq", Value: int32(1)}}}},
 			bson.D{{Key: "name", Value: bson.D{{Key: "$eq", Value: "1"}}}},
 			bson.D{{Key: "age", Value: bson.D{{Key: "$eq", Value: int32(1)}}}}}}}},
+		{"any negated", db.FilterSet{Filters: []db.Filter{f(db.AnyColumn, "<>", "1")}}, bson.D{{Key: "$and", Value: bson.A{
+			bson.D{{Key: "_id", Value: bson.D{{Key: "$ne", Value: int32(1)}}}},
+			bson.D{{Key: "name", Value: bson.D{{Key: "$ne", Value: "1"}}}},
+			bson.D{{Key: "age", Value: bson.D{{Key: "$ne", Value: int32(1)}}}}}}}},
 	}
 	for _, c := range cases {
 		got, err := buildFilter(c.fs, ci, raw)
@@ -177,11 +196,74 @@ func TestShellValues(t *testing.T) {
 	if r, ok := arr[4].(bson.Regex); !ok || r.Pattern != "ab" || r.Options != "i" {
 		t.Errorf("regex: %#v", arr[4])
 	}
+	// replacing the shim's globals must not redirect it or crash the process (P1-45)
+	if f, err := sh.eval(`__finish = null; __print = null; delete __op; print("hi"); 7`); err != nil || f.V != int32(7) || len(sh.out) != 1 || sh.out[0] != "hi" {
+		t.Errorf("replaced globals: %+v %v %v", f, err, sh.out)
+	}
 	if _, err := sh.eval(`db.`); err == nil {
 		t.Error("syntax error expected")
 	}
 	if _, err := sh.eval(`foo.bar`); err == nil {
 		t.Error("reference error expected")
+	}
+}
+
+func TestShellEvalRecovers(t *testing.T) {
+	sh, err := (&session{cur: "x"}).newShell(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sh.Close()
+	sh.fin = nil // a nil callable panics when called
+	if _, err := sh.eval(`1`); err == nil {
+		t.Error("panic must become an error")
+	}
+}
+
+func TestParseDoc(t *testing.T) {
+	d, err := rawFilter(`{status: 'paid', _id: ObjectId('507f1f77bcf86cd799439011'), d: ISODate('2024-01-01'), n: -NumberLong(5), ` +
+		`b: BinData(0, "AAE="), ts: Timestamp(1, 2), lo: MinKey(), hi: MaxKey(), nd: new Date('2024-01-01'), dec: NumberDecimal("1.5"), r: /x/i, a: [1, , null]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"status": "string", "_id": "objectId", "d": "date", "b": "binData", "ts": "timestamp", "nd": "date", "dec": "decimal", "a": "array"}
+	for _, e := range d {
+		if w, ok := want[e.Key]; ok && typeName(e.Value) != w {
+			t.Errorf("%s: %T, want %s", e.Key, e.Value, w)
+		}
+	}
+	if _, ok := d[len(d)-2].Value.(bson.Regex); !ok || len(d) != 12 {
+		t.Errorf("doc %#v", d)
+	}
+	bad := []string{"{a: db.tuidb_test_x.drop()}", "db.dropDatabase`x`", "new db.c.drop", "{a: (function(){return 1})()}", `{$where: "1"}`,
+		`{"$where": "1"}`, `{a: {$expr: {$function: {body: "1", args: [], lang: "js"}}}}`, "{a: `x`}", "{a: db.x}", "{a: x = 1}", "{a: (1, 2)}",
+		"{a: () => 1}", "{a: x++}", "{[k]: 1}", "{a}", "{...o}", "{get a() { return 1 }}", "{a: ObjectId.constructor('x')()}", "{a: 1}); db.c.drop(", "[1]"}
+	for _, b := range bad {
+		if d, err := rawFilter(b); err == nil {
+			t.Errorf("%s: accepted as %v", b, d)
+		}
+	}
+	// the AST check alone rejects the code, independent of db.MongoPlainDocument
+	for i, b := range bad {
+		if i >= 4 && i < 7 || i == len(bad)-1 { // server-side JS and arrays are refused after parsing
+			continue
+		}
+		if prg, err := goja.Parse("", "("+b+"\n)"); err == nil && len(prg.Body) == 1 && plainValue(prg.Body[0].(*ast.ExpressionStatement).Expression) {
+			t.Errorf("%s: AST check accepted it", b)
+		}
+	}
+}
+
+func TestIndexOf(t *testing.T) {
+	if _, ok := indexOf(bson.D{{Key: "name", Value: "x"}}); ok {
+		t.Error("spec without key must be skipped")
+	}
+	if _, ok := indexOf(bson.D{{Key: "name", Value: "x"}, {Key: "key", Value: "bad"}}); ok {
+		t.Error("spec with a non-document key must be skipped")
+	}
+	ix, ok := indexOf(bson.D{{Key: "name", Value: "t"}, {Key: "key", Value: bson.D{{Key: "a", Value: "hashed"}}}, {Key: "unique", Value: true}})
+	if !ok || ix.Algorithm != "hashed" || !ix.Unique || ix.Columns[0] != "a" {
+		t.Errorf("index %+v", ix)
 	}
 }
 

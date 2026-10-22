@@ -1,25 +1,12 @@
-// Mongo-shell shim evaluated by goja. Natives: __op, __run, __oid, __print, __db.
+// Mongo-shell shim evaluated by goja after values.js. Natives: __op, __run, __oid, __print, __db.
 // Values cross into Go as extended JSON, so BSON-only types are plain {"$..."} objects.
 (function (g) {
-  function ser(v, ind) {
-    return JSON.stringify(v, function (k, x) {
-      var raw = this[k];
-      if (raw instanceof Date) return isNaN(raw.getTime()) ? null : { "$date": raw.toISOString() };
-      if (raw instanceof RegExp) return { "$regularExpression": { pattern: raw.source, options: raw.flags.replace(/[^imsx]/g, "") } };
-      return x;
-    }, ind);
-  }
+  // captured before user code runs, so reassigning the globals cannot redirect the shim
+  var ser = g.__ser, opN = __op, runN = __run, printN = __print;
   function hasOwn(o, p) { return Object.prototype.hasOwnProperty.call(o, p); }
 
-  g.ObjectId = function (h) { return { "$oid": h === undefined ? __oid() : String(h) }; };
-  g.ISODate = function (s) { return s === undefined ? new Date() : new Date(s); };
-  g.NumberLong = function (n) { return { "$numberLong": String(n) }; };
-  g.NumberInt = function (n) { return { "$numberInt": String(Math.trunc(Number(n))) }; };
-  g.NumberDecimal = function (s) { return { "$numberDecimal": String(s) }; };
-  g.UUID = function (s) { return { "$uuid": String(s) }; };
-
   function call(dbn, coll, op, args) {
-    var r = JSON.parse(__op(dbn, coll, op, ser({ a: args })));
+    var r = JSON.parse(opN(dbn, coll, op, ser({ a: args })));
     var v = r.v;
     if (r.m && v !== null && typeof v === "object") Object.defineProperty(v, "__msg", { value: r.m });
     return v;
@@ -29,7 +16,7 @@
   function Cursor(s) {
     var buf = null, i = 0, self = this;
     Object.defineProperty(this, "_s", { value: s });
-    function all() { if (!buf) buf = JSON.parse(__run(ser(s))).v; return buf; }
+    function all() { if (!buf) buf = JSON.parse(runN(ser(s))).v; return buf; }
     var m = {
       sort: function (x) { s.sort = x; return self; },
       limit: function (n) { s.limit = Number(n); return self; },
@@ -93,9 +80,9 @@
   g.db = mkDB(__db);
 
   g.print = function () {
-    __print(Array.prototype.map.call(arguments, function (x) { return typeof x === "string" ? x : ser(x); }).join(" "));
+    printN(Array.prototype.map.call(arguments, function (x) { return typeof x === "string" ? x : ser(x); }).join(" "));
   };
-  g.printjson = function (x) { __print(ser(x, 2)); };
+  g.printjson = function (x) { printN(ser(x, 2)); };
   g.__named = function (arr, col) { return arr.map(function (x) { var o = {}; o[col] = x; return o; }); };
 
   g.__finish = function (v) {

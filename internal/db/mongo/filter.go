@@ -148,6 +148,12 @@ func buildFilter(fs db.FilterSet, ci *colInfo, rawDoc func(string) (bson.D, erro
 			}
 			parts = append(parts, d)
 		case db.AnyColumn:
+			// a negated operator must hold for every column ("no column contains x"), the others for any
+			join := "$or"
+			switch f.Op {
+			case "Not contains", "<>", "NOT IN", "NOT BETWEEN":
+				join = "$and"
+			}
 			var ors bson.A
 			for _, n := range ci.names {
 				c, err := condition(n, f, ci.types[n])
@@ -159,7 +165,7 @@ func buildFilter(fs db.FilterSet, ci *colInfo, rawDoc func(string) (bson.D, erro
 			if len(ors) == 0 {
 				return nil, fmt.Errorf("filter on any column needs a non-empty collection")
 			}
-			parts = append(parts, bson.D{{Key: "$or", Value: ors}})
+			parts = append(parts, bson.D{{Key: join, Value: ors}})
 		default:
 			c, err := condition(f.Column, f, ci.types[f.Column])
 			if err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -373,12 +374,65 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 		}
 		all[i] = args
 	}
-	pipe := s.c().TxPipeline()
+	// MULTI/EXEC only aborts on queue-time errors, so check each key still has the type the plan
+	// assumed, under WATCH so a change after the check aborts EXEC.
+	want := map[string]string{}
+	var keys []string
 	for _, a := range all {
-		pipe.Do(ctx, toAny(a)...)
+		if len(a) < 2 {
+			continue
+		}
+		if _, ok := want[a[1]]; !ok {
+			want[a[1]] = cmdType[strings.ToUpper(a[0])] // first statement's assumption wins
+			keys = append(keys, a[1])
+		}
 	}
-	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
+	err := s.c().Watch(ctx, func(tx *goredis.Tx) error {
+		for _, k := range keys {
+			if want[k] == "" {
+				continue
+			}
+			typ, err := tx.Type(ctx, k).Result()
+			if err != nil {
+				return fmt.Errorf("type of %q: %w", k, err)
+			}
+			if typ != "none" && typ != want[k] {
+				return fmt.Errorf("key %q is now a %s, not a %s; nothing was applied", k, typ, want[k])
+			}
+		}
+		cmds, err := tx.TxPipelined(ctx, func(p goredis.Pipeliner) error {
+			for _, a := range all {
+				p.Do(ctx, toAny(a)...)
+			}
+			return nil
+		})
+		if errors.Is(err, goredis.TxFailedErr) {
+			return errors.New("a key changed while applying; nothing was applied")
+		}
+		if err == nil || errors.Is(err, goredis.Nil) {
+			return nil
+		}
+		var done, failed []string
+		for i, c := range cmds {
+			if e := c.Err(); e != nil && !errors.Is(e, goredis.Nil) {
+				failed = append(failed, fmt.Sprintf("statement %d %q: %v", i+1, stmts[i].Text, e))
+			} else {
+				done = append(done, strconv.Itoa(i+1))
+			}
+		}
+		if len(done) == 0 {
+			return fmt.Errorf("%w; nothing was applied", err)
+		}
+		return fmt.Errorf("%s; statements %s were applied and cannot be rolled back", strings.Join(failed, "; "), strings.Join(done, ", "))
+	}, keys...)
+	if err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}
 	return nil
+}
+
+// cmdType is the key type a planned write command needs ("": any type).
+var cmdType = map[string]string{
+	"SET": "string", "HSET": "hash", "HDEL": "hash", "RPUSH": "list", "LSET": "list", "LREM": "list",
+	"SADD": "set", "SREM": "set", "ZADD": "zset", "ZREM": "zset",
 }

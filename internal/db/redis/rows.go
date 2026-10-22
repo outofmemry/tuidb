@@ -35,9 +35,13 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 		}
 		rows = [][]any{{cell(v)}}
 	case "hash", "set":
+		if start > maxLoad {
+			return nil, fmt.Errorf("offset %d is too deep for a %s key (at most %d): its elements have no stable positions, filter instead", start, typ, maxLoad)
+		}
+		// seen keeps only names (at most start+n) to drop SCAN repeats; passed values are not kept.
 		seen := map[string]bool{}
 		var cursor uint64
-		for len(rows) < start+n {
+		for len(seen) < start+n {
 			var items []string
 			var err error
 			if typ == "hash" {
@@ -52,14 +56,17 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 			if typ == "hash" {
 				step = 2
 			}
-			for i := 0; i+step <= len(items); i += step {
+			for i := 0; i+step <= len(items) && len(seen) < start+n; i += step {
 				if seen[items[i]] { // SCAN may repeat elements
 					continue
 				}
+				pos := len(seen)
 				seen[items[i]] = true
-				if typ == "hash" {
+				switch {
+				case pos < start:
+				case typ == "hash":
 					rows = append(rows, []any{cell(items[i]), cell(items[i+1])})
-				} else {
+				default:
 					rows = append(rows, []any{cell(items[i])})
 				}
 			}
@@ -67,7 +74,7 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 				break
 			}
 		}
-		return window(rows, start, n), nil
+		return rows, nil
 	case "list":
 		vs, err := cl.LRange(ctx, key, int64(start), int64(start+n-1)).Result()
 		if err != nil {
@@ -85,7 +92,18 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 			rows = append(rows, []any{cell(str(z.Member)), z.Score})
 		}
 	case "stream":
-		ms, err := cl.XRangeN(ctx, key, "-", "+", int64(start+n)).Result()
+		from, pos := s.streamFrom(key, start)
+		for pos < start { // skip to start in chunks without keeping them
+			ms, err := cl.XRangeN(ctx, key, from, "+", int64(min(start-pos, 1000))).Result()
+			if err != nil {
+				return nil, fmt.Errorf("xrange %q: %w", key, err)
+			}
+			if len(ms) == 0 {
+				return nil, nil
+			}
+			from, pos = "("+ms[len(ms)-1].ID, pos+len(ms)
+		}
+		ms, err := cl.XRangeN(ctx, key, from, "+", int64(n)).Result()
 		if err != nil {
 			return nil, fmt.Errorf("xrange %q: %w", key, err)
 		}
@@ -93,7 +111,9 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 			b, _ := json.Marshal(m.Values)
 			rows = append(rows, []any{m.ID, string(b)})
 		}
-		return window(rows, start, n), nil
+		if len(ms) > 0 {
+			s.markStream(key, streamMark{start, from}, streamMark{start + len(ms), "(" + ms[len(ms)-1].ID})
+		}
 	default:
 		return nil, fmt.Errorf("unsupported redis type %q", typ)
 	}
@@ -103,11 +123,51 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 	return rows, nil
 }
 
+// streamMark says the stream entries from offset on are read by XRANGE starting at from.
+type streamMark struct {
+	offset int
+	from   string
+}
+
+// streamFrom returns the closest remembered XRANGE start at or before offset.
+// shortcut: marks assume entries before them are not deleted (XDEL/XTRIM shift offsets); a
+// reload from offset 0 resets them.
+func (s *session) streamFrom(key string, offset int) (string, int) {
+	from, pos := "-", 0
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, m := range s.marks[key] {
+		if m.from != "" && m.offset <= offset && m.offset > pos {
+			from, pos = m.from, m.offset
+		}
+	}
+	return from, pos
+}
+
+func (s *session) markStream(key string, page, next streamMark) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.marks == nil {
+		s.marks = map[string][2]streamMark{}
+	}
+	s.marks[key] = [2]streamMark{page, next}
+}
+
 func window(rows [][]any, start, n int) [][]any {
 	if start >= len(rows) {
 		return nil
 	}
 	return rows[start:min(len(rows), start+n)]
+}
+
+// loadAll reads at most maxLoad elements of key for in-memory filtering/sorting; capped
+// reports that the key holds more, so results built from rows are incomplete.
+func (s *session) loadAll(ctx context.Context, key, typ string) (rows [][]any, capped bool, err error) {
+	if rows, err = s.fetch(ctx, key, typ, 0, 0); err != nil || len(rows) < maxLoad {
+		return rows, false, err
+	}
+	n, err := s.Count(ctx, db.RowQuery{ObjRef: db.ObjRef{Name: key}}, false)
+	return rows, n.N > int64(maxLoad), err
 }
 
 func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
@@ -121,8 +181,9 @@ func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 	}
 	offset := max(q.Offset, 0)
 	var rows [][]any
+	capped := false
 	if len(q.Filters.Active()) > 0 || len(q.Sort) > 0 {
-		if rows, err = s.fetch(ctx, q.Name, typ, 0, 0); err != nil {
+		if rows, capped, err = s.loadAll(ctx, q.Name, typ); err != nil {
 			return nil, err
 		}
 		if rows, err = filterRows(rows, names, q.Filters); err != nil {
@@ -139,7 +200,7 @@ func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 	} else if rows, err = s.fetch(ctx, q.Name, typ, offset, max(q.Limit, 0)); err != nil {
 		return nil, err
 	}
-	res := &db.Result{Rows: rows, HasRows: true}
+	res := &db.Result{Rows: rows, HasRows: true, Truncated: capped}
 	for _, n := range names {
 		t := colTypes[n]
 		if t == "" {
@@ -180,14 +241,14 @@ func (s *session) Count(ctx context.Context, q db.RowQuery, _ bool) (db.Count, e
 		if err != nil {
 			return db.Count{}, err
 		}
-		rows, err := s.fetch(ctx, q.Name, typ, 0, 0)
+		rows, capped, err := s.loadAll(ctx, q.Name, typ)
 		if err != nil {
 			return db.Count{}, err
 		}
 		if rows, err = filterRows(rows, names, q.Filters); err != nil {
 			return db.Count{}, err
 		}
-		return db.Count{N: int64(len(rows)), Exact: true}, nil
+		return db.Count{N: int64(len(rows)), Exact: !capped}, nil
 	}
 	cl := s.c()
 	var n int64

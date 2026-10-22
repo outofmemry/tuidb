@@ -205,7 +205,9 @@ func (s *session) CurrentDatabase() string {
 }
 
 func (s *session) UseDatabase(ctx context.Context, name string) error {
+	s.mu.RLock()
 	opts := s.opts
+	s.mu.RUnlock()
 	opts.Auth.Database = name
 	c, err := ch.Open(&opts)
 	if err != nil {
@@ -217,8 +219,7 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 	}
 	s.mu.Lock()
 	old := s.conn
-	s.conn, s.cur, s.colCache = c, name, nil
-	s.opts = opts
+	s.conn, s.cur, s.colCache, s.opts = c, name, nil, opts
 	s.mu.Unlock()
 	old.Close()
 	return nil
@@ -470,8 +471,17 @@ func (s *session) run(ctx context.Context, sql string, args ...any) (uint64, err
 	return wrote.Load(), err
 }
 
+// useRe matches USE <db>; it must switch the session, not one pooled connection.
+var useRe = regexp.MustCompile("(?is)^\\s*use\\s+(?:`([^`]+)`|\"([^\"]+)\"|([^\\s;`\"]+))\\s*;?\\s*$")
+
 func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result, error) {
 	start := time.Now()
+	if m := useRe.FindStringSubmatch(stmt); m != nil {
+		if err := s.UseDatabase(ctx, m[1]+m[2]+m[3]); err != nil {
+			return nil, err
+		}
+		return &db.Result{Message: "Database changed", Duration: time.Since(start)}, nil
+	}
 	var res *db.Result
 	if db.IsReadOnly("clickhouse", stmt) {
 		var err error
