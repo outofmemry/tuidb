@@ -41,6 +41,8 @@ type App struct {
 	toast     string
 	toastErr  bool
 	toastSeq  int
+	spin      int  // current spinner frame
+	spinning  bool // a spinner tick is in flight
 	nextID    int
 	quit      bool
 	deferred  []wsMsg // async results held back while a dialog is open
@@ -185,7 +187,46 @@ func (a *App) connByName(name string) (config.Connection, bool) {
 
 // ---- update -----------------------------------------------------------------------------
 
+// spinFrames animate the health dot and "loading…" labels while something runs.
+var spinFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+type spinMsg struct{}
+
+func spinTick() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg { return spinMsg{} })
+}
+
+func (a *App) spinner() string { return spinFrames[a.spin%len(spinFrames)] }
+
+func (a *App) anyBusy() bool {
+	for _, w := range a.wss {
+		if w.busy() || w.applying || w.sb.loading {
+			return true
+		}
+	}
+	return false
+}
+
+// Update runs the message, then starts the spinner if that made a workspace busy; the
+// spinner keeps ticking only while something is still running.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(spinMsg); ok {
+		a.spin++
+		if a.anyBusy() {
+			return a, spinTick()
+		}
+		a.spinning = false
+		return a, nil
+	}
+	m, cmd := a.update(msg)
+	if !a.spinning && !a.d.NoTimers && a.anyBusy() {
+		a.spinning = true
+		cmd = tea.Batch(cmd, spinTick())
+	}
+	return m, cmd
+}
+
+func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.w, a.h = m.Width, m.Height

@@ -901,7 +901,7 @@ func (w *Workspace) crumbs(th Theme) (left, right []string) {
 	if w.lost {
 		dot = th.Err.Background(bg).Render("● ")
 	} else if w.busy() || w.applying {
-		dot = th.Warn.Background(bg).Render("● ")
+		dot = th.Warn.Background(bg).Render(w.a.spinner() + " ")
 	}
 	name := dot + th.StatusKey.Render(c.Name)
 	if c.Tag != "" || c.Color != "" {
@@ -964,7 +964,7 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	if t := w.tab(); t != nil {
 		mainTitle = w.tabBar(th)
 		if b, ok := t.(interface{ Busy() bool }); ok && b.Busy() {
-			mainTitle += th.Warn.Render(" loading…")
+			mainTitle += th.Warn.Render(" " + w.a.spinner() + " loading…")
 		}
 		if h, ok := t.(interface{ Hint(Theme) string }); ok {
 			mainHint = h.Hint(th)

@@ -650,6 +650,8 @@ func (g *Grid) CursorValue() (any, bool) {
 
 // ---- render ---------------------------------------------------------------------------
 
+func isBool(v any) bool { _, ok := v.(bool); return ok }
+
 func isNumber(v any) bool {
 	switch v.(type) {
 	case int64, uint64, float64, int, int32:
@@ -736,6 +738,10 @@ func (g *Grid) View(th Theme, focused bool) string {
 				st = th.Modified
 			case isSpecial(v):
 				st = base.Inherit(th.Null)
+			case isNumber(v): // typed values get the editor's colors so a row reads at a glance
+				st = base.Foreground(th.Number.GetForeground())
+			case isBool(v):
+				st = base.Foreground(th.Keyword.GetForeground())
 			}
 			sb.WriteString(th.Border.Render("│") + st.Render(cell))
 			if width(sb.String()) >= g.W {

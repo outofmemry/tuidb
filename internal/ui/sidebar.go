@@ -904,7 +904,7 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 	var body []string
 	switch {
 	case s.loading:
-		body = append(body, th.Dim.Render(" loading…"))
+		body = append(body, th.Warn.Render(" "+s.w.a.spinner())+th.Dim.Render(" loading…"))
 	case s.err != "":
 		body = append(body, th.Err.Render(fit(" "+s.err, W)))
 	case len(rows) == 0 && s.q.Value() != "":
