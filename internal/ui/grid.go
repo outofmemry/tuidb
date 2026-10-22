@@ -58,7 +58,8 @@ type Grid struct {
 	undo, redo           []gridSnapshot
 	SortCol              string
 	SortDesc             bool
-	RowOffset            int // first row number shown in the gutter (paging)
+	RowOffset            int  // first row number shown in the gutter (paging)
+	NoStripes            bool // table.alternating_rows = false
 }
 
 // SetData replaces the contents with a fresh result (drops pending edits and undo history).
@@ -208,22 +209,32 @@ func (g *Grid) inSelection(r, c int) bool {
 
 // ---- editing --------------------------------------------------------------------------
 
+// snapshot records the row pointers only; a row is cloned (own) before it is mutated, so the
+// snapshot keeps the old row and an undo step costs one pointer per row, not a copy of every cell.
 func (g *Grid) snapshot() {
-	s := gridSnapshot{row: g.row, col: g.col, rows: make([]*gridRow, len(g.Rows))}
-	for i, r := range g.Rows {
-		c := *r
-		c.Cur = append([]any(nil), r.Cur...)
-		c.Dirty = map[int]bool{}
-		for k, v := range r.Dirty {
-			c.Dirty[k] = v
-		}
-		s.rows[i] = &c
-	}
+	s := gridSnapshot{row: g.row, col: g.col, rows: append([]*gridRow(nil), g.Rows...)}
 	g.undo = append(g.undo, s)
-	if len(g.undo) > 50 {
-		g.undo = g.undo[1:]
+	depth := 50
+	if len(g.Rows) > 20000 { // huge results: keep the undo stack small
+		depth = 5
+	}
+	if len(g.undo) > depth {
+		g.undo = g.undo[len(g.undo)-depth:]
 	}
 	g.redo = nil
+}
+
+// own returns row i, cloned first so the snapshot that still points at the old struct is untouched.
+func (g *Grid) own(i int) *gridRow {
+	r := g.Rows[i]
+	c := *r
+	c.Cur = append([]any(nil), r.Cur...)
+	c.Dirty = make(map[int]bool, len(r.Dirty))
+	for k, v := range r.Dirty {
+		c.Dirty[k] = v
+	}
+	g.Rows[i] = &c
+	return &c
 }
 
 func (g *Grid) restore(s gridSnapshot) {
@@ -278,6 +289,7 @@ func (g *Grid) SetCell(v any) bool {
 		return false
 	}
 	g.snapshot()
+	r = g.own(g.row)
 	r.Cur[g.col] = v
 	if r.State == rowNew || !sameValue(v, r.Orig[g.col]) {
 		r.Dirty[g.col] = true
@@ -391,6 +403,7 @@ func (g *Grid) DeleteRows() bool {
 			kept = append(kept, r)
 		case r.State == rowNew: // never reached the server: just drop it
 		default:
+			r = g.own(i)
 			r.State = rowDeleted
 			kept = append(kept, r)
 		}
@@ -510,10 +523,7 @@ func plain(v any) string {
 	if v == nil || v == db.Null {
 		return "NULL"
 	}
-	if v == db.Empty {
-		return ""
-	}
-	return db.FormatValue(v)
+	return db.FormatValue(v) // Empty -> "", Default -> "DEFAULT", Expr -> its text
 }
 
 // FormatRect renders rows r0..r1, cols c0..c1 in the given format.
@@ -690,7 +700,7 @@ func (g *Grid) View(th Theme, focused bool) string {
 			base = th.Deleted
 		case r.State == rowNew:
 			base = th.New
-		case ri%2 == 1:
+		case ri%2 == 1 && !g.NoStripes:
 			base = th.AltRow
 		}
 		var sb strings.Builder
@@ -755,12 +765,9 @@ func ParseClip(text string) [][]string {
 	return recs
 }
 
-func clipValue(s string) any {
-	if s == "NULL" {
-		return db.Null
-	}
-	return s
-}
+// clipValue keeps pasted text as text: a cell whose value is the word NULL stays that word
+// (use Set Value > NULL for a real NULL), so a copy/paste round trip cannot change the data.
+func clipValue(s string) any { return s }
 
 // PasteRows inserts the parsed rows as new rows after the cursor. Values go to columns in order;
 // columns the clipboard does not cover stay DEFAULT and are left out of the INSERT.
@@ -804,7 +811,7 @@ func (g *Grid) PasteCells(data [][]string) bool {
 			if c >= len(g.Cols) {
 				break
 			}
-			row := g.Rows[r]
+			row := g.own(r)
 			v := clipValue(f)
 			row.Cur[c] = v
 			if row.State == rowNew || !sameValue(v, row.Orig[c]) {

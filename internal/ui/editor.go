@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -60,6 +61,8 @@ type Editor struct {
 	// render cache: lexing and statement splitting are redone only when the text changes, and
 	// lexing stops at the bottom of the viewport (a frame is drawn after every message, not just keys)
 	cache struct {
+		dirty bool
+		offs  []int // byte offset of every line start, for the current-statement highlight
 		text  string
 		kinds [][]tokKind // for lines[:len(kinds)]
 		stmts []db.Stmt
@@ -76,8 +79,13 @@ func NewEditor(dialect string, opts EditorOpts) *Editor {
 
 func (e *Editor) Text() string { return strings.Join(e.lines, "\n") }
 
+// markChanged flags the buffer for the owner (Changed) and the render cache (dirty).
+func (e *Editor) markChanged() { e.Changed, e.cache.dirty = true, true }
+
 func (e *Editor) SetText(s string) {
-	e.lines = strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	s = strings.ToValidUTF8(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\uFFFD")
+	e.lines = strings.Split(s, "\n")
+	e.cache.dirty = true
 	e.cur, e.anchor, e.top, e.left = pos{}, nil, 0, 0
 	e.undo, e.redo, e.lastKind = nil, nil, ""
 	e.ac.open = false
@@ -99,13 +107,19 @@ func (e *Editor) fixAnchor() {
 	e.anchor.col = clamp(e.anchor.col, 0, runeLen(e.lines[e.anchor.row]))
 }
 
-// Offset is the byte offset of the cursor in Text().
+// Offset is the byte offset of the cursor in Text(), measured on the stored bytes so it matches
+// what Split sees (re-encoding runes would inflate invalid UTF-8).
 func (e *Editor) Offset() int {
 	n := 0
 	for i := 0; i < e.cur.row; i++ {
 		n += len(e.lines[i]) + 1
 	}
-	return n + len(string(e.runes(e.cur.row)[:e.cur.col]))
+	line, idx := e.lines[e.cur.row], 0
+	for i := 0; i < e.cur.col && idx < len(line); i++ {
+		_, size := utf8.DecodeRuneInString(line[idx:])
+		idx += size
+	}
+	return n + idx
 }
 
 // Selection returns the selected text ("" when none).
@@ -151,8 +165,12 @@ func (e *Editor) push(kind string) {
 		return
 	}
 	e.undo = append(e.undo, editSnap{lines: append([]string(nil), e.lines...), cur: e.cur})
-	if len(e.undo) > 200 {
-		e.undo = e.undo[1:]
+	depth := 200
+	if len(e.lines) > 20000 { // a pasted dump: each snapshot is a line-slice copy, keep few
+		depth = 10
+	}
+	if len(e.undo) > depth {
+		e.undo = e.undo[len(e.undo)-depth:]
 	}
 	e.redo, e.lastKind = nil, kind
 }
@@ -165,12 +183,13 @@ func (e *Editor) deleteSelection() bool {
 	ra, rb := e.runes(a.row), e.runes(b.row)
 	e.lines = append(append(e.lines[:a.row:a.row], string(ra[:a.col])+string(rb[b.col:])), e.lines[b.row+1:]...)
 	e.cur, e.anchor = a, nil
+	e.cache.dirty = true
 	return true
 }
 
 // Insert types s at the cursor, replacing any selection.
 func (e *Editor) Insert(s string) {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+	s = strings.ToValidUTF8(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\uFFFD")
 	e.deleteSelection()
 	r := e.runes(e.cur.row)
 	head, tail := string(r[:e.cur.col]), string(r[e.cur.col:])
@@ -184,7 +203,7 @@ func (e *Editor) Insert(s string) {
 		e.lines = append(append(e.lines[:e.cur.row:e.cur.row], append(mid, last+tail)...), e.lines[e.cur.row+1:]...)
 		e.cur = pos{e.cur.row + len(parts) - 1, runeLen(last)}
 	}
-	e.Changed = true
+	e.markChanged()
 }
 
 func (e *Editor) indentOf(r int) string {
@@ -202,10 +221,16 @@ func (e *Editor) move(row, col int, extend bool) {
 	if !extend {
 		e.anchor = nil
 	}
-	e.cur.row = clamp(row, 0, len(e.lines)-1)
-	e.cur.col = clamp(col, 0, len(e.runes(e.cur.row)))
+	next := pos{clamp(row, 0, len(e.lines)-1), 0}
+	next.col = clamp(col, 0, len(e.runes(next.row)))
+	if extend && next == e.cur && e.anchor != nil && *e.anchor == e.cur {
+		e.anchor = nil // a shift-move that goes nowhere must not leave an empty, stale selection
+	}
+	if extend || e.anchor != nil {
+		e.lastKind = "" // a selection is an undo boundary; a plain cursor move is not
+	}
+	e.cur = next
 	e.scroll()
-	e.lastKind = ""
 }
 
 func (e *Editor) scroll() {
@@ -281,11 +306,12 @@ func (e *Editor) acceptComplete() {
 		}
 	}
 	e.push("complete")
+	e.deleteSelection()
 	r := e.runes(e.cur.row)
-	e.lines[e.cur.row] = string(r[:st]) + text + string(r[e.cur.col:])
-	e.cur.col = st + runeLen(text)
+	e.lines[e.cur.row] = string(r[:st]) + string(r[e.cur.col:])
+	e.cur.col = st
+	e.Insert(text) // Insert splits multi-line text into lines and places the cursor
 	e.ac.open = false
-	e.Changed = true
 	e.scroll()
 }
 
@@ -323,7 +349,7 @@ func (e *Editor) ToggleComment() {
 		e.lines[r] = ind + body
 	}
 	e.fixAnchor()
-	e.Changed = true
+	e.markChanged()
 }
 
 // ToggleBlockComment wraps the selection in /* */ (or unwraps it).
@@ -517,7 +543,7 @@ func (e *Editor) handleKey(m tea.KeyPressMsg) bool {
 			for r := a.row; r <= b.row; r++ {
 				e.lines[r] = e.tab() + e.lines[r]
 			}
-			e.Changed = true
+			e.markChanged()
 		} else {
 			e.Insert(e.tab())
 		}
@@ -532,7 +558,7 @@ func (e *Editor) handleKey(m tea.KeyPressMsg) bool {
 			e.lines[r] = e.outdent(e.lines[r])
 		}
 		e.fixAnchor()
-		e.Changed = true
+		e.markChanged()
 	case "backspace", "ctrl+h":
 		e.push("delete")
 		switch {
@@ -553,7 +579,7 @@ func (e *Editor) handleKey(m tea.KeyPressMsg) bool {
 			e.lines = append(e.lines[:row], e.lines[row+1:]...)
 			e.cur = pos{row - 1, prev}
 		}
-		e.Changed = true
+		e.markChanged()
 		e.scroll()
 		e.refreshComplete()
 	case "delete", "ctrl+d":
@@ -567,12 +593,12 @@ func (e *Editor) handleKey(m tea.KeyPressMsg) bool {
 			e.lines[row] += e.lines[row+1]
 			e.lines = append(e.lines[:row+1], e.lines[row+2:]...)
 		}
-		e.Changed = true
+		e.markChanged()
 	case "ctrl+k": // kill to end of line
 		e.push("delete")
 		e.lines[row] = string(e.runes(row)[:col])
 		e.anchor = nil
-		e.Changed = true
+		e.markChanged()
 	case "ctrl+z":
 		e.Undo()
 	case "ctrl+y", "ctrl+shift+z":
@@ -588,7 +614,7 @@ func (e *Editor) handleKey(m tea.KeyPressMsg) bool {
 		e.lines[row] = string(r[:c]) + string(r[col:])
 		e.cur.col = c
 		e.anchor = nil
-		e.Changed = true
+		e.markChanged()
 	default:
 		return false
 	}
@@ -646,7 +672,7 @@ func (e *Editor) typeRune(c rune) {
 	default:
 		e.Insert(string(c))
 	}
-	e.Changed = true
+	e.markChanged()
 }
 
 // FirstWord returns lowercased first word of the buffer (used by tests/tab titles).
@@ -690,8 +716,8 @@ func (e *Editor) View(th Theme, focused bool) string {
 	}
 	e.scroll()
 	c := &e.cache
-	if text := e.Text(); text != c.text || len(c.kinds) > len(e.lines) {
-		c.text, c.kinds, c.stmts, c.split = text, nil, nil, false
+	if c.dirty || c.text == "" && len(e.lines) > 0 && e.lines[0] != "" {
+		c.text, c.kinds, c.stmts, c.split, c.offs, c.dirty = e.Text(), nil, nil, false, nil, false
 	}
 	if need := min(len(e.lines), e.top+e.H); len(c.kinds) < need {
 		c.kinds = lexLines(e.Dialect, e.lines[:need]) // block comments carry over from earlier lines
@@ -706,11 +732,14 @@ func (e *Editor) View(th Theme, focused bool) string {
 		if s, ok := db.StatementAt(c.stmts, e.Offset()); ok {
 			curStmt = &s
 		}
-		n := 0
-		for _, l := range e.lines {
-			offs = append(offs, n)
-			n += len(l) + 1
+		if c.offs == nil {
+			n := 0
+			for _, l := range e.lines {
+				c.offs = append(c.offs, n)
+				n += len(l) + 1
+			}
 		}
+		offs = c.offs
 	}
 	a, b, hasSel := e.selRange()
 	gw, tw := e.gutterW(), e.textW()

@@ -74,7 +74,7 @@ func cellText(v any) string {
 }
 
 func isSpecial(v any) bool {
-	if v == nil || v == db.Null || v == db.Default {
+	if v == nil || v == db.Null || v == db.Default || v == db.Empty {
 		return true
 	}
 	_, isExpr := v.(db.Expr)

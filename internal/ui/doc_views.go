@@ -97,10 +97,11 @@ type treeRow struct {
 
 // docTree is the Tree view state.
 type docTree struct {
-	roots []*jnode
-	open  map[string]bool
-	sel   int
-	top   int
+	roots  []*jnode
+	open   map[string]bool
+	sel    int
+	top    int
+	cached []treeRow // flattened rows; nil after any fold change
 }
 
 func newDocTree(docs []string) *docTree {
@@ -118,6 +119,9 @@ func newDocTree(docs []string) *docTree {
 }
 
 func (t *docTree) rows() []treeRow {
+	if t.cached != nil {
+		return t.cached
+	}
 	var out []treeRow
 	var walk func(n *jnode, id string, depth int)
 	walk = func(n *jnode, id string, depth int) {
@@ -131,6 +135,7 @@ func (t *docTree) rows() []treeRow {
 	for i, r := range t.roots {
 		walk(r, fmt.Sprint(i), 0)
 	}
+	t.cached = out
 	return out
 }
 
@@ -155,6 +160,7 @@ func (t *docTree) setAll(open bool) {
 }
 
 func (t *docTree) input(key string) {
+	defer func() { t.cached = nil }() // folds may have changed
 	rows := t.rows()
 	if len(rows) == 0 {
 		return
@@ -254,12 +260,16 @@ func (t *docTree) view(th Theme, W, H int) string {
 // ---- hooks used by tableTab -------------------------------------------------------------
 
 func (t *tableTab) jsonView(th Theme, W, H int) string {
-	lines := docLines(t.docs)
+	if t.jsonCache.docs == nil || &t.jsonCache.docs[0] != &t.docs[0] || len(t.jsonCache.docs) != len(t.docs) {
+		t.jsonCache.docs = t.docs
+		t.jsonCache.lines = docLines(t.docs)
+		t.jsonCache.kinds = lexLines("mongo", t.jsonCache.lines) // once per result, not per frame
+	}
+	lines, kinds := t.jsonCache.lines, t.jsonCache.kinds
 	if len(lines) == 0 {
 		return pad(th.Dim.Render("  (no documents)"), W, H)
 	}
 	t.jsonTop = clamp(t.jsonTop, 0, max(0, len(lines)-H))
-	kinds := lexLines("mongo", lines)
 	var out []string
 	for i := t.jsonTop; i < min(len(lines), t.jsonTop+H); i++ {
 		out = append(out, " "+highlight(th, lines[i], kinds[i]))
@@ -313,11 +323,21 @@ type quickLookDlg struct {
 	tree  *docTree
 	raw   bool
 	top   int
+	lines []string // wrapped raw lines, built once per width
+	wrapW int
 }
 
+// quickLookMax caps what quick look formats: a huge cell would be wrapped and pretty-printed per frame.
+const quickLookMax = 256 << 10
+
 func newQuickLook(title, text string) *quickLookDlg {
+	if len(text) > quickLookMax {
+		text = text[:quickLookMax] + fmt.Sprintf("\n… truncated (%d bytes in total; c copies everything)", len(text))
+		return &quickLookDlg{title: "Quick look: " + title, text: text, raw: true}
+	}
 	q := &quickLookDlg{title: "Quick look: " + title, text: text}
 	if t := strings.TrimSpace(text); len(t) > 1 && (t[0] == '{' || t[0] == '[') {
+		q.text = text
 		if _, err := parseDoc(t); err == nil {
 			q.tree = newDocTree([]string{t})
 		}
@@ -371,12 +391,14 @@ func (q *quickLookDlg) View(th Theme, maxW, maxH int) string {
 		body = strings.Split(q.tree.view(th, w-4, vis), "\n")
 		hint = "↑↓ move · ↵ fold · E/C expand/collapse all · r raw text · " + hint
 	} else {
-		var lines []string
-		for _, l := range strings.Split(prettyValue(q.text), "\n") {
-			lines = append(lines, wrapText(l, w-4)...)
+		if q.lines == nil || q.wrapW != w-4 {
+			q.lines, q.wrapW = nil, w-4
+			for _, l := range strings.Split(prettyValue(q.text), "\n") {
+				q.lines = append(q.lines, wrapText(l, w-4)...)
+			}
 		}
-		q.top = clamp(q.top, 0, max(0, len(lines)-vis))
-		body = lines[q.top:min(len(lines), q.top+vis)]
+		q.top = clamp(q.top, 0, max(0, len(q.lines)-vis))
+		body = q.lines[q.top:min(len(q.lines), q.top+vis)]
 		hint = "↑↓ scroll · " + hint
 		if q.tree != nil {
 			hint = "r tree · " + hint

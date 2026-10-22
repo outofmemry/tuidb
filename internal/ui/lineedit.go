@@ -101,21 +101,28 @@ func (l *lineEdit) View(w int, th Theme, focused bool) string {
 	if w < 2 {
 		return ""
 	}
-	start := 0
-	if l.pos >= w-1 {
-		start = l.pos - (w - 2)
-	}
-	end := min(len(shown), start+w-1)
-	before := string(shown[start:min(l.pos, end)])
-	after := ""
+	// window by display cells: wide runes (CJK, emoji) take two cells each
 	cur := " "
 	if l.pos < len(shown) {
 		cur = string(shown[l.pos])
-		after = string(shown[l.pos+1 : end])
+	}
+	budget := w - 1 - width(cur)
+	start, used := l.pos, 0
+	for start > 0 && used+width(string(shown[start-1])) <= budget {
+		start--
+		used += width(string(shown[start]))
+	}
+	before := string(shown[start:l.pos])
+	after, rest := "", w-1-width(before)-width(cur)
+	for i := l.pos + 1; i < len(shown); i++ {
+		ch := string(shown[i])
+		if width(after)+width(ch) > rest {
+			break
+		}
+		after += ch
 	}
 	if !focused {
-		return fit(string(shown[start:end]), w)
+		return fit(before+cur+after, w)
 	}
-	out := before + th.SelCell.Render(cur) + after
-	return out + strings.Repeat(" ", max(0, w-width(before)-width(cur)-width(after)))
+	return fit(before+th.SelCell.Render(cur)+after, w)
 }
