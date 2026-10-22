@@ -485,6 +485,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 	} else {
 		list = append(list, " "+th.Section.Render(fit("NAME", 28)+fit("DRIVER", 12)+fit("HOST", 26)+"TAG"))
 	}
+	listW -= 0
 	listH := max(1, bodyH-2-len(list))
 	w.sel = clamp(w.sel, 0, max(0, len(rows)-1))
 	if w.sel < w.top {
@@ -527,7 +528,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 		}
 		line := cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, 26)) + tagS
 		if i == w.sel {
-			line = th.SelRow.Render(fit(line, listW-2))
+			line = th.SelRow.Render(fit(line, listW-4))
 		}
 		list = append(list, line)
 	}

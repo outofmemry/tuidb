@@ -25,7 +25,7 @@ func box(th Theme, title string, content []string, hint string, w int) string {
 		lines = append(lines, fit(l, inner))
 	}
 	if hint != "" {
-		lines = append(lines, "", th.Dim.Render(fit(hint, inner)))
+		lines = append(lines, "", fit(th.hintChips(hint), inner))
 	}
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(th.Border.GetForeground()).Padding(0, 1).Render(strings.Join(lines, "\n"))
 }

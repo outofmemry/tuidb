@@ -46,11 +46,11 @@ func frame(th Theme, title, hint, content string, w, h int, focused bool) string
 	if hint != "" && width(hint) <= inner-2 {
 		bottom = edge.Render("╰"+strings.Repeat("─", inner-width(hint)-2)+" ") + hint + edge.Render(" ╯")
 	}
-	body := padLines(strings.Split(content, "\n"), inner, h-2)
+	body := padLines(strings.Split(content, "\n"), inner-2, h-2) // one cell of padding each side
 	out := make([]string, 0, h)
 	out = append(out, top)
 	for _, l := range body {
-		out = append(out, edge.Render("│")+l+edge.Render("│"))
+		out = append(out, edge.Render("│")+" "+l+" "+edge.Render("│"))
 	}
 	out = append(out, bottom)
 	return strings.Join(out, "\n")
@@ -67,6 +67,24 @@ func padLines(lines []string, w, h int) []string {
 		}
 	}
 	return out
+}
+
+// hintChips turns a hint such as "Enter: open   Esc: cancel   ↑↓: move" into chips; text that
+// is not key: label pairs is left dimmed, so every dialog's footer reads the same way.
+func (t Theme) hintChips(hint string) string {
+	var parts []string
+	for _, piece := range strings.Split(hint, "   ") {
+		piece = strings.TrimSpace(piece)
+		if piece == "" {
+			continue
+		}
+		if k, label, ok := strings.Cut(piece, ": "); ok && !strings.Contains(k, " ") || ok && len(k) <= 12 {
+			parts = append(parts, t.chip(k)+t.Hint.Render(" "+label))
+		} else {
+			parts = append(parts, t.Hint.Render(piece))
+		}
+	}
+	return strings.Join(parts, "  ")
 }
 
 // chip renders a key as a small badge, used in bars and hints: [C-d s].

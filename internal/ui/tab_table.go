@@ -973,6 +973,21 @@ func (t *tableTab) bodyView(th Theme, W, H int) string {
 		return t.structView(th, W, H)
 	}
 	bar := t.filterView(th, W)
+	if !t.showFilters && len(t.filters.Active()) > 0 { // hidden bar: the filters still show as chips
+		pre := keymap.Display(t.ws.a.d.Keys.Prefix)
+		var chips []string
+		for _, f := range t.filters.Active() {
+			col := f.Column
+			switch col {
+			case db.AnyColumn:
+				col = "any"
+			case db.RawColumn:
+				col = "sql"
+			}
+			chips = append(chips, th.chip(strings.TrimSpace(col+" "+f.Op+" "+f.Value)))
+		}
+		bar = []string{fit(th.Dim.Render("filters ")+strings.Join(chips, " ")+th.Dim.Render("   "+pre+" f edit · M-c clear"), W)}
+	}
 	t.grid.W, t.grid.H = W, max(2, H-len(bar))
 	var out string
 	if len(t.grid.Cols) > 0 && len(t.grid.Rows) == 0 && !t.loading {

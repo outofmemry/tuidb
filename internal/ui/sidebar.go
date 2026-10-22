@@ -865,7 +865,11 @@ func (s *sidebar) hint(th Theme) string {
 }
 
 func (s *sidebar) view(th Theme, W, H int, focused bool) string {
-	head := []string{th.segmented([]string{"Objects", "Queries", "History"}, []string{"1", "2", "3"}, s.tab)}
+	keys := []string{"1", "2", "3"}
+	if W < 36 {
+		keys = nil // the key numbers do not fit in a narrow sidebar; the hint line still says 1-3
+	}
+	head := []string{th.segmented([]string{"Objects", "Queries", "History"}, keys, s.tab)}
 	if s.searching || s.q.Value() != "" {
 		head = append(head, th.Accent.Render("/")+s.q.View(W-2, th, s.searching))
 	} else if s.w.caps.Schemas && s.tab == 0 {

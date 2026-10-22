@@ -700,6 +700,8 @@ func (g *Grid) View(th Theme, focused bool) string {
 			base = th.Deleted
 		case r.State == rowNew:
 			base = th.New
+		case ri == g.row && focused && !g.selecting:
+			base = th.CurRow // the whole current row is tinted so the cursor is easy to find
 		case ri%2 == 1 && !g.NoStripes:
 			base = th.AltRow
 		}

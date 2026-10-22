@@ -23,6 +23,7 @@ type Theme struct {
 	TabActive, TabIdle               lipgloss.Style
 	Popup                            lipgloss.Style
 	AltRow                           lipgloss.Style
+	CurRow                           lipgloss.Style // the row under the cursor
 	Key                              lipgloss.Style // a key name in a hint line
 	Hint                             lipgloss.Style // hint label text
 	Section                          lipgloss.Style // sidebar / list section headers
@@ -80,6 +81,7 @@ func NewTheme(t config.Theme) Theme {
 		TabActive: lipgloss.NewStyle().Foreground(lipgloss.Color(pal["sel_cell_fg"])).Background(lipgloss.Color(pal["accent"])).Bold(true),
 		TabIdle:   bg("header_bg").Foreground(lipgloss.Color(pal["dim"])),
 		Popup:     bg("popup_bg"),
+		CurRow:    bg("header_bg"),
 		Key:       fg("accent").Bold(true),
 		Hint:      fg("dim"),
 		Section:   fg("dim").Bold(true),

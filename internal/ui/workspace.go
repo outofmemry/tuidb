@@ -846,9 +846,43 @@ func schemaSuffix(s string) string {
 
 // ---- view -------------------------------------------------------------------------------
 
+// statusContext is the middle zone of the status bar: where you are in the data.
+func (w *Workspace) statusContext() string {
+	t, ok := w.tab().(*tableTab)
+	if !ok || t.view != viewData {
+		return ""
+	}
+	var parts []string
+	if t.counted {
+		total := fmt.Sprint(t.count.N)
+		if !t.count.Exact {
+			total = "~" + total
+		}
+		parts = append(parts, fmt.Sprintf("rows %d–%d of %s", min(t.offset+1, t.offset+t.loadedRows), t.offset+t.loadedRows, total))
+	}
+	for _, s := range t.sort {
+		dir := "▲"
+		if s.Desc {
+			dir = "▼"
+		}
+		parts = append(parts, s.Column+" "+dir)
+	}
+	if n := len(t.filters.Active()); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d filter(s)", n))
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
 func (w *Workspace) statusParts(th Theme) []string {
 	c := w.conn
-	parts := []string{th.StatusKey.Render(" " + c.Name + " ")}
+	bg := lipgloss.Color(th.pal["status_bg"])
+	dot := th.OK.Background(bg).Render("●")
+	if w.lost {
+		dot = th.Err.Background(bg).Render("●")
+	} else if w.busy() || w.applying {
+		dot = th.Warn.Background(bg).Render("●")
+	}
+	parts := []string{th.StatusBar.Render(" ") + dot + th.StatusKey.Render(" "+c.Name+" ")}
 	if c.Tag != "" || c.Color != "" {
 		parts = append(parts, th.TagStyle(c.Tag, c.Color).Render(" "+strings.ToUpper(orDefault(c.Tag, "●"))+" "))
 	}
@@ -857,7 +891,6 @@ func (w *Workspace) statusParts(th Theme) []string {
 		where += "." + w.sb.schema
 	}
 	parts = append(parts, th.StatusBar.Render(th.DriverStyle(c.Driver).Background(lipgloss.Color(th.pal["status_bg"])).Render(c.Driver)+" "+where))
-	bg := lipgloss.Color(th.pal["status_bg"])
 	if w.level == safemode.Silent {
 		parts = append(parts, th.StatusBar.Foreground(lipgloss.Color(th.pal["dim"])).Render("safe: off"))
 	} else {
@@ -893,23 +926,26 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	}
 	var cols []string
 	if sbW > 0 {
-		cols = append(cols, frame(th, w.sb.title(), w.sb.hint(th), w.sb.view(th, sbW-2, mainH-2, w.focusSB), sbW, mainH, w.focusSB))
+		cols = append(cols, frame(th, w.sb.title(), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB))
 	}
 	mainTitle := w.conn.Name
 	var mainHint string
 	if t := w.tab(); t != nil {
 		mainTitle = t.Title()
+		if b, ok := t.(interface{ Busy() bool }); ok && b.Busy() {
+			mainTitle += " · loading…"
+		}
 		if h, ok := t.(interface{ Hint(Theme) string }); ok {
 			mainHint = h.Hint(th)
 		}
 	}
-	cols = append(cols, frame(th, mainTitle, mainHint, w.mainView(th, mainW-2, mainH-2), mainW, mainH, !w.focusSB))
+	cols = append(cols, frame(th, mainTitle, mainHint, w.mainView(th, mainW-4, mainH-2), mainW, mainH, !w.focusSB))
 	if detW > 0 {
-		cols = append(cols, frame(th, "Row details", "", w.detailView(th, detW-2, mainH-2), detW, mainH, false))
+		cols = append(cols, frame(th, "Row details", "", w.detailView(th, detW-4, mainH-2), detW, mainH, false))
 	}
 	out := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	if conH > 0 {
-		out += "\n" + frame(th, fmt.Sprintf("Console · %d statements", len(w.console)), th.chips(keymap.Display(w.a.d.Keys.Prefix)+" C-c", "hide"), w.consoleView(th, W-2, conH-2), W, conH, false)
+		out += "\n" + frame(th, fmt.Sprintf("Console · %d statements", len(w.console)), th.chips(keymap.Display(w.a.d.Keys.Prefix)+" C-c", "hide"), w.consoleView(th, W-4, conH-2), W, conH, false)
 	}
 	return out
 }

@@ -435,7 +435,7 @@ func (a *App) View() tea.View {
 
 func (a *App) render() string {
 	if a.w < 20 || a.h < 6 {
-		return "terminal too small"
+		return fmt.Sprintf("tuidb needs at least 20×6 cells (this terminal is %d×%d)", a.w, a.h)
 	}
 	bodyH := a.h - 1
 	var body string
@@ -533,6 +533,10 @@ func (a *App) statusLine() string {
 		left = append(left, a.th.StatusKey.Render(" tuidb "), a.th.StatusBar.Render(fmt.Sprintf(" %d connections", len(a.d.Conns))))
 	}
 	l := strings.Join(left, a.th.StatusBar.Render(" "))
+	center := ""
+	if w := a.ws(); w != nil {
+		center = a.th.StatusBar.Foreground(lipgloss.Color(a.th.pal["dim"])).Render(w.statusContext())
+	}
 	var right string
 	switch {
 	case a.toast != "":
@@ -544,19 +548,32 @@ func (a *App) statusLine() string {
 		}
 		right = st.Render(" " + a.toast + " ")
 	default:
-		right = a.th.StatusBar.Render(" " + a.contextHints() + " ")
+		// hints give way to the context zone: drop pairs from the end until both fit (help stays)
+		pairs := a.contextHintPairs()
+		for {
+			right = a.th.StatusBar.Render(" " + a.renderHints(pairs) + " ")
+			if len(pairs) <= 2 || a.w-width(l)-width(right) >= width(center)+4 {
+				break
+			}
+			pairs = append(pairs[:len(pairs)-4], pairs[len(pairs)-2:]...)
+		}
 	}
 	gap := a.w - width(l) - width(right)
 	if gap < 0 {
 		right = fit(right, max(0, a.w-width(l)))
 		gap = 0
 	}
+	if cw := width(center); cw > 0 && cw+4 <= gap { // centered between the two zones when it fits
+		pre := (gap - cw) / 2
+		return l + a.th.StatusBar.Render(strings.Repeat(" ", pre)) + center + a.th.StatusBar.Render(strings.Repeat(" ", gap-pre-cw)) + right
+	}
 	return l + a.th.StatusBar.Render(strings.Repeat(" ", gap)) + right
 }
 
 // contextHints are the three or four most useful keys for the focused pane, shown on the right of
 // the status line so the next step is always visible.
-func (a *App) contextHints() string {
+// contextHintPairs are key/label pairs for the focused pane; the last pair is always help.
+func (a *App) contextHintPairs() []string {
 	pre := keymap.Display(a.d.Keys.Prefix)
 	k := func(action string) string {
 		for _, b := range a.d.Keys.Bindings(a.context()) {
@@ -585,7 +602,10 @@ func (a *App) contextHints() string {
 			pairs = []string{"↵", "connect", "n", "new"}
 		}
 	}
-	pairs = append(pairs, pre+" ?", "help")
+	return append(pairs, pre+" ?", "help")
+}
+
+func (a *App) renderHints(pairs []string) string {
 	bar := lipgloss.NewStyle().Background(lipgloss.Color(a.th.pal["status_bg"]))
 	var parts []string
 	for i := 0; i+1 < len(pairs); i += 2 {
