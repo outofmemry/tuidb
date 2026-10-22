@@ -242,9 +242,9 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 		case db.RawColumn:
 			col = "Raw SQL"
 		}
-		chk := "[ ]"
+		chk := " ○ " // off: the row is kept but not applied
 		if f.Enabled {
-			chk = "[x]"
+			chk = " ✓ "
 		}
 		focus := func(field int, s string) string { // dropdowns look like buttons, the focused one selected
 			if t.fb.focus && i == t.fb.sel && t.fb.field == field {
@@ -260,6 +260,8 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 			valStr = t.fb.edit.View(valW, th, true)
 		case val == "":
 			valStr = th.Dim.Render(fit("value…", valW))
+		case !f.Enabled:
+			valStr = th.Dim.Strikethrough(true).Render(fit(val, valW))
 		default:
 			valStr = fit(val, valW)
 		}
@@ -267,8 +269,8 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 			valStr = th.Dim.Render(fit("(no value)", valW))
 		}
 		mark := "  "
-		if i == t.fb.sel {
-			mark = "▸ "
+		if i == t.fb.sel && t.fb.focus {
+			mark = th.Accent.Render("▸") + " "
 		}
 		line := mark + focus(ffCheck, chk) + " " + focus(ffColumn, " "+col+" ▾ ") + " " + focus(ffOp, " "+f.Op+" ▾ ") + " " + valStr
 		lines = append(lines, fit(line, W))

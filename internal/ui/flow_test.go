@@ -795,7 +795,7 @@ func TestFlowFailingFilterStaysVisibleAndClearable(t *testing.T) {
 	h.press("enter")
 	h.want("invalid input syntax")
 	h.want("Filters (AND)") // the bar is shown even though the load failed
-	h.want("Alt+c")
+	h.want("clear all (in the bar)")
 	// the structure view is not blocked by the failed row load
 	h.prefix(")")
 	h.wantNot("invalid input syntax")

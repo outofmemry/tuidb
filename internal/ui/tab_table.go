@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"tuidb/internal/db"
 	"tuidb/internal/keymap"
@@ -959,14 +960,20 @@ func (t *tableTab) View(th Theme, W, H int) string {
 func (t *tableTab) bodyView(th Theme, W, H int) string {
 	switch {
 	case t.err != "" && t.view == viewData: // a failed row load must not hide the structure / DDL views
-		bar := t.filterView(th, W)
-		msg := []string{th.Err.Render("  error: ") + t.err}
-		if len(t.filters.Active()) > 0 {
-			msg = append(msg, "", th.Dim.Render("  A filter is active: edit it in the bar above, or clear all filters with Alt+c."))
+		msg := append(t.filterView(th, W), "", "  "+th.Err.Bold(true).Render("✗ Could not load "+t.ref.Name))
+		for _, l := range wrapText(t.err, max(10, W-6)) {
+			msg = append(msg, "    "+l)
 		}
-		return pad(strings.Join(append(bar, msg...), "\n"), W, H)
+		msg = append(msg, "")
+		if len(t.filters.Active()) > 0 {
+			msg = append(msg, "    "+th.Dim.Render("A filter is active and may be the cause."),
+				"    "+th.chips(t.keyFor("filters"), "edit it", "M-c", "clear all (in the bar)", t.keyFor("reload_tab"), "reload"))
+		} else {
+			msg = append(msg, "    "+th.chips(t.keyFor("reload_tab"), "reload"))
+		}
+		return pad(strings.Join(msg, "\n"), W, H)
 	case t.loading && len(t.grid.Cols) == 0 && t.view == viewData:
-		return pad(th.Dim.Render("  loading "+t.ref.Name+"…"), W, H)
+		return pad("\n  "+th.Warn.Render(t.ws.a.spinner())+th.Dim.Render(" loading "+t.ref.Name+"…"), W, H)
 	}
 	switch t.view {
 	case viewJSON:
@@ -981,29 +988,21 @@ func (t *tableTab) bodyView(th Theme, W, H int) string {
 		return t.structView(th, W, H)
 	}
 	bar := t.filterView(th, W)
-	if !t.showFilters && len(t.filters.Active()) > 0 { // hidden bar: the filters still show as chips
-		pre := keymap.Display(t.ws.a.d.Keys.Prefix)
-		var chips []string
-		for _, f := range t.filters.Active() {
-			col := f.Column
-			switch col {
-			case db.AnyColumn:
-				col = "any"
-			case db.RawColumn:
-				col = "sql"
-			}
-			chips = append(chips, th.chip(strings.TrimSpace(col+" "+f.Op+" "+f.Value)))
-		}
-		bar = []string{fit(th.Dim.Render("filters ")+strings.Join(chips, " ")+th.Dim.Render("   "+pre+" f edit · M-c clear"), W)}
+	if !t.showFilters && len(t.filters.Active()) > 0 { // hidden bar: the filters still show as pills
+		bar = []string{fit(" "+t.filterPills(th)+"   "+th.chips(t.keyFor("filters"), "edit"), W)}
 	}
 	t.grid.W, t.grid.H = W, max(2, H-len(bar))
 	var out string
 	if len(t.grid.Cols) > 0 && len(t.grid.Rows) == 0 && !t.loading {
-		out = t.grid.View(th, true)
-		out = strings.Join(append(strings.Split(out, "\n")[:1], th.Dim.Render(fit("  (no rows match)", W))), "\n")
-		for i := 2; i < t.grid.H; i++ {
-			out += "\n" + strings.Repeat(" ", W)
+		empty := th.Dim.Render("No rows match the filters") + "   " + th.chips(t.keyFor("filters"), "edit filters")
+		if len(t.filters.Active()) == 0 {
+			empty = th.Dim.Render("No rows yet")
+			if t.grid.Editable {
+				empty += "   " + th.chips(t.keyFor("add_row"), "add a row")
+			}
 		}
+		lines := append(strings.Split(t.grid.View(th, true), "\n")[:1], "", "  "+empty)
+		out = pad(strings.Join(lines, "\n"), W, t.grid.H)
 	} else {
 		out = t.grid.View(th, !t.ws.focusSB && !t.fb.focus)
 	}
@@ -1024,49 +1023,98 @@ func pad(s string, W, H int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (t *tableTab) footer(th Theme, W int) string {
-	pre := keymap.Display(t.ws.a.d.Keys.Prefix)
-	key := func(action string) string {
-		for _, b := range t.ws.a.d.Keys.All() {
-			if b.Action == action && !b.NoPrefix {
-				return pre + " " + keymap.Display(b.Key)
-			}
-		}
+// keyFor is the prefixed key bound to action, as shown in chips ("C-d f"); "" when unbound.
+func (t *tableTab) keyFor(action string) string {
+	k := firstKey(t.ws.a.d.Keys, action)
+	if k == "?" {
 		return ""
 	}
+	return keymap.Display(t.ws.a.d.Keys.Prefix) + " " + keymap.Display(k)
+}
+
+// filterPills renders the filters as pills (column bold, operator dim, value plain) joined by
+// the dim and/or; disabled filters are struck through.
+func (t *tableTab) filterPills(th Theme) string {
+	bg := lipgloss.Color(th.pal["header_bg"])
+	join := th.Dim.Render(" and ")
+	if t.filters.Or {
+		join = th.Dim.Render(" or ")
+	}
+	var pills []string
+	for _, f := range t.filters.Filters {
+		col := f.Column
+		switch col {
+		case db.AnyColumn:
+			col = "any column"
+		case db.RawColumn:
+			col = "sql"
+		}
+		if !f.Enabled {
+			pills = append(pills, th.Dim.Background(bg).Strikethrough(true).Render(" "+strings.TrimSpace(col+" "+f.Op+" "+f.Value)+" "))
+			continue
+		}
+		p := th.Bold.Background(bg).Render(" "+col) + th.Dim.Background(bg).Render(" "+f.Op)
+		if f.Value != "" {
+			p += lipgloss.NewStyle().Background(bg).Render(" " + f.Value)
+		}
+		pills = append(pills, p+lipgloss.NewStyle().Background(bg).Render(" "))
+	}
+	return th.Section.Render("Filters") + "  " + strings.Join(pills, join)
+}
+
+// pendingRows counts the rows with uncommitted edits, inserts or deletes.
+func (t *tableTab) pendingRows() int {
+	n := 0
+	for _, r := range t.grid.Rows {
+		if r.State != rowClean || len(r.Dirty) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+func (t *tableTab) footer(th Theme, W int) string {
 	var names, keys []string
 	active := 0
 	for i, id := range t.viewList() {
 		names = append(names, viewNames[id])
-		keys = append(keys, key(map[int]string{viewData: "show_data", viewStructure: "show_structure", viewIndex: "show_index", viewDDL: "show_ddl", viewJSON: "show_json", viewTree: "show_tree"}[id]))
+		keys = append(keys, t.keyFor(map[int]string{viewData: "show_data", viewStructure: "show_structure", viewIndex: "show_index", viewDDL: "show_ddl", viewJSON: "show_json", viewTree: "show_tree"}[id]))
 		if id == t.view {
 			active = i
 		}
 	}
 	left := th.segmented(names, keys, active)
 	right := ""
-	if t.view == viewData {
-		total := "…"
+	if t.view == viewData && t.err == "" { // after a failed load the old row range would mislead
+		var parts []string
+		if t.loading {
+			parts = append(parts, th.Warn.Render(t.ws.a.spinner())+th.Dim.Render(" loading"))
+		}
+		if n := t.pendingRows(); n > 0 {
+			parts = append(parts, th.Warn.Render(fmt.Sprintf("● %d pending", n)))
+		}
+		if len(t.hidden) > 0 {
+			parts = append(parts, th.Dim.Render(fmt.Sprintf("%d hidden col(s)", len(t.hidden))))
+		}
+		total := th.Dim.Render("…")
 		if t.counted {
-			total = fmt.Sprintf("%d", t.count.N)
+			total = th.Bold.Render(strconv.FormatInt(t.count.N, 10))
 			if !t.count.Exact {
-				total = "~" + total
+				total = th.Dim.Render("≈") + total // an estimate from the planner; C-d # counts exactly
 			}
 		}
 		first := t.offset + 1
 		if t.loadedRows == 0 {
 			first = 0
 		}
-		right = fmt.Sprintf("rows %d–%d of %s · %s", first, t.offset+t.loadedRows, total, t.took.Round(time.Millisecond))
-		if n := len(t.filters.Active()); n > 0 {
-			right = fmt.Sprintf("%d filter(s) · ", n) + right
+		parts = append(parts, th.Dim.Render("rows ")+th.Bold.Render(fmt.Sprintf("%d–%d", first, t.offset+t.loadedRows))+th.Dim.Render(" of ")+total)
+		if d := t.took.Round(time.Millisecond); d > 0 {
+			parts = append(parts, th.Dim.Render(d.String()))
 		}
-		if len(t.hidden) > 0 {
-			right = fmt.Sprintf("%d hidden col(s) · ", len(t.hidden)) + right
+		if t.offset > 0 || t.loadedRows >= t.limit {
+			parts = append(parts, th.chips(t.keyFor("page_settings"), "pages"))
 		}
-		if t.loading {
-			right = "loading… " + right
-		}
+		right = strings.Join(parts, th.Dim.Render(" · "))
 	}
 	gap := W - width(left) - width(right) - 1
 	if gap < 1 { // not enough room for the keys: names only, the frame hint still lists the keys
@@ -1074,9 +1122,9 @@ func (t *tableTab) footer(th Theme, W int) string {
 		gap = W - width(left) - width(right) - 1
 	}
 	if gap < 1 {
-		return fit(left+" "+th.Dim.Render(right), W)
+		return fit(left+" "+right, W)
 	}
-	return left + strings.Repeat(" ", gap) + th.Dim.Render(right) + " "
+	return left + strings.Repeat(" ", gap) + right + " "
 }
 
 // Hint is shown in the frame's bottom edge: the keys that matter for the current view.

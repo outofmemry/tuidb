@@ -299,7 +299,7 @@ func (s *sidebar) rows() []sbRow {
 			}
 		}
 		if len(rec) > 0 {
-			out = append(out, sbRow{kind: sbHeader, text: "Recent"})
+			out = appendSection(out, sbRow{kind: sbHeader, text: "Recent"})
 			out = append(out, rec...)
 		}
 	}
@@ -307,7 +307,7 @@ func (s *sidebar) rows() []sbRow {
 		if s.open == nil {
 			s.open = map[string]bool{}
 		}
-		out = append(out, sbRow{kind: sbHeader, text: fmt.Sprintf("Keys (%d)", len(s.objs))})
+		out = appendSection(out, sbRow{kind: sbHeader, text: fmt.Sprintf("Keys (%d)", len(s.objs))}) // keytree_test reads this
 		s.flattenKeys(buildKeyTree(s.objs), 0, &out)
 		return out
 	}
@@ -325,12 +325,21 @@ func (s *sidebar) rows() []sbRow {
 		title := map[db.Kind]string{db.KindTable: "Tables", db.KindView: "Views", db.KindMatView: "Materialized views", db.KindFunction: "Functions",
 			db.KindProcedure: "Procedures", db.KindSequence: "Sequences", db.KindType: "Types"}[o.Kind]
 		if o.Kind != section {
-			out = append(out, sbRow{kind: sbHeader, text: fmt.Sprintf("%s (%d)", title, counts[o.Kind])})
+			out = appendSection(out, sbRow{kind: sbHeader, text: title, count: counts[o.Kind]})
 			section = o.Kind
 		}
 		out = append(out, sbRow{kind: sbObject, obj: o, star: pinned[objKey(o.ObjRef)]})
 	}
 	return out
+}
+
+// appendSection adds a section header, after a blank spacer row when a section came before it.
+// The spacer is a header too, so the cursor skips it.
+func appendSection(out []sbRow, h sbRow) []sbRow {
+	if len(out) > 0 {
+		out = append(out, sbRow{kind: sbHeader})
+	}
+	return append(out, h)
 }
 
 func (s *sidebar) current() (sbRow, bool) {
@@ -883,13 +892,15 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 	}
 	switch {
 	case s.searching || s.q.Value() != "":
-		head = append(head, th.Accent.Render("/")+s.q.View(W-2, th, s.searching))
+		head = append(head, " "+th.Accent.Render("/")+" "+s.q.View(W-4, th, s.searching))
 	case s.tab == 0 && s.w.caps.Schemas:
 		head = append(head, fit(" "+th.Bold.Render(where)+th.Dim.Render("  s switch schema"), W))
 	case s.tab == 0:
 		head = append(head, fit(" "+th.Bold.Render(where), W))
+	case s.tab == 1:
+		head = append(head, fit(" "+th.Bold.Render("Saved queries")+th.Dim.Render(fmt.Sprintf(" · %d", len(s.queries))), W))
 	default:
-		head = append(head, "")
+		head = append(head, fit(" "+th.Bold.Render(s.w.conn.Name)+th.Dim.Render("  newest first"), W))
 	}
 	head = append(head, "")
 	rows := s.rows()
@@ -901,23 +912,39 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 	if s.sel >= s.top+listH {
 		s.top = s.sel - listH + 1
 	}
+	pk := func(action string) string { // a prefixed key for the empty-state chips
+		return keymap.Display(s.w.a.d.Keys.Prefix) + " " + keymap.Display(firstKey(s.w.a.d.Keys, action))
+	}
 	var body []string
 	switch {
 	case s.loading:
 		body = append(body, th.Warn.Render(" "+s.w.a.spinner())+th.Dim.Render(" loading…"))
 	case s.err != "":
-		body = append(body, th.Err.Render(fit(" "+s.err, W)))
+		body = append(body, " "+th.Err.Bold(true).Render("✗ Could not load"))
+		for _, l := range wrapText(s.err, max(8, W-3)) {
+			body = append(body, "   "+l)
+		}
+		body = append(body, "", " "+th.chips("r", "reload"))
 	case len(rows) == 0 && s.q.Value() != "":
-		body = append(body, th.Dim.Render(" nothing matches"))
+		body = append(body, th.Dim.Render(" Nothing matches"), "", " "+th.chips("Esc", "clear search"))
+	case len(rows) == 0 && s.tab == 1:
+		body = append(body, th.Dim.Render(" No saved queries yet"), "", " "+th.chips(pk("new_query_tab"), "new query"),
+			" "+th.Dim.Render("then ")+th.chip(pk("add_to_queries"))+th.Dim.Render(" saves it"))
+	case len(rows) == 0 && s.tab == 2:
+		body = append(body, th.Dim.Render(" Nothing run yet"), "", " "+th.chips(pk("new_query_tab"), "new query"))
 	case len(rows) == 0:
-		body = append(body, th.Dim.Render(" nothing here yet"))
+		body = append(body, th.Dim.Render(" Nothing here yet"), "", " "+th.chips("N", "new table"))
 	}
 	for i := s.top; i < min(len(rows), s.top+listH) && len(body) < listH; i++ {
 		r := rows[i]
 		var line string
 		switch r.kind {
 		case sbHeader:
-			line = th.Section.Render(fit(" "+r.text, W))
+			count := ""
+			if r.count > 0 {
+				count = th.Dim.Render(fmt.Sprintf(" · %d", r.count))
+			}
+			line = fit(" "+th.Section.Render(r.text)+count, W)
 		case sbObject:
 			mark := " "
 			if r.star {
@@ -939,9 +966,21 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 			}
 			line = fit(" "+strings.Repeat("  ", r.depth)+th.Accent.Render(arrow)+" "+r.text+th.Dim.Render(fmt.Sprintf("  %d", r.count)), W)
 		case sbQuery:
-			line = fit(" ƒ "+r.q.Name, W)
+			name := th.Bold.Render(r.q.Name)
+			if r.q.Folder != "" {
+				name = th.Dim.Render(r.q.Folder+"/") + name
+			}
+			kw := ""
+			if len(r.q.Keywords) > 0 {
+				kw = th.Dim.Render("  " + strings.Join(r.q.Keywords, ", "))
+			}
+			line = fit(" "+th.Accent.Render("≡")+" "+name+kw, W)
 		case sbHistory:
-			line = fit(" "+r.h.Time.Format("01-02 15:04")+" "+strings.Join(strings.Fields(r.h.SQL), " "), W)
+			when := r.h.Time.Format("Jan 02")
+			if r.h.Time.Format(time.DateOnly) == time.Now().Format(time.DateOnly) { // today: the time is enough
+				when = r.h.Time.Format("15:04")
+			}
+			line = fit(" "+th.Dim.Render(fit(when, 6))+" "+strings.Join(strings.Fields(r.h.SQL), " "), W)
 		}
 		if i == s.sel && r.kind != sbHeader {
 			st := th.SelRow
