@@ -1140,7 +1140,7 @@ func TestFlowQuickLookOpensJSONTree(t *testing.T) {
 	g.GoCol(2, false)
 	h.prefix("enter") // quick_look
 	h.want("Quick look: email")
-	h.want("{2 fields}")
+	h.want("{2}")
 	h.press("r")
 	h.want(`"a": [`)
 }

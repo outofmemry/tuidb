@@ -340,59 +340,54 @@ func (t *tableTab) structView(th Theme, W, H int) string {
 		return pad(th.Dim.Render("  loading structure…"), W, H)
 	}
 	if t.structErr != "" {
-		return pad(th.Err.Render("  error: ")+t.structErr, W, H)
+		return pad(th.Err.Render("  ✗ ")+t.structErr, W, H)
 	}
 	switch t.view {
 	case viewStructure:
+		pk := func(r *gridRow) bool { return cellStr(r.Cur[scPK]) == "YES" }
 		if t.creating {
 			H--
-			head := th.Warn.Render(fit(" new table "+t.ref.Name+" — add columns with the add-row key, then commit to create it", W))
-			t.structGrid.W, t.structGrid.H = W, H
-			return head + "\n" + t.structGrid.View(th, true)
+			head := fit(" "+th.OK.Render("+")+" "+th.Bold.Render("new table "+t.ref.Name)+
+				th.Dim.Render("  ·  add columns with the add-row key, then commit to create it"), W)
+			return head + "\n" + railView(th, t.structGrid, W, H, pk)
 		}
-		t.structGrid.W, t.structGrid.H = W, H
-		return t.structGrid.View(th, true)
+		return railView(th, t.structGrid, W, H, pk)
 	case viewIndex:
 		if !t.ws.caps.Indexes {
 			return pad(th.Dim.Render("  "+t.ws.conn.Driver+" has no Index tab"), W, H)
 		}
-		t.idxGrid.W, t.idxGrid.H = W, H
 		if len(t.idxGrid.Rows) == 0 {
-			return pad(th.Dim.Render("  no indexes — add one with the add-row key"), W, H)
+			t.idxGrid.W, t.idxGrid.H = W, H
+			return pad(th.Dim.Render("  no indexes  ·  add one with the add-row key"), W, H)
 		}
-		return t.idxGrid.View(th, true)
+		return railView(th, t.idxGrid, W, H, nil)
+	}
+	if t.ddl == "" {
+		return pad(th.Dim.Render("  loading DDL…"), W, H)
 	}
 	lines := strings.Split(strings.TrimRight(t.ddl, "\n"), "\n")
-	if t.ddl == "" {
-		lines = []string{"  loading DDL…"}
-	}
 	t.ddlTop = clamp(t.ddlTop, 0, max(0, len(lines)-H))
-	kinds := lexLines(t.ws.caps.Dialect, lines)
-	var out []string
-	for i := t.ddlTop; i < min(len(lines), t.ddlTop+H); i++ {
-		out = append(out, " "+highlight(th, lines[i], kinds[i]))
-	}
-	for len(out) < H {
-		out = append(out, "")
-	}
-	for i := range out {
-		out[i] = fit(out[i], W)
-	}
-	return strings.Join(out, "\n")
+	return codeView(th, lines, lexLines(t.ws.caps.Dialect, lines), t.ddlTop, W, H)
 }
 
-// highlight colors one line using lexer kinds, one Render call per run of equal kind.
+// highlight colors one line using lexer (or jsonKinds) kinds, one Render call per run of equal kind.
 func highlight(th Theme, line string, kinds []tokKind) string {
 	var sb strings.Builder
 	r := []rune(line)
+	kind := func(i int) tokKind {
+		if i < len(kinds) {
+			return kinds[i]
+		}
+		return tkText
+	}
 	for i := 0; i < len(r); {
 		j := i
-		for j < len(r) && kinds[j] == kinds[i] {
+		for j < len(r) && kind(j) == kind(i) {
 			j++
 		}
 		st := th.Cell
-		switch kinds[i] {
-		case tokKindKeyword:
+		switch kind(i) {
+		case tkKeyword, tkBool:
 			st = th.Keyword
 		case tkString:
 			st = th.String
@@ -400,6 +395,12 @@ func highlight(th Theme, line string, kinds []tokKind) string {
 			st = th.Comment
 		case tkNumber:
 			st = th.Number
+		case tkKey:
+			st = th.Accent
+		case tkPunct:
+			st = th.Dim
+		case tkNullLit:
+			st = th.Null
 		}
 		sb.WriteString(st.Render(string(r[i:j])))
 		i = j
@@ -407,7 +408,49 @@ func highlight(th Theme, line string, kinds []tokKind) string {
 	return sb.String()
 }
 
-const tokKindKeyword = tkKeyword
+// codeView is a read-only code pane: an editor-style dim line-number gutter, then highlighted text.
+func codeView(th Theme, lines []string, kinds [][]tokKind, top, W, H int) string {
+	gw := max(3, len(fmt.Sprint(len(lines)))) + 1
+	out := make([]string, H)
+	for i := range out {
+		if li := top + i; li < len(lines) {
+			out[i] = th.Dim.Render(padLeft(fmt.Sprint(li+1), gw-1)+" ") + " " + highlight(th, lines[li], kinds[li])
+		}
+		out[i] = fit(out[i], W)
+	}
+	return strings.Join(out, "\n")
+}
+
+// railView draws g with a two-cell rail on its left: a symbol for each pending row (+ new,
+// ✗ deleted, ● modified) and ⚷ on primary-key columns, so neither relies on the row tint alone.
+func railView(th Theme, g *Grid, W, H int, pk func(r *gridRow) bool) string {
+	g.W, g.H = max(0, W-2), H
+	lines := strings.Split(g.View(th, true), "\n")
+	for i, l := range lines {
+		rail := th.HeaderCell.Render("  ")
+		if ri := g.top + i - 1; i > 0 { // line 0 is the header; g.top is settled by View
+			rail = "  "
+			if ri < len(g.Rows) {
+				r := g.Rows[ri]
+				state, key := " ", " "
+				switch {
+				case r.State == rowNew:
+					state = th.OK.Render("+")
+				case r.State == rowDeleted:
+					state = th.Err.Render("✗")
+				case len(r.Dirty) > 0:
+					state = th.Warn.Render("●")
+				}
+				if pk != nil && pk(r) {
+					key = th.Warn.Render("⚷")
+				}
+				rail = state + key
+			}
+		}
+		lines[i] = rail + l
+	}
+	return strings.Join(lines, "\n")
+}
 
 // ---- input ------------------------------------------------------------------------------
 
