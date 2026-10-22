@@ -76,22 +76,28 @@ func (s *session) Objects(ctx context.Context, _ string) ([]db.Object, error) {
 }
 
 func (s *session) loadColumns(ctx context.Context, ref db.ObjRef) ([]db.Column, error) {
-	rows, err := s.db().QueryContext(ctx, `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_KEY, DATA_TYPE
-		FROM information_schema.columns WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`, s.schemaOf(ref), ref.Name)
+	// The collation is only loaded where it differs from the table's: MODIFY without one keeps the table default.
+	rows, err := s.db().QueryContext(ctx, `SELECT c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT, c.EXTRA, c.COLUMN_KEY, c.DATA_TYPE,
+			c.COLUMN_COMMENT, IF(c.COLLATION_NAME <> t.TABLE_COLLATION, c.COLLATION_NAME, NULL), c.GENERATION_EXPRESSION
+		FROM information_schema.columns c JOIN information_schema.tables t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
+		WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ? ORDER BY c.ORDINAL_POSITION`, s.schemaOf(ref), ref.Name)
 	if err != nil {
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
 	defer rows.Close()
 	var out []db.Column
 	for rows.Next() {
-		var name, typ, nullable, extra, key, dataType string
-		var def sql.NullString
-		if err := rows.Scan(&name, &typ, &nullable, &def, &extra, &key, &dataType); err != nil {
+		var name, typ, nullable, extra, key, dataType, comment string
+		var def, coll, gen sql.NullString
+		if err := rows.Scan(&name, &typ, &nullable, &def, &extra, &key, &dataType, &comment, &coll, &gen); err != nil {
 			return nil, err
 		}
 		c := db.Column{Name: name, OrigName: name, Type: typ, Nullable: nullable == "YES", PK: key == "PRI"}
 		c.Default, c.HasDef = columnDefault(dataType, def, extra, s.maria)
-		c.Extra = strings.TrimSpace(strings.ReplaceAll(extra, "DEFAULT_GENERATED", ""))
+		c.Extra = columnExtra(extra, gen.String, comment, s.maria)
+		if coll.Valid { // part of the type so it stays right after it, where generated columns need it
+			c.Type += " COLLATE " + coll.String
+		}
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -116,6 +122,34 @@ func (s *session) Columns(ctx context.Context, ref db.ObjRef) ([]db.Column, erro
 		}
 	}
 	return cols, nil
+}
+
+// columnExtra is the column's SQL after type, nullability and default: EXTRA (auto_increment,
+// on update ...), the full GENERATED ALWAYS AS clause in place of EXTRA's bare "STORED GENERATED",
+// and the comment, so a MODIFY/CHANGE rebuilt from it keeps all of them.
+func columnExtra(extra, gen, comment string, maria bool) string {
+	e := strings.TrimSpace(strings.ReplaceAll(extra, "DEFAULT_GENERATED", ""))
+	if gen != "" {
+		kind := "VIRTUAL"
+		if strings.Contains(e, "STORED") || strings.Contains(e, "PERSISTENT") {
+			kind = "STORED"
+		}
+		if !maria {
+			gen = unescapeExpr(gen)
+		}
+		rest := strings.NewReplacer("VIRTUAL GENERATED", "", "STORED GENERATED", "", "PERSISTENT GENERATED", "").Replace(e)
+		e = strings.TrimSpace("GENERATED ALWAYS AS (" + gen + ") " + kind + " " + strings.TrimSpace(rest))
+	}
+	if comment != "" {
+		e = strings.TrimSpace(e + " COMMENT " + quote(comment))
+	}
+	return e
+}
+
+// unescapeExpr undoes MySQL 8's extra escaping of quotes in information_schema expressions
+// (GENERATION_EXPRESSION, statistics.EXPRESSION show _utf8mb4\'x\' for _utf8mb4'x').
+func unescapeExpr(s string) string {
+	return strings.NewReplacer(`\\`, `\`, `\'`, `'`).Replace(s)
 }
 
 var rawDefault = map[string]bool{"tinyint": true, "smallint": true, "mediumint": true, "int": true, "bigint": true,
@@ -144,7 +178,11 @@ func quote(s string) string {
 }
 
 func (s *session) Indexes(ctx context.Context, ref db.ObjRef) ([]db.Index, error) {
-	rows, err := s.db().QueryContext(ctx, `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME, INDEX_TYPE FROM information_schema.statistics
+	expr := "NULL"
+	if hasIndexExpr(s.info) {
+		expr = "EXPRESSION"
+	}
+	rows, err := s.db().QueryContext(ctx, `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME, INDEX_TYPE, `+expr+` FROM information_schema.statistics
 		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY INDEX_NAME = 'PRIMARY' DESC, INDEX_NAME, SEQ_IN_INDEX`, s.schemaOf(ref), ref.Name)
 	if err != nil {
 		return nil, fmt.Errorf("list indexes: %w", err)
@@ -154,21 +192,32 @@ func (s *session) Indexes(ctx context.Context, ref db.ObjRef) ([]db.Index, error
 	for rows.Next() {
 		var name, algo string
 		var nonUnique int
-		var col sql.NullString
-		if err := rows.Scan(&name, &nonUnique, &col, &algo); err != nil {
+		var col, ex sql.NullString
+		if err := rows.Scan(&name, &nonUnique, &col, &algo, &ex); err != nil {
 			return nil, err
 		}
 		if len(out) == 0 || out[len(out)-1].Name != name {
 			out = append(out, db.Index{Name: name, Unique: nonUnique == 0, Primary: name == "PRIMARY", Algorithm: algo})
 		}
 		c := col.String
-		if !col.Valid {
-			c = "(expression)"
+		if !col.Valid { // functional key part: kept as "(expr)", which indexSQL emits raw
+			c = "(" + unescapeExpr(ex.String) + ")"
 		}
 		last := &out[len(out)-1]
 		last.Columns = append(last.Columns, c)
 	}
 	return out, rows.Err()
+}
+
+// hasIndexExpr: statistics.EXPRESSION (functional key parts) exists since MySQL 8.0.13; MariaDB has neither.
+func hasIndexExpr(info string) bool {
+	v, ok := strings.CutPrefix(info, "MySQL ")
+	if !ok {
+		return false
+	}
+	var a, b, c int
+	fmt.Sscanf(v, "%d.%d.%d", &a, &b, &c)
+	return a > 8 || a == 8 && (b > 0 || c >= 13)
 }
 
 func (s *session) Triggers(ctx context.Context, ref db.ObjRef) ([]db.Trigger, error) {

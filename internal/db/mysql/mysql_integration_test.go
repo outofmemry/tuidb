@@ -652,3 +652,78 @@ func TestIntegrationScripts(t *testing.T) {
 		t.Errorf("drop view: %q", got)
 	}
 }
+
+// Comments, collations, generated columns and functional indexes survive a structure edit and a copy.
+func TestIntegrationPlanTableKeepsAttributes(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	tbl := tempTable(t, s)
+	copied := tbl + "_c"
+	t.Cleanup(func() { s.db().Exec("DROP TABLE IF EXISTS " + q(copied)) })
+	exec(t, s, "CREATE TABLE "+q(tbl)+` (id INT PRIMARY KEY, a VARCHAR(10) COLLATE utf8mb4_bin COMMENT 'it''s a \\ note',
+		g VARCHAR(30) AS (concat(a, 'x''y')) VIRTUAL COMMENT 'gen', h INT AS (length(a) + 1) STORED NOT NULL, INDEX fx ((lower(a))))`)
+	loaded := tableDef(t, s, tbl)
+	if st, err := s.PlanTable(loaded, tableDef(t, s, tbl)); err != nil || len(st) != 0 {
+		t.Fatalf("self diff: %v %v", st, err)
+	}
+	next := tableDef(t, s, tbl)
+	next.Columns[1].Type = strings.Replace(next.Columns[1].Type, "(10)", "(20)", 1)
+	next.Columns[2].Type = strings.Replace(next.Columns[2].Type, "(30)", "(40)", 1)
+	next.Columns[3].Type = "bigint"
+	next.Indexes[1].Unique = true // forces DROP INDEX + ADD of the functional index
+	st, err := s.PlanTable(loaded, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Apply(ctx, st); err != nil {
+		t.Fatalf("%v\n%s", err, st[0].Text)
+	}
+	check := func(name string) {
+		t.Helper()
+		got := tableDef(t, s, name)
+		c := got.Columns
+		if c[1].Type != "varchar(20) COLLATE utf8mb4_bin" || c[1].Extra != `COMMENT 'it''s a \\ note'` {
+			t.Errorf("%s a: %+v", name, c[1])
+		}
+		if c[2].Extra != "GENERATED ALWAYS AS (concat(`a`,_utf8mb4'x\\'y')) VIRTUAL COMMENT 'gen'" || c[2].Type != "varchar(40)" {
+			t.Errorf("%s g: %+v", name, c[2])
+		}
+		if c[3].Extra != "GENERATED ALWAYS AS ((length(`a`) + 1)) STORED" || c[3].Type != "bigint" || c[3].Nullable {
+			t.Errorf("%s h: %+v", name, c[3])
+		}
+		if ix := got.Indexes[1]; ix.Name != "fx" || !ix.Unique || strings.Join(ix.Columns, ",") != "(lower(`a`))" {
+			t.Errorf("%s index: %+v", name, ix)
+		}
+	}
+	check(tbl)
+	exec(t, s, "INSERT INTO "+q(tbl)+" (id, a) VALUES (1, 'q')")
+	if r := exec(t, s, "SELECT g, h FROM "+q(tbl)); r.Rows[0][0] != "qx'y" || r.Rows[0][1] != int64(2) {
+		t.Errorf("generated values %v", r.Rows)
+	}
+
+	cp := tableDef(t, s, tbl)
+	cp.Name = copied
+	if st, err = s.PlanTable(nil, cp); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Apply(ctx, st); err != nil {
+		t.Fatalf("%v\n%s", err, st[0].Text)
+	}
+	check(copied)
+}
+
+func TestIntegrationApplyDDLStopsAndReports(t *testing.T) {
+	s := open(t)
+	tbl := tempTable(t, s)
+	err := s.Apply(context.Background(), []db.Statement{
+		{Text: "CREATE TABLE " + q(tbl) + " (id INT)"},
+		{Text: "ALTER TABLE " + q(tbl) + " ADD COLUMN nope NOT_A_TYPE"},
+		{Text: "ALTER TABLE " + q(tbl) + " ADD COLUMN never INT"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "statement 2") || !strings.Contains(err.Error(), "1 of 3 statements were already applied") {
+		t.Fatalf("error %v", err)
+	}
+	if cols := tableDef(t, s, tbl).Columns; len(cols) != 1 {
+		t.Errorf("columns after partial batch %+v", cols)
+	}
+}

@@ -119,6 +119,13 @@ func columnSQL(c db.Column) (string, error) {
 		return "", fmt.Errorf("column %q needs a name and a type", c.Name)
 	}
 	t := q(c.Name) + " " + c.Type
+	if strings.HasPrefix(strings.ToUpper(c.Extra), "GENERATED ALWAYS AS") { // the AS clause goes first; no DEFAULT allowed
+		t += " " + c.Extra
+		if !c.Nullable {
+			t += " NOT NULL"
+		}
+		return t, nil
+	}
 	if c.Nullable {
 		t += " NULL"
 	} else {
@@ -159,7 +166,13 @@ func indexSQL(ix db.Index) (string, error) {
 	if ix.Name != "" {
 		kw += " " + q(ix.Name)
 	}
-	return kw + " (" + colList(ix.Columns) + ")", nil
+	parts := make([]string, len(ix.Columns))
+	for i, c := range ix.Columns {
+		if parts[i] = c; !strings.HasPrefix(c, "(") { // "(expr)" is a functional key part, emitted raw
+			parts[i] = q(c)
+		}
+	}
+	return kw + " (" + strings.Join(parts, ", ") + ")", nil
 }
 
 var fkRules = map[string]bool{"": true, "NO ACTION": true, "RESTRICT": true, "CASCADE": true, "SET NULL": true, "SET DEFAULT": true}

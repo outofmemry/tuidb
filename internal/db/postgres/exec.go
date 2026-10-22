@@ -152,7 +152,9 @@ func normalize(tm *pgtype.Map, oid uint32, b []byte) any {
 				return out
 			}
 		}
-	case pgtype.DateOID, pgtype.TimestampOID, pgtype.TimestamptzOID:
+	// timestamptz stays the server's text: it carries the offset, so the shown value, a filter on it
+	// and a key written back all denote the same instant whatever the client and session zones are.
+	case pgtype.DateOID, pgtype.TimestampOID:
 		var t time.Time
 		if err := tm.Scan(oid, pgtype.TextFormatCode, b, &t); err == nil { // infinity falls through as text
 			return t
@@ -264,7 +266,7 @@ func (s *session) Count(ctx context.Context, q db.RowQuery, estimate bool) (db.C
 		if err != nil {
 			return db.Count{}, fmt.Errorf("estimate rows: %w", err)
 		}
-		if n >= 0 {
+		if n > 0 { // -1 is never analyzed, 0 can be stale stats of a filled table: count exactly
 			return db.Count{N: n}, nil
 		}
 	}

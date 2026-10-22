@@ -303,3 +303,51 @@ func TestSearchableSkipsBinary(t *testing.T) {
 		}
 	}
 }
+
+func TestColumnExtra(t *testing.T) {
+	for _, c := range []struct{ extra, gen, comment, want string }{
+		{"auto_increment", "", "it's", "auto_increment COMMENT 'it''s'"},
+		{"DEFAULT_GENERATED on update CURRENT_TIMESTAMP", "", "", "on update CURRENT_TIMESTAMP"},
+		{"STORED GENERATED", "(length(`a`) + 1)", "", "GENERATED ALWAYS AS ((length(`a`) + 1)) STORED"},
+		{"VIRTUAL GENERATED INVISIBLE", `concat(` + "`a`" + `,_utf8mb4\'x\\\'y\')`, "c", `GENERATED ALWAYS AS (concat(` + "`a`" + `,_utf8mb4'x\'y')) VIRTUAL INVISIBLE COMMENT 'c'`},
+	} {
+		if got := columnExtra(c.extra, c.gen, c.comment, false); got != c.want {
+			t.Errorf("%q %q: got %s want %s", c.extra, c.gen, got, c.want)
+		}
+	}
+}
+
+func TestColumnSQLGeneratedAndCollation(t *testing.T) {
+	gen := db.Column{Name: "g", Type: "varchar(20) COLLATE utf8mb4_bin", Extra: "GENERATED ALWAYS AS (upper(`a`)) STORED COMMENT 'x'"}
+	if got, _ := columnSQL(gen); got != "`g` varchar(20) COLLATE utf8mb4_bin GENERATED ALWAYS AS (upper(`a`)) STORED COMMENT 'x' NOT NULL" {
+		t.Errorf("generated: %s", got)
+	}
+	gen.Nullable = true
+	if got, _ := columnSQL(gen); strings.Contains(got, "NULL") {
+		t.Errorf("nullable generated: %s", got)
+	}
+}
+
+func TestIndexSQLFunctionalPart(t *testing.T) {
+	got, err := indexSQL(db.Index{Name: "fx", Columns: []string{"a", "(lower(`b`))"}})
+	if err != nil || got != "INDEX `fx` (`a`, (lower(`b`)))" {
+		t.Errorf("%s %v", got, err)
+	}
+}
+
+func TestHasIndexExpr(t *testing.T) {
+	for info, want := range map[string]bool{"MySQL 8.4.3": true, "MySQL 8.0.13": true, "MySQL 8.0.12": false, "MySQL 5.7.44-log": false, "MySQL 9.1.0": true, "MariaDB 11.4.2": false} {
+		if got := hasIndexExpr(info); got != want {
+			t.Errorf("%s: %v", info, got)
+		}
+	}
+}
+
+func TestIsDDL(t *testing.T) {
+	for text, want := range map[string]bool{"ALTER TABLE `t` DROP FOREIGN KEY `f`": true, "\n  create table x (a int)": true, "rename table a to b": true, "TRUNCATE TABLE t": true,
+		"INSERT INTO t VALUES (1)": false, "UPDATE t SET a = 1": false, "": false} {
+		if got := isDDL(text); got != want {
+			t.Errorf("%q: %v", text, got)
+		}
+	}
+}

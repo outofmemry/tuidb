@@ -234,7 +234,25 @@ func convertArg(a any) any {
 	return a
 }
 
+// isDDL: MySQL commits implicitly around these, so a transaction cannot undo them.
+func isDDL(text string) bool {
+	f := strings.Fields(text)
+	if len(f) == 0 {
+		return false
+	}
+	switch strings.ToUpper(f[0]) {
+	case "CREATE", "ALTER", "DROP", "RENAME", "TRUNCATE":
+		return true
+	}
+	return false
+}
+
 func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
+	for _, st := range stmts {
+		if isDDL(st.Text) {
+			return s.applyDDL(ctx, stmts)
+		}
+	}
 	tx, err := s.db().BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -254,6 +272,27 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 	s.mu.Unlock()
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
+
+// applyDDL runs a batch holding DDL one statement at a time without a transaction (it could not
+// roll DDL back anyway), stops at the first error and says what was already applied.
+func (s *session) applyDDL(ctx context.Context, stmts []db.Statement) error {
+	defer func() {
+		s.mu.Lock()
+		s.cols = map[string][]string{} // DDL may have changed column lists
+		s.mu.Unlock()
+	}()
+	for i, st := range stmts {
+		args := make([]any, len(st.Args))
+		for j, a := range st.Args {
+			args[j] = convertArg(a)
+		}
+		if _, err := s.db().ExecContext(ctx, st.Text, args...); err != nil {
+			return fmt.Errorf("statement %d (%s): %w (%d of %d statements were already applied and stay applied: MySQL cannot roll back DDL)",
+				i+1, st.Shown(), err, i, len(stmts))
+		}
 	}
 	return nil
 }
