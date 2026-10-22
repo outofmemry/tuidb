@@ -33,6 +33,19 @@ func TestParseDocKeepsOrderAndNesting(t *testing.T) {
 	}
 }
 
+func TestJSONKinds(t *testing.T) {
+	line := `  "k\"x": "v:", -1.5e3, true, null`
+	k := jsonKinds(line)
+	r := []rune(line)
+	at := func(sub string) tokKind { return k[len([]rune(line[:strings.Index(line, sub)]))] }
+	if len(k) != len(r) || at(`"k`) != tkKey || at(`"v`) != tkString || at("-1") != tkNumber || at("true") != tkBool || at("null") != tkNullLit || at(",") != tkPunct {
+		t.Errorf("kinds: %v", k)
+	}
+	if k[strings.Index(line, `x"`)] != tkKey {
+		t.Error("an escaped quote does not end the key")
+	}
+}
+
 func TestDocTreeNavigation(t *testing.T) {
 	tr := newDocTree([]string{`{"name":"Ann","tags":["a","b"]}`, `{"name":"Bob"}`})
 	if got := len(tr.rows()); got != 2+1+1+0 && got != 5 { // [0] open: name,tags ; [1] open: name
@@ -79,7 +92,7 @@ func TestFlowDocumentViews(t *testing.T) {
 	h.want(`"name": "Ann"`)
 	h.want(`"city": "Oslo"`)
 	h.prefix("T")
-	h.want("{4 fields}")
+	h.want("{4}")
 	h.press("down", "down", "down", "enter") // expand "tags"... whichever composite is selected
 	h.prefix("(")                            // back to data
 	h.want("ann@x.io")
@@ -126,11 +139,11 @@ func TestQuickLookTreeForJSONRawForText(t *testing.T) {
 		t.Fatal("JSON opens as a tree")
 	}
 	th := NewTheme(configTheme())
-	if v := q.View(th, 80, 24); !strings.Contains(v, "tier") || !strings.Contains(v, "{2 fields}") {
+	if v := stripANSI(q.View(th, 80, 24)); !strings.Contains(v, "tier") || !strings.Contains(v, "{2}") {
 		t.Errorf("tree view: %s", v)
 	}
 	q.Update(keyMsg("r"))
-	if v := q.View(th, 80, 24); !strings.Contains(v, `"tier": "gold"`) {
+	if v := stripANSI(q.View(th, 80, 24)); !strings.Contains(v, `"tier": "gold"`) {
 		t.Errorf("r shows pretty raw text: %s", v)
 	}
 	if p := newQuickLook("note", "just some text\nover two lines"); p.tree != nil || !p.raw {
