@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"tuidb/internal/db"
 	"tuidb/internal/keymap"
@@ -191,6 +192,20 @@ func objKey(o db.ObjRef) string {
 func (s *sidebar) cfg() (showRecent, showFn, showSeq, showTypes bool, fuzzyMode bool) {
 	c := s.w.a.d.Cfg.Sidebar
 	return c.ShowRecent, c.ShowFunctions && s.w.caps.Functions, c.ShowSequences && s.w.caps.Sequences, c.ShowTypes, c.Matching != "contains"
+}
+
+// objStyle colors an object icon by kind so the sections read at a glance: tables in the
+// accent, views in the keyword color, code in the number color, the rest dim.
+func objStyle(th Theme, k db.Kind) lipgloss.Style {
+	switch k {
+	case db.KindView, db.KindMatView:
+		return th.Keyword
+	case db.KindFunction, db.KindProcedure:
+		return th.Number
+	case db.KindSequence, db.KindType:
+		return th.Dim
+	}
+	return th.Accent
 }
 
 func objIcon(k db.Kind) string {
@@ -848,13 +863,9 @@ func (w *Workspace) closeTabsFor(ref db.ObjRef, closeThem bool) {
 	}
 }
 
-func (s *sidebar) title() string {
-	t := []string{"Objects", "Saved queries", "History"}[s.tab]
-	sub := s.w.sess.CurrentDatabase()
-	if s.w.caps.Schemas {
-		sub += "." + s.schema
-	}
-	return t + " · " + sub
+// title is the sidebar's tab strip, set into the frame's top edge like the main pane's tabs.
+func (s *sidebar) title(th Theme) string {
+	return th.segmented([]string{"Objects", "Queries", "History"}, nil, s.tab)
 }
 
 func (s *sidebar) hint(th Theme) string {
@@ -865,18 +876,22 @@ func (s *sidebar) hint(th Theme) string {
 }
 
 func (s *sidebar) view(th Theme, W, H int, focused bool) string {
-	keys := []string{"1", "2", "3"}
-	if W < 36 {
-		keys = nil // the key numbers do not fit in a narrow sidebar; the hint line still says 1-3
+	var head []string
+	where := s.w.sess.CurrentDatabase()
+	if s.w.caps.Schemas {
+		where += "." + s.schema
 	}
-	head := []string{th.segmented([]string{"Objects", "Queries", "History"}, keys, s.tab)}
-	if s.searching || s.q.Value() != "" {
+	switch {
+	case s.searching || s.q.Value() != "":
 		head = append(head, th.Accent.Render("/")+s.q.View(W-2, th, s.searching))
-	} else if s.w.caps.Schemas && s.tab == 0 {
-		head = append(head, th.Dim.Render(fit(" schema "+s.schema+"  (s to switch)", W)))
-	} else {
+	case s.tab == 0 && s.w.caps.Schemas:
+		head = append(head, fit(" "+th.Bold.Render(where)+th.Dim.Render("  s switch schema"), W))
+	case s.tab == 0:
+		head = append(head, fit(" "+th.Bold.Render(where), W))
+	default:
 		head = append(head, "")
 	}
+	head = append(head, "")
 	rows := s.rows()
 	listH := max(1, H-len(head))
 	s.sel = clamp(s.sel, 0, max(0, len(rows)-1))
@@ -916,7 +931,7 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 			if r.label != "" {
 				name = r.label
 			}
-			line = fit(" "+strings.Repeat("  ", r.depth)+mark+th.Accent.Render(objIcon(r.obj.Kind))+" "+name+detail, W)
+			line = fit(" "+strings.Repeat("  ", r.depth)+mark+objStyle(th, r.obj.Kind).Render(objIcon(r.obj.Kind))+" "+name+detail, W)
 		case sbFolder:
 			arrow := "▸"
 			if r.open {

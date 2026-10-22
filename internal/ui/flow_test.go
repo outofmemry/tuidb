@@ -18,7 +18,7 @@ func TestFlowConnectBrowse(t *testing.T) {
 	h.want("shop") // welcome lists the connection
 	h.want("connect")
 	h.connect()
-	h.want("Objects · shop.public") // sidebar frame title
+	h.want("shop.public") // sidebar shows where it is
 	h.want("Tables")
 	h.want("Views")
 	h.openCustomers()

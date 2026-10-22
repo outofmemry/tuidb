@@ -504,7 +504,7 @@ func (a *App) whichKey(w int) []string {
 				i := c*rows + r
 				if i < len(es) {
 					e := es[i]
-					sb.WriteString(" " + a.th.Key.Render(fit(e.key, 10)) + fit(e.desc, colW-12) + " ")
+					sb.WriteString(" " + a.th.chip(e.key) + strings.Repeat(" ", max(1, 11-width(e.key))) + fit(e.desc, colW-13) + " ")
 					shown++
 				}
 			}
@@ -516,7 +516,11 @@ func (a *App) whichKey(w int) []string {
 		return out
 	}
 	title := strings.ToUpper(ctx[:1]) + ctx[1:]
-	out := []string{a.th.Prefix.Render(fit(" "+keymap.Display(a.d.Keys.Prefix)+" …  press a key   (Esc cancels, "+keymap.Display(a.d.Keys.Prefix)+" again sends it literally)", w))}
+	pre := keymap.Display(a.d.Keys.Prefix)
+	out := []string{
+		a.th.Popup.Render(a.th.Border.Render(strings.Repeat("─", w))),
+		a.th.Popup.Render(fit(a.th.Prefix.Render(" "+pre+" … ")+a.th.Popup.Bold(true).Render(" press a key")+a.th.Popup.Foreground(lipgloss.Color(a.th.pal["dim"])).Render("   Esc cancels  ·  "+pre+" again sends it literally"), w)),
+	}
 	out = append(out, layout(local, title)...)
 	out = append(out, layout(global, "Global")...)
 	return out

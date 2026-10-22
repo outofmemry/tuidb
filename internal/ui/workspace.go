@@ -957,14 +957,14 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	}
 	var cols []string
 	if sbW > 0 {
-		cols = append(cols, frame(th, w.sb.title(), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
+		cols = append(cols, frame(th, w.sb.title(th), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
 	}
 	mainTitle := w.conn.Name
 	var mainHint string
 	if t := w.tab(); t != nil {
-		mainTitle = t.Title()
+		mainTitle = w.tabBar(th)
 		if b, ok := t.(interface{ Busy() bool }); ok && b.Busy() {
-			mainTitle += " · loading…"
+			mainTitle += th.Warn.Render(" loading…")
 		}
 		if h, ok := t.(interface{ Hint(Theme) string }); ok {
 			mainHint = h.Hint(th)
@@ -985,10 +985,10 @@ func borderCol(th Theme, h int) string {
 	return strings.TrimRight(strings.Repeat(th.Border.Render("│")+"\n", h), "\n")
 }
 
-func (w *Workspace) mainView(th Theme, W, H int) string {
-	var lines []string
-	// tab bar: "1 ▦ customers ●" per tab; the active one is highlighted, dimmed while the sidebar has focus
-	var bar strings.Builder
+// tabBar renders "1 ▦ customers ●" per tab for the main frame's top edge; the active one is
+// highlighted, dimmed while the sidebar has focus.
+func (w *Workspace) tabBar(th Theme) string {
+	var bar []string
 	for i, t := range w.tabs {
 		icon := "▦"
 		if _, ok := t.(*queryTab); ok {
@@ -1001,19 +1001,20 @@ func (w *Workspace) mainView(th Theme, W, H int) string {
 		label := fmt.Sprintf(" %d %s %s ", i+1, icon, fit(title, min(width(title), 24)))
 		switch {
 		case i == w.cur && !w.focusSB:
-			bar.WriteString(th.TabActive.Render(label))
+			bar = append(bar, th.TabActive.Render(label))
 		case i == w.cur:
-			bar.WriteString(th.TabActive.Faint(true).Render(label))
+			bar = append(bar, th.TabActive.Faint(true).Render(label))
 		default:
-			bar.WriteString(th.TabIdle.Render(label))
+			bar = append(bar, th.TabIdle.Render(label))
 		}
-		bar.WriteString(" ")
 	}
-	if len(w.tabs) > 0 {
-		lines = append(lines, th.TabIdle.Faint(true).Render(fit(bar.String(), W)))
-	}
+	return strings.Join(bar, " ")
+}
+
+func (w *Workspace) mainView(th Theme, W, H int) string {
+	var lines []string
 	var body string
-	bodyH := H - len(lines)
+	bodyH := H
 	if t := w.tab(); t != nil {
 		body = t.View(th, W, bodyH)
 	} else {
