@@ -8,6 +8,7 @@ import (
 	"html"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"tuidb/internal/db"
@@ -147,6 +148,21 @@ func (g *Grid) GoCol(c int, extend bool) {
 }
 
 func (g *Grid) Page(dir int, extend bool) { g.Move(dir*max(1, g.bodyH()-1), 0, extend) }
+
+// Wheel handles one mouse wheel tick: 3 rows up or down (the terminal convention) and one column
+// sideways, so a vertical scroll covers ground about as fast as a horizontal one.
+func (g *Grid) Wheel(b tea.MouseButton) {
+	switch b {
+	case tea.MouseWheelDown:
+		g.Move(3, 0, false)
+	case tea.MouseWheelUp:
+		g.Move(-3, 0, false)
+	case tea.MouseWheelRight:
+		g.Move(0, 1, false)
+	case tea.MouseWheelLeft:
+		g.Move(0, -1, false)
+	}
+}
 
 func (g *Grid) setSelecting(extend bool) {
 	if extend && !g.selecting {
@@ -662,10 +678,12 @@ func (g *Grid) View(th Theme, focused bool) string {
 		return ""
 	}
 	gw := g.gutterW()
+	// Widths are tracked as ints: measuring the growing line after every cell made a frame O(cells²).
 	var hdr strings.Builder
 	hdr.WriteString(th.HeaderCell.Render(fit("", gw)))
-	for i := g.left; i < len(g.Cols); i++ {
+	for i, used := g.left, gw; i < len(g.Cols) && used < g.W; i++ {
 		c := g.Cols[i]
+		used += c.Width + 1
 		name := c.Name
 		if c.PK {
 			name = "⚷" + name
@@ -678,15 +696,13 @@ func (g *Grid) View(th Theme, focused bool) string {
 			}
 		}
 		hdr.WriteString(th.HeaderCell.Render("│" + fit(name, c.Width)))
-		if width(hdr.String()) >= g.W {
-			break
-		}
 	}
 	head := ansi.Truncate(hdr.String(), g.W, "")
 	if pad := g.W - width(head); pad > 0 {
 		head += th.HeaderCell.Render(strings.Repeat(" ", pad))
 	}
 	lines := []string{head}
+	sep := th.Border.Render("│") // styled once per frame, not once per cell
 	for vi := 0; vi < g.bodyH(); vi++ {
 		ri := g.top + vi
 		if ri >= len(g.Rows) {
@@ -707,20 +723,17 @@ func (g *Grid) View(th Theme, focused bool) string {
 		}
 		var sb strings.Builder
 		sb.WriteString(th.Dim.Render(padLeft(fmt.Sprint(g.RowOffset+ri+1), gw-1) + " "))
-		for ci := g.left; ci < len(g.Cols); ci++ {
+		for ci, used := g.left, gw; ci < len(g.Cols) && used < g.W; ci++ {
 			c := g.Cols[ci]
+			used += c.Width + 1
 			v := r.Cur[ci]
-			text := cellText(v)
 			if g.edit != nil && ri == g.row && ci == g.col {
-				sb.WriteString(th.Border.Render("│") + g.edit.View(c.Width, th, true))
+				sb.WriteString(sep + g.edit.View(c.Width, th, true))
 				continue
 			}
-			cell := fit(text, c.Width)
+			cell := fit(cellText(v), c.Width)
 			if isNumber(v) {
-				cell = padLeft(fit(text, c.Width), c.Width)
-				if t := fit(text, c.Width); strings.TrimSpace(t) != "" {
-					cell = padLeft(strings.TrimRight(t, " "), c.Width)
-				}
+				cell = padLeft(strings.TrimRight(cell, " "), c.Width)
 			}
 			st := base
 			switch {
@@ -733,10 +746,7 @@ func (g *Grid) View(th Theme, focused bool) string {
 			case isSpecial(v):
 				st = base.Inherit(th.Null)
 			}
-			sb.WriteString(th.Border.Render("│") + st.Render(cell))
-			if width(sb.String()) >= g.W {
-				break
-			}
+			sb.WriteString(sep + st.Render(cell))
 		}
 		line := ansi.Truncate(sb.String(), g.W, "")
 		if pad := g.W - width(line); pad > 0 {
