@@ -271,14 +271,18 @@ func TestReadQueryGuards(t *testing.T) {
 			t.Errorf("%s: %s", q, out)
 		}
 	}
-	if len(fs.ran) != 0 {
-		t.Errorf("ran %v", fs.ran)
+	if got := fs.log(); len(got) != 0 {
+		t.Errorf("ran %v", got)
 	}
 	s, _ = mk("cql", false)
-	if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); !bad || !strings.Contains(out, "read_only") {
+	if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); !bad || !strings.Contains(out, "cannot be enforced") {
 		t.Errorf("no begin-read-only dialect: %s", out)
 	}
-	s, _ = mk("cql", true)
+	s, _ = mk("cql", true) // cql does not enforce read_only on the server: still refused
+	if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); !bad {
+		t.Errorf("cql read_only connection was trusted: %s", out)
+	}
+	s, _ = mk("mysql", true)
 	if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); bad {
 		t.Errorf("read_only connection refused: %s", out)
 	}
