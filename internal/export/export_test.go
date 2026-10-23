@@ -59,12 +59,12 @@ func TestWrite(t *testing.T) {
 }
 
 func TestCSVNeutralizesFormulas(t *testing.T) {
-	r := &db.Result{Columns: []db.ResultColumn{{Name: "=h"}, {Name: "n"}}, Rows: [][]any{{"=cmd|' /C calc'!A0", int64(-5)}, {"@x", -1.5}, {"+1", "ok"}}}
+	r := &db.Result{Columns: []db.ResultColumn{{Name: "=h"}, {Name: "n"}}, Rows: [][]any{{"=cmd|' /C calc'!A0", int64(-5)}, {"@x", -1.5}, {"+1+1", "ok"}, {"-12.34", []byte("-7")}, {"-1e5", "+3"}}}
 	var b bytes.Buffer
 	if err := Write(&b, r, Options{Format: "csv"}); err != nil {
 		t.Fatal(err)
 	}
-	if want := "'=h,n\n'=cmd|' /C calc'!A0,-5\n'@x,-1.5\n'+1,ok\n"; b.String() != want {
+	if want := "'=h,n\n'=cmd|' /C calc'!A0,-5\n'@x,-1.5\n'+1+1,ok\n-12.34,\\x2d37\n-1e5,+3\n"; b.String() != want {
 		t.Errorf("got %q want %q", b.String(), want)
 	}
 	b.Reset()
