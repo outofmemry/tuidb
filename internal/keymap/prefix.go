@@ -100,6 +100,45 @@ func Build(prefix string, overrides map[string][]string, extra ...Binding) (*Map
 	return m, nil
 }
 
+// BuildChecked is Build with the extra bindings added one at a time: an extra that does not parse or that
+// clashes with a default, a [keys] entry or an earlier extra is left out and described in conflicts, instead of
+// failing the whole map. An error means the prefix or overrides alone are invalid.
+func BuildChecked(prefix string, overrides map[string][]string, extra ...Binding) (m *Map, conflicts []string, err error) {
+	// The first Build must already know the extra actions, or a [keys] override of an installed plugin is
+	// "unknown". Their keys are irrelevant here (an overridden action's own key is never bound), so a fixed one stands in.
+	var known []Binding
+	for _, b := range extra {
+		if _, over := overrides[b.Action]; over {
+			known = append(known, Binding{Action: b.Action, Key: "f12", Context: b.Context, Desc: b.Desc})
+		}
+	}
+	if m, err = Build(prefix, overrides, known...); err != nil {
+		return nil, nil, err
+	}
+	var ok []Binding
+	for _, b := range extra {
+		cand := append(append([]Binding(nil), ok...), b)
+		nm, e := Build(prefix, overrides, cand...)
+		if e == nil {
+			found := false
+			for _, x := range nm.All() {
+				if x.Action == b.Action {
+					found = true
+				}
+			}
+			if !found {
+				e = fmt.Errorf("[keys] %s: %s is taken by another binding", b.Action, b.Key)
+			}
+		}
+		if e != nil {
+			conflicts = append(conflicts, fmt.Sprintf("%s (%s): %v", b.Action, b.Key, e))
+			continue
+		}
+		ok, m = cand, nm
+	}
+	return m, conflicts, nil
+}
+
 func descOf(action string) string {
 	for _, d := range defaults {
 		if d.action == action {
