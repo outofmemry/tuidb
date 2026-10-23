@@ -27,22 +27,34 @@ type SearchHit struct {
 // Search counts matching rows table by table, calling hit after each one (zero counts included, for progress).
 // Cancelling ctx stops it and returns ctx.Err(); the caller resumes by re-running with the remaining Tables.
 func Search(ctx context.Context, sess Session, o SearchOptions, hit func(SearchHit)) error {
-	schema := o.Schema
-	if schema == "" {
-		schema = sess.CurrentSchema()
+	if !slices.Contains(Operators(sess.Caps().Dialect), o.Op) {
+		return fmt.Errorf("search operator %q is not supported on this connection", o.Op)
 	}
-	objs, err := sess.Objects(ctx, schema)
+	schemas, err := SearchSchemas(ctx, sess, o)
 	if err != nil {
 		return err
 	}
-	op, val := o.Op, o.Value
-	if op == "=" { // compare as text on every column: a native = fails on ints in PG and coerces 'bob' to 0 in MySQL
-		op, val = "LIKE", likeEscape(val)
-	}
+	op, val := o.Op, o.Value // "=" stays "=": the filter builder casts to text on LikeCast dialects and compares natively elsewhere
 	only := map[string]bool{}
 	for _, t := range o.Tables {
 		only[t] = true
 	}
+	for _, schema := range schemas {
+		if schema == "" {
+			schema = sess.CurrentSchema()
+		}
+		objs, err := sess.Objects(ctx, schema)
+		if err != nil {
+			return err
+		}
+		if err := searchSchema(ctx, sess, objs, only, op, val, hit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func searchSchema(ctx context.Context, sess Session, objs []Object, only map[string]bool, op, val string, hit func(SearchHit)) error {
 	for _, ob := range objs {
 		if ob.Kind != KindTable || len(only) > 0 && !only[ob.Name] {
 			continue
