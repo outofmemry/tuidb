@@ -1,4 +1,4 @@
-# Status (milestones 1-8 complete)
+# Status (milestones 1-15 complete)
 
 **Built and tested** (`make test`; `make smoke` runs the same suite plus driver and end-to-end tests against live databases):
 config + keymap with tmux-style prefix, all five drivers, store (history, saved queries, state), welcome screen with
