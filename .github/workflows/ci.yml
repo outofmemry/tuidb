@@ -17,6 +17,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: make web && test -s internal/web/dist/index.html
       - run: go vet ./... && test -z "$(gofmt -l .)"
+      - run: make parity
       - run: go test -race ./...
       - run: make up
       - run: make smoke
