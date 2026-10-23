@@ -254,8 +254,12 @@ func (s *session) Objects(ctx context.Context, schema string) ([]db.Object, erro
 		return nil, err
 	}
 	out := make([]db.Object, len(rows))
+	refSchema := "" // refs of another database carry it, or an all-schemas search counts the current one
+	if schema != "" && schema != s.CurrentDatabase() {
+		refSchema = schema
+	}
 	for i, r := range rows {
-		o := db.Object{ObjRef: db.ObjRef{Name: str(r[0]), Kind: db.KindTable}, Detail: str(r[2])}
+		o := db.Object{ObjRef: db.ObjRef{Schema: refSchema, Name: str(r[0]), Kind: db.KindTable}, Detail: str(r[2])}
 		switch str(r[1]) {
 		case "View":
 			o.Kind = db.KindView
