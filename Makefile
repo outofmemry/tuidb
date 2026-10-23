@@ -1,4 +1,4 @@
-.PHONY: build test up down smoke web release docker
+.PHONY: build test up down smoke web release docker parity
 # Build the web app into internal/web/dist, which the Go binary embeds (`make web build`).
 web:
 	cd web && npm ci && npm run build
@@ -19,3 +19,6 @@ release:
 	goreleaser release --snapshot --clean
 docker:
 	docker build -t webtuidb --build-arg VERSION=$$(git describe --tags --always --dirty) .
+# Both UIs offer the same menus, actions and config keys (M14).
+parity:
+	go test ./internal/menus/... ./internal/config/... -run 'Parity|TestHolds' && go test ./internal/web ./internal/ui -run Parity
