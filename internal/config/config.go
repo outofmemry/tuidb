@@ -53,6 +53,8 @@ type General struct {
 	EstimateCountOver  int64  `toml:"estimate_count_over"`
 	DefaultSafeMode    string `toml:"default_safe_mode"`
 	LogOriginalValues  bool   `toml:"log_original_values"`
+	// Hints are the actions shown in the terminal status line, in order; empty = the built-in set (M13).
+	Hints []string `toml:"hints"`
 }
 
 type Editor struct {
@@ -88,6 +90,8 @@ type Table struct {
 	DefaultSort           string `toml:"default_sort"`            // none | pk_asc | pk_desc
 	FilterColumnSort      string `toml:"filter_column_sort"`      // name | ordinal (M4)
 	AutoPrettyJSON        bool   `toml:"auto_pretty_json"`        // pretty-print JSON cells in the grid and row detail (M8)
+	DecodeSpatial         bool   `toml:"decode_spatial"`          // show geometry cells as WKT instead of hex (M13)
+	ImagePreview          bool   `toml:"image_preview"`           // sniff image bytes and preview them in quick look (M13)
 }
 
 type CSV struct {
@@ -117,6 +121,7 @@ type Queries struct {
 
 type Export struct {
 	Filename string `toml:"filename"` // pattern: {connection} {database} {table} {tag} {date} {time} (M4)
+	Header   bool   `toml:"header"`   // CSV header row (M9); NULL text is [csv] null_as
 }
 
 // Web holds settings only the web UI reads.
