@@ -298,7 +298,7 @@ type Grant struct {
 	Columns []string // column-level privilege (SELECT, INSERT, UPDATE, REFERENCES) on just these columns; empty = whole object
 }
 
-// UserChange is one administrative edit. Kind: create | drop | password | attrs | grant | revoke.
+// UserChange is one administrative edit. Kind: create | drop | password | attrs | limits | grant | revoke.
 // attrs on PostgreSQL is ALTER ROLE ... WITH <Attrs> (NOSUPERUSER etc. turn a flag off); on MySQL it
 // grants User.Attrs globally (GRANT ... ON *.*).
 type UserChange struct {
