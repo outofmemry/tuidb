@@ -29,9 +29,13 @@ func (s *session) Databases(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
-// Objects ignores schema: in MySQL the database is the schema.
-func (s *session) Objects(ctx context.Context, _ string) ([]db.Object, error) {
-	cur := s.CurrentDatabase()
+// Objects lists a database's objects: schema names the database (the MySQL schema), "" the current one.
+// Refs of another database carry it in Schema so later calls reach it; the current database's keep it empty.
+func (s *session) Objects(ctx context.Context, schema string) ([]db.Object, error) {
+	cur, refSchema := s.CurrentDatabase(), ""
+	if schema != "" && schema != cur {
+		cur, refSchema = schema, schema
+	}
 	if cur == "" {
 		return nil, fmt.Errorf("no database selected")
 	}
@@ -49,7 +53,7 @@ func (s *session) Objects(ctx context.Context, _ string) ([]db.Object, error) {
 			return nil, err
 		}
 		versioned[cur+"."+name] = typ == "SYSTEM VERSIONED"
-		o := db.Object{ObjRef: db.ObjRef{Name: name, Kind: db.KindTable}}
+		o := db.Object{ObjRef: db.ObjRef{Schema: refSchema, Name: name, Kind: db.KindTable}}
 		if strings.Contains(typ, "VIEW") {
 			o.Kind = db.KindView
 		} else if typ == "SEQUENCE" && s.caps.Sequences { // MariaDB; the sequence is a one-row table
