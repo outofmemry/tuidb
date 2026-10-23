@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -19,6 +20,8 @@ func TestPlanUser(t *testing.T) {
 		{db.UserChange{Kind: "password", User: db.User{Name: "a"}, Password: "x"}, "ALTER USER 'a'@'%' IDENTIFIED BY 'x'", "ALTER USER 'a'@'%' IDENTIFIED BY '********'"},
 		{db.UserChange{Kind: "drop", User: db.User{Name: "a", Host: "h"}}, "DROP USER 'a'@'h'", ""},
 		{db.UserChange{Kind: "attrs", User: db.User{Name: "a", Attrs: []string{"all"}}}, "GRANT ALL PRIVILEGES ON *.* TO 'a'@'%'", ""},
+		{db.UserChange{Kind: "limits", User: db.User{Name: "a", Limits: map[string]int{"MAX_USER_CONNECTIONS": 3, "MAX_QUERIES_PER_HOUR": 100, "BOGUS; DROP": 1}}},
+			"ALTER USER 'a'@'%' WITH MAX_QUERIES_PER_HOUR 100 MAX_USER_CONNECTIONS 3", ""},
 		{db.UserChange{Kind: "grant", User: db.User{Name: "a"}, Grant: db.Grant{Object: "d`b.*", Privs: []string{"select", "insert"}}},
 			"GRANT SELECT, INSERT ON `d``b`.* TO 'a'@'%'", ""},
 		{db.UserChange{Kind: "revoke", User: db.User{Name: "a"}, Grant: db.Grant{Object: "d.t", Privs: []string{"SELECT"}}},
