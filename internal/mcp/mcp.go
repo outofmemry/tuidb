@@ -637,8 +637,143 @@ var strLit = regexp.MustCompile(`'(?:[^']|'')*'`)
 // shortcut: backslash escapes and $tag$ strings are not recognised; upgrade to the db scanner.
 func redact(sql string) string { return strLit.ReplaceAllString(sql, "'…'") }
 
-// sideEffectRe matches functions and verbs that change state even inside a statement the keyword classifier calls read-only.
-var sideEffectRe = regexp.MustCompile(`(?i)\b(pg_terminate_backend|pg_cancel_backend|pg_read_file|pg_read_binary_file|pg_ls_dir|lo_import|lo_export|copy|dblink|setval|nextval)\b`)
+// sideEffectRe matches functions that change state or reach outside the database even inside a statement the
+// keyword classifier calls read-only. A trailing identifier tail (dblink_exec, lo_put, ...) is part of the match,
+// and a call needs the "(" so a column that happens to be named copy is fine. The query_to_xml and cursor_to_xml
+// families run the SQL text they are given, which string concatenation can hide from this filter, so they are refused outright.
+var sideEffectRe = regexp.MustCompile(`(?i)\b(dblink\w*|lo_\w+|pg_terminate_backend|pg_cancel_backend|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_switch_wal|pg_create_restore_point|pg_reload_conf|pg_rotate_logfile|pg_advisory_\w+|query_to_xml\w*|cursor_to_xml\w*|setval|nextval|copy)\s*\(`)
 
-// sideEffectFunc returns the first such word in stmt ("" = none). It is a conservative word match (string literals included).
-func sideEffectFunc(stmt string) string { return strings.ToLower(sideEffectRe.FindString(stmt)) }
+// sideEffectByDialect adds each dialect's own file, network and lock primitives. LOAD_FILE and INTO OUTFILE pass
+// START TRANSACTION READ ONLY; ClickHouse table functions read files and URLs.
+var sideEffectByDialect = map[string]*regexp.Regexp{
+	"mysql":      mysqlSideEffect,
+	"mariadb":    mysqlSideEffect,
+	"clickhouse": regexp.MustCompile(`(?i)\b(file|url|urlcluster|s3|s3cluster|remote|remotesecure|hdfs|hdfscluster|executable|azureblobstorage|gcs|mysql|postgresql|mongodb|odbc|jdbc|sqlite|input|cluster|clusterallreplicas|deltalake|iceberg|hudi)\s*\(`),
+}
+
+var mysqlSideEffect = regexp.MustCompile(`(?i)\b(load_file|get_lock|release_lock|release_all_locks|sleep|benchmark|sys_exec|sys_eval|into\s+(?:outfile|dumpfile)|load\s+data)\b`)
+
+// copyStmtRe is COPY used as a statement keyword (COPY t TO PROGRAM ...), which has no "(" after it.
+var copyStmtRe = regexp.MustCompile(`(?i)^\s*copy\b`)
+
+// uescRe is a Postgres U&"..." identifier, whose \XXXX escapes can spell any function name past the filter.
+var uescRe = regexp.MustCompile(`(?i)\bu&\s*"`)
+
+// dollarTagRe is db's tag rule: digits are allowed after the first character ($a1$), or the closing tag is
+// missed and the rest of the statement is blanked in the copy the deny-list sees.
+var dollarTagRe = regexp.MustCompile(`^\$(?:[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)?\$`)
+
+// sideEffectFunc returns the first denied function or verb in stmt ("" = none). It matches on a copy of the
+// statement with comments and string literals removed and quoted identifiers unquoted, so 'copy' in a literal or
+// "-- copy this" does not trip it while "dblink_exec"(...) still does.
+func sideEffectFunc(dialect, stmt string) string {
+	if uescRe.MatchString(stmt) {
+		return "a unicode-escaped identifier"
+	}
+	c := stripLiterals(dialect, stmt)
+	if copyStmtRe.MatchString(c) {
+		return "copy"
+	}
+	if m := sideEffectRe.FindStringSubmatch(c); m != nil {
+		return strings.ToLower(m[1])
+	}
+	if re := sideEffectByDialect[dialect]; re != nil {
+		if m := re.FindStringSubmatch(c); m != nil {
+			return strings.ToLower(strings.Join(strings.Fields(m[1]), " "))
+		}
+	}
+	return ""
+}
+
+// stripLiterals blanks comments and string literals and unquotes "ident" and `ident`.
+func stripLiterals(dialect, sql string) string {
+	var b strings.Builder
+	my := dialect == "mysql" || dialect == "mariadb"
+	for i := 0; i < len(sql); {
+		c := sql[i]
+		switch {
+		case c == '-' && strings.HasPrefix(sql[i:], "--"), c == '#' && my:
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+			b.WriteByte(' ')
+		case c == '/' && strings.HasPrefix(sql[i:], "/*"):
+			depth := 0
+			for i < len(sql) {
+				if strings.HasPrefix(sql[i:], "/*") {
+					depth++
+					i += 2
+				} else if strings.HasPrefix(sql[i:], "*/") {
+					depth--
+					i += 2
+					if depth == 0 {
+						break
+					}
+				} else {
+					i++
+				}
+			}
+			b.WriteByte(' ')
+		case c == '\'':
+			// backslash escapes: MySQL always, Postgres only in E'...'
+			esc := my || (i > 0 && (sql[i-1] == 'e' || sql[i-1] == 'E') && (i < 2 || !isIdentByte(sql[i-2])))
+			i++
+			for i < len(sql) {
+				if esc && sql[i] == '\\' {
+					i += 2
+					continue
+				}
+				if sql[i] == '\'' {
+					if i+1 < len(sql) && sql[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					break
+				}
+				i++
+			}
+			i++
+			b.WriteString("''")
+		case c == '$' && dialect != "mysql" && dialect != "mariadb":
+			if tag := dollarTagRe.FindString(sql[i:]); tag != "" && (i == 0 || !isIdentByte(sql[i-1])) {
+				end := strings.Index(sql[i+len(tag):], tag)
+				if end < 0 {
+					i = len(sql)
+				} else {
+					i += len(tag) + end + len(tag)
+				}
+				b.WriteString("''")
+				break
+			}
+			b.WriteByte(c)
+			i++
+		case c == '"' || c == '`':
+			j := i + 1
+			for j < len(sql) {
+				if sql[j] == c {
+					if j+1 < len(sql) && sql[j+1] == c {
+						j += 2
+						continue
+					}
+					break
+				}
+				j++
+			}
+			if j > len(sql) {
+				j = len(sql)
+			}
+			b.WriteByte(' ')
+			b.WriteString(strings.NewReplacer(string(c)+string(c), string(c)).Replace(sql[i+1 : min(j, len(sql))]))
+			b.WriteByte(' ')
+			i = j + 1
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return b.String()
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80
+}
