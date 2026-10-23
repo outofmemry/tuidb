@@ -153,3 +153,391 @@ func TestImportEdges(t *testing.T) {
 		t.Errorf("empty cell = %#v", got)
 	}
 }
+
+func (f *fake) Columns(context.Context, db.ObjRef) ([]db.Column, error) {
+	return []db.Column{{Name: "id", PK: true}, {Name: "v"}}, nil
+}
+
+func TestEncoding(t *testing.T) {
+	_, rows, err := Preview(strings.NewReader("a\n\xe9\n"), Options{Source: "csv", Header: true, Encoding: "latin1"}, 5)
+	if err != nil || len(rows) != 1 || rows[0][0] != "é" {
+		t.Errorf("latin1: %v %v", rows, err)
+	}
+	u16 := "a\né\n"
+	var b []byte
+	for _, r := range u16 {
+		b = append(b, byte(r), byte(r>>8))
+	}
+	if _, rows, err = Preview(bytes.NewReader(b), Options{Source: "csv", Header: true, Encoding: "utf-16le"}, 5); err != nil || len(rows) != 1 || rows[0][0] != "é" {
+		t.Errorf("utf-16le: %v %v", rows, err)
+	}
+	if _, _, err = Preview(strings.NewReader("a"), Options{Source: "csv", Encoding: "nope"}, 1); err == nil {
+		t.Error("unknown encoding must fail")
+	}
+}
+
+func TestQuote(t *testing.T) {
+	_, rows, err := Preview(strings.NewReader("a,b\n'x,y',\"z\"\n"), Options{Source: "csv", Header: true, Quote: '\''}, 5)
+	if err != nil || len(rows) != 1 || rows[0][0] != "x,y" || rows[0][1] != `"z"` {
+		t.Errorf("%v %v", rows, err)
+	}
+}
+
+func TestOnConflict(t *testing.T) {
+	run := func(dialect, mode string) (*fake, error) {
+		f := &fake{dialect: dialect}
+		return f, Run(context.Background(), f, strings.NewReader("id,v\n1,a\n"), Options{Source: "csv", Header: true, Table: tbl, OnConflict: mode}, nil)
+	}
+	f, err := run("postgres", "update")
+	if got := f.applied[0][0].Text; err != nil || !strings.HasSuffix(got, `ON CONFLICT ("id") DO UPDATE SET "v" = EXCLUDED."v"`) {
+		t.Errorf("pg update: %v %q", err, got)
+	}
+	f, _ = run("mysql", "update")
+	if got := f.applied[0][0].Text; !strings.HasSuffix(got, "ON DUPLICATE KEY UPDATE `id` = VALUES(`id`), `v` = VALUES(`v`)") {
+		t.Errorf("mysql update: %q", got)
+	}
+	f, _ = run("mysql", "replace")
+	if got := f.applied[0][0].Text; strings.Contains(got, "REPLACE INTO") || !strings.Contains(got, "ON DUPLICATE KEY UPDATE") {
+		t.Errorf("mysql replace: %q", got)
+	}
+	if _, err = run("clickhouse", "update"); err == nil {
+		t.Error("clickhouse must be refused")
+	}
+	if f, err = run("postgres", "stop"); err != nil || strings.Contains(f.applied[0][0].Text, "CONFLICT") {
+		t.Errorf("stop: %v", err)
+	}
+}
+
+func TestColumnTypes(t *testing.T) {
+	f := &fake{}
+	err := Run(context.Background(), f, strings.NewReader("a,b\n1,x\n"), Options{Source: "csv", Header: true, Table: tbl, CreateTable: true, ColumnTypes: map[string]string{"a": "integer"}}, nil)
+	if err != nil || f.tables[0].Columns[0].Type != "integer" || f.tables[0].Columns[1].Type != "TEXT" {
+		t.Errorf("%v %+v", err, f.tables)
+	}
+}
+
+func runCSV(f db.Session, in string, o Options) error {
+	o.Source, o.Table = "csv", tbl
+	return Run(context.Background(), f, strings.NewReader(in), o, nil)
+}
+
+func TestBlankHeaderRejected(t *testing.T) {
+	f := &fake{}
+	for _, in := range []string{"a,,c\n1,2,3\n", "a, ,c\n1,2,3\n"} {
+		err := runCSV(f, in, Options{Header: true})
+		if err == nil || !strings.Contains(err.Error(), "column 2 has no name") || len(f.applied) != 0 {
+			t.Errorf("%q: %v", in, err)
+		}
+		if _, _, err := Preview(strings.NewReader(in), Options{Source: "csv", Header: true}, 1); err == nil {
+			t.Errorf("preview %q must fail", in)
+		}
+	}
+}
+
+func TestDuplicateTargets(t *testing.T) {
+	f := &fake{}
+	err := runCSV(f, "a,a\n1,2\n", Options{Header: true})
+	if err == nil || !strings.Contains(err.Error(), "1") || !strings.Contains(err.Error(), "2") || len(f.applied) != 0 {
+		t.Errorf("dup header: %v", err)
+	}
+	err = runCSV(f, "a,b\n1,2\n", Options{Header: true, Mapping: map[string]string{"a": "x", "b": "x"}})
+	if err == nil || !strings.Contains(err.Error(), `"a"`) || !strings.Contains(err.Error(), `"b"`) {
+		t.Errorf("dup mapping: %v", err)
+	}
+	f = &fake{}
+	if err = runCSV(f, "a,a\n1,2\n", Options{Header: true, CreateTable: true}); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.tables[0].Columns; c[0].Name != "a" || c[1].Name != "a_2" {
+		t.Errorf("suffix: %+v", c)
+	}
+}
+
+func TestCreateTableWithUpdateRefused(t *testing.T) {
+	f := &fake{dialect: "postgres"}
+	err := runCSV(f, "id,v\n1,a\n", Options{Header: true, CreateTable: true, OnConflict: "update"})
+	if err == nil || len(f.tables) != 0 {
+		t.Errorf("%v %v", err, f.tables)
+	}
+}
+
+func TestMySQLReplaceKeepsUnmappedColumns(t *testing.T) {
+	f := &fake{dialect: "mysql"}
+	if err := runCSV(f, "id,v\n1,a\n", Options{Header: true, OnConflict: "replace"}); err != nil {
+		t.Fatal(err)
+	}
+	got := f.applied[0][0].Text
+	if strings.Contains(got, "REPLACE") || !strings.Contains(got, "ON DUPLICATE KEY UPDATE") {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestQuoteFromConfigAndValidation(t *testing.T) {
+	o := Options{Source: "csv", Header: true, CSV: config.CSV{Quote: "'"}}
+	_, rows, err := Preview(strings.NewReader("a,b\n'x,y',z\n"), o, 5)
+	if err != nil || len(rows) != 1 || rows[0][0] != "x,y" {
+		t.Errorf("%v %v", rows, err)
+	}
+	for _, o := range []Options{{Quote: ','}, {Quote: '\n'}, {Quote: 0x80}, {CSV: config.CSV{Delimiter: "||"}}, {CSV: config.CSV{Quote: "ab"}}} {
+		o.Source = "csv"
+		if _, _, err := Preview(strings.NewReader("a\n1\n"), o, 1); err == nil {
+			t.Errorf("%+v must be rejected", o)
+		}
+	}
+}
+
+func TestNullAsAndFormulaRoundTrip(t *testing.T) {
+	r := &db.Result{Columns: []db.ResultColumn{{Name: "id"}, {Name: "v"}}, Rows: [][]any{{int64(1), "=1+1"}, {int64(2), nil}, {int64(3), "-12.34"}}}
+	cfg := config.CSV{NullAs: `\N`}
+	var b bytes.Buffer
+	if err := export.Write(&b, r, export.Options{Format: "csv", CSV: cfg}); err != nil {
+		t.Fatal(err)
+	}
+	for _, keep := range []bool{false, true} {
+		f := &fake{}
+		if err := runCSV(f, b.String(), Options{Header: true, CSV: cfg, KeepFormulaQuote: keep}); err != nil {
+			t.Fatal(err)
+		}
+		set := func(i int) any { return f.plans[0][i].Set[1].Val }
+		want := "=1+1"
+		if keep {
+			want = "'=1+1"
+		}
+		if set(0) != want || set(1) != db.Null || set(2) != "-12.34" {
+			t.Errorf("keep=%v: %v %v %v", keep, set(0), set(1), set(2))
+		}
+	}
+	// an explicit NullAs wins over the empty-cell rule
+	f := &fake{}
+	runCSV(f, "a\nNIL\n\n", Options{Header: true, NullAs: "NIL", EmptyIsNull: false})
+	if f.plans[0][0].Set[0].Val != db.Null {
+		t.Errorf("NullAs: %v", f.plans[0][0].Set[0].Val)
+	}
+}
+
+// txFake is a Pinner whose pin records BEGIN/COMMIT/ROLLBACK and applies through the same fake.
+type txFake struct {
+	*fake
+	log []string
+}
+
+func (t *txFake) Caps() db.Capabilities {
+	return db.Capabilities{Dialect: "postgres", Transactions: true}
+}
+func (t *txFake) Pin(context.Context) (db.Session, error) {
+	return &txPin{txFake: t}, nil
+}
+
+type txPin struct{ *txFake }
+
+func (p *txPin) Exec(_ context.Context, stmt string, _ int) (*db.Result, error) {
+	p.log = append(p.log, stmt)
+	return &db.Result{}, nil
+}
+func (p *txPin) Close() error { p.log = append(p.log, "close"); return nil }
+
+func TestImportRunsInOneTransaction(t *testing.T) {
+	f := &txFake{fake: &fake{}}
+	if err := runCSV(f, "a\n1\n2\n3\n", Options{Header: true, Batch: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.log, ","); got != "BEGIN,COMMIT,close" {
+		t.Errorf("success: %s", got)
+	}
+	f = &txFake{fake: &fake{fail: errors.New("boom")}}
+	err := runCSV(f, "a\n1\n2\n", Options{Header: true, Batch: 1})
+	if got := strings.Join(f.log, ","); err == nil || got != "BEGIN,ROLLBACK,close" || !strings.Contains(err.Error(), "rolled back") {
+		t.Errorf("failure: %v %s", err, got)
+	}
+}
+
+func TestPartialImportMessage(t *testing.T) {
+	f := &failAfter{fake: &fake{}, ok: 1}
+	err := runCSV(&fakeSess{f}, "a\n1\n2\n", Options{Header: true, Batch: 1})
+	if err == nil || !strings.Contains(err.Error(), "rows before the failure were committed") {
+		t.Errorf("%v", err)
+	}
+}
+
+type failAfter struct {
+	*fake
+	ok int
+}
+type fakeSess struct{ *failAfter }
+
+func (f *fakeSess) Apply(c context.Context, s []db.Statement) error {
+	if f.ok == 0 {
+		return errors.New("boom")
+	}
+	f.ok--
+	return f.fake.Apply(c, s)
+}
+
+func TestStrayQuoteFailsWithLine(t *testing.T) { // P1-08
+	in := "a,b\n1,\"unclosed\n2,x\n3,y\n"
+	_, _, err := Preview(strings.NewReader(in), Options{Source: "csv", Header: true}, 9)
+	if err == nil || !strings.Contains(err.Error(), "line") {
+		t.Errorf("default quote: %v", err)
+	}
+	f := &fake{}
+	if err := runCSV(f, in, Options{Header: true}); err == nil || len(f.applied) != 0 {
+		t.Errorf("run: %v %d", err, len(f.applied))
+	}
+}
+
+func TestShortRowIsAnError(t *testing.T) { // P2-45
+	f := &fake{}
+	err := runCSV(f, "a,b,c\n1,2,3\n4,5\n", Options{Header: true})
+	if err == nil || !strings.Contains(err.Error(), "line 3") || len(f.applied) != 0 {
+		t.Errorf("%v", err)
+	}
+}
+
+// ddlTx records the order of BEGIN, the CREATE and ROLLBACK on one pin.
+type ddlTx struct {
+	*fake
+	log []string
+}
+
+func (t *ddlTx) Caps() db.Capabilities {
+	return db.Capabilities{Dialect: "postgres", Transactions: true}
+}
+func (t *ddlTx) Pin(context.Context) (db.Session, error) {
+	return &ddlPin{ddlTx: t}, nil
+}
+
+type ddlPin struct{ *ddlTx }
+
+func (p *ddlPin) Exec(_ context.Context, stmt string, _ int) (*db.Result, error) {
+	p.log = append(p.log, stmt)
+	return &db.Result{}, nil
+}
+func (p *ddlPin) Close() error { return nil }
+func (p *ddlPin) Apply(_ context.Context, s []db.Statement) error {
+	p.log = append(p.log, s[0].Text)
+	if strings.HasPrefix(s[0].Text, "INSERT") {
+		return errors.New("NUL byte")
+	}
+	return nil
+}
+
+func TestCreateTableRollsBackWithData(t *testing.T) { // P2-46
+	f := &ddlTx{fake: &fake{}}
+	err := runCSV(f, "a\n1\n", Options{Header: true, CreateTable: true})
+	if got := strings.Join(f.log, "|"); err == nil || !strings.HasPrefix(got, "BEGIN|CREATE TABLE t|INSERT") || !strings.HasSuffix(got, "|ROLLBACK") {
+		t.Errorf("%v %s", err, got)
+	}
+}
+
+func TestPreviewMatchesImport(t *testing.T) { // P2-48
+	in := "a,b\n'=1+1,\\N\n'=A1,\n"
+	o := Options{Source: "csv", Header: true, CSV: config.CSV{NullAs: `\N`}, EmptyIsNull: true}
+	_, rows, err := Preview(strings.NewReader(in), o, 5)
+	if err != nil || !reflect.DeepEqual(rows, [][]string{{"=1+1", "NULL"}, {"=A1", "NULL"}}) {
+		t.Errorf("%v %v", rows, err)
+	}
+	o.KeepFormulaQuote = true
+	_, rows, _ = Preview(strings.NewReader(in), o, 5)
+	if rows[0][0] != "'=1+1" {
+		t.Errorf("keep: %v", rows)
+	}
+}
+
+func TestNullAsAndEmptyIsNullForJSON(t *testing.T) { // P2-59
+	f := &fake{}
+	err := Run(context.Background(), f, strings.NewReader(`[{"a":"","b":"NIL","c":"x"}]`),
+		Options{Source: "json", Table: tbl, EmptyIsNull: true, NullAs: "NIL"}, nil)
+	set := f.plans[0][0].Set
+	if err != nil || set[0].Val != db.Null || set[1].Val != db.Null || set[2].Val != "x" {
+		t.Errorf("%v %v", err, set)
+	}
+}
+
+func TestWrongEncodingIsAnError(t *testing.T) { // P2-49
+	_, _, err := Preview(strings.NewReader("a,b\nhello,world!\n"), Options{Source: "csv", Header: true, Encoding: "utf-16le"}, 5)
+	if err == nil || !strings.Contains(err.Error(), "utf-16le") {
+		t.Errorf("%v", err)
+	}
+	// a replacement character the file really has is fine
+	_, rows, err := Preview(strings.NewReader("a\n�\n"), Options{Source: "csv", Header: true, Encoding: "latin1"}, 5)
+	if err != nil {
+		t.Logf("latin1 decodes the 3 bytes as mojibake, not FFFD: %v %v", rows, err)
+	}
+}
+
+func TestSQLImportHonoursCancel(t *testing.T) { // P2-50
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := &fake{}
+	err := Run(ctx, f, strings.NewReader("select 1; select 2;"), Options{Source: "sql", Batch: 1}, nil)
+	if !errors.Is(err, context.Canceled) || len(f.applied) != 0 {
+		t.Errorf("%v %d", err, len(f.applied))
+	}
+}
+
+func TestOnConflictNeedsPostgresDriver(t *testing.T) { // P2-51
+	for _, drv := range []string{"redshift", "greenplum", "vertica"} {
+		f := &fake{dialect: "postgres"}
+		err := runCSV(f, "id,v\n1,a\n", Options{Header: true, OnConflict: "update", Driver: drv})
+		if err == nil || len(f.applied) != 0 {
+			t.Errorf("%s: %v", drv, err)
+		}
+	}
+	f := &fake{dialect: "postgres"}
+	if err := runCSV(f, "id,v\n1,a\n", Options{Header: true, OnConflict: "update", Driver: config.Postgres}); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestOnConflictNeedsKeyColumn(t *testing.T) { // P2-52
+	f := &fake{dialect: "postgres"}
+	err := runCSV(f, "v\na\n", Options{Header: true, OnConflict: "update"})
+	if err == nil || !strings.Contains(err.Error(), `"id"`) || len(f.applied) != 0 {
+		t.Errorf("%v", err)
+	}
+}
+
+// mysqlTx: the CREATE applies, the first data batch fails.
+type mysqlTx struct {
+	*fake
+	calls *int
+	log   *[]string
+}
+
+func (m mysqlTx) Caps() db.Capabilities {
+	return db.Capabilities{Dialect: "mysql", Transactions: true}
+}
+func (m mysqlTx) Pin(context.Context) (db.Session, error) { return mysqlPin{m}, nil }
+func (m mysqlTx) Apply(_ context.Context, s []db.Statement) error {
+	*m.calls++
+	if *m.calls > 1 {
+		return errors.New("boom")
+	}
+	return nil
+}
+
+type mysqlPin struct{ mysqlTx }
+
+func (p mysqlPin) Exec(_ context.Context, stmt string, _ int) (*db.Result, error) {
+	*p.log = append(*p.log, stmt)
+	return &db.Result{}, nil
+}
+func (p mysqlPin) Close() error { return nil }
+
+func TestMySQLCreateTableRollbackMessage(t *testing.T) { // P2-46
+	for _, create := range []bool{true, false} {
+		n, log := 0, []string{}
+		f := mysqlTx{fake: &fake{}, calls: &n, log: &log}
+		if !create {
+			n = 1
+		}
+		err := runCSV(f, "a\n1\n", Options{Header: true, Batch: 1, CreateTable: create, Driver: config.MySQL})
+		if err == nil {
+			t.Fatal("want error")
+		}
+		stays := strings.Contains(err.Error(), "the new table stays")
+		if stays != create || (!create && !strings.Contains(err.Error(), "no rows were imported")) {
+			t.Errorf("create=%v: %v", create, err)
+		}
+	}
+}
