@@ -114,6 +114,45 @@ key = "~/.ssh/id_ed25519"      # empty: ssh-agent
 Safe mode works as in TablePlus: Alert modes ask for confirmation (showing the exact statements),
 Safe modes ask for the database password. Mode 2 lets `SELECT`/`EXPLAIN`/`SHOW` through.
 
+### Local servers (DBngin, Docker, Homebrew)
+
+Import a local server with `i` in the connection list (or paste the URL as the argument: `webtuidb 'postgresql://...'`). The ports below are the defaults; use the port the tool shows for your instance.
+
+| Server | Import URL |
+|---|---|
+| DBngin PostgreSQL | `postgresql://postgres@127.0.0.1:5432/postgres` |
+| DBngin MySQL / MariaDB | `mysql://root@127.0.0.1:3306/` |
+| DBngin Redis | `redis://127.0.0.1:6379/0` |
+| Docker `postgres` (`-e POSTGRES_PASSWORD=pw -p 5432:5432`) | `postgresql://postgres:pw@127.0.0.1:5432/postgres` |
+| Docker `mysql` (`-e MYSQL_ROOT_PASSWORD=pw -p 3306:3306`) | `mysql://root:pw@127.0.0.1:3306/` |
+| Docker `mongo` | `mongodb://127.0.0.1:27017/` |
+| Homebrew `postgresql@16` (`brew services start`) | `postgresql://$USER@127.0.0.1:5432/postgres` |
+| Homebrew `mysql` / `mariadb` | `mysql://root@127.0.0.1:3306/` |
+| Homebrew `redis` | `redis://127.0.0.1:6379/0` |
+
+Add `?name=Local&env=local` to name the connection and tag it. A Unix socket is not needed: `127.0.0.1` works for all of them.
+
+### Settings
+
+`webtuidb` reads `~/.config/webtuidb/config.toml` over its defaults, and both UIs have a settings editor (it rewrites the file; comments in it are not kept). New keys:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `[general] hints` | `[]` | actions shown in the terminal status line, in order (empty = built-in set) |
+| `[general] connection_sort` | `"name"` | `name`, `tag`, `driver` or `recent` (last connected first) |
+| `[web] auto_hide_scrollbars` | `true` | scrollbars only while scrolling |
+| `[web] toolbar` | `[]` | web toolbar actions, in order (empty = built-in set) |
+| `[security] passcode` | unset | bcrypt hash; make it with `webtuidb -set-passcode` |
+| `[security] lock_after_mins` | `0` | lock after this many idle minutes (0 = never) |
+| `[table] decode_spatial` | `true` | geometry cells as WKT instead of hex |
+| `[table] image_preview` | `true` | recognise image bytes and preview them in quick look |
+
+Plugin shortcuts are keys named `plugin:<name>` and can be rebound under `[keys]`. Themes installed with `webtuidb -theme-install <git url>[@ref]` (a repo with a top-level `theme.toml`, cloned into `~/.config/webtuidb/themes/`) can be used as `[theme] name`; `-theme-update` pulls them.
+
+### Help menu equivalents
+
+Things the desktop help menu would do are flags here: `webtuidb -changelog` opens the release notes (and prints the URL), `webtuidb -bugreport` prints version, OS, `$TERM`, the drivers your connections use and your config with secrets masked (paste it into an issue), `webtuidb -check-update` asks GitHub once whether a newer release exists. Nothing checks for updates on its own. A crash writes the panic, stack and last console lines to `~/.local/share/webtuidb/crash.log`; nothing is sent anywhere.
+
 ## Web UI
 
 ```sh
