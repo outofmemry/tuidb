@@ -2,6 +2,7 @@ package vertica
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,5 +27,40 @@ func TestCatalogRefused(t *testing.T) {
 	}
 	if _, err := s.DDL(context.Background(), db.ObjRef{}); err == nil {
 		t.Fatal("DDL must be refused")
+	}
+}
+
+func TestCatalogRefusedThroughDriver(t *testing.T) {
+	d, err := db.Lookup("vertica")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.(driver); !ok {
+		t.Fatalf("registered driver is %T, not the wrapper", d)
+	}
+	ctx := context.Background()
+	var s db.Session = session{}
+	checks := map[string]error{}
+	_, checks["Columns"] = s.Columns(ctx, db.ObjRef{})
+	_, checks["Databases"] = s.Databases(ctx)
+	_, checks["PlanTable"] = s.PlanTable(&db.TableDef{}, &db.TableDef{})
+	_, checks["Script"] = s.Script(ctx, db.ScriptCreate, db.ObjRef{})
+	for name, err := range checks {
+		if !errors.Is(err, ErrCatalog) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+type planStub struct{ db.Session }
+
+func (planStub) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
+	return []db.Statement{{Text: "CREATE TABLE x ()"}}, nil
+}
+
+func TestCreateTableNeedsNoCatalog(t *testing.T) {
+	st, err := session{planStub{}}.PlanTable(nil, &db.TableDef{})
+	if err != nil || len(st) != 1 {
+		t.Errorf("CREATE TABLE must reach the wrapped planner: %v %v", st, err)
 	}
 }
