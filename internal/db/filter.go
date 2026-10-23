@@ -133,7 +133,7 @@ func (fs FilterSet) Where(d Dialect, cols []string, startArg int) (string, []any
 			var ors []string
 			for _, c := range cols {
 				col := d.Quote(c)
-				if isLikeOp(f.Op) { // LIKE needs text; =, <, > must compare natively or 10 < 9 as strings
+				if isLikeOp(f.Op) || f.Op == "=" && d.CastText != nil { // LIKE needs text, and = across mixed column types compares as text (MySQL would coerce 'bob' to 0 and match every zero); <, > must compare natively or 10 < 9 as strings
 					col = d.CastText(col)
 				}
 				s, err := cond(col)
