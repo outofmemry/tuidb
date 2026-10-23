@@ -351,20 +351,41 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 			progress(p)
 		}
 	}()
-	if o.OnConflict != "" {
-		return fmt.Errorf("on conflict %q: not supported for %s", o.OnConflict, sess.Caps().Dialect)
+	if r, err = decode(r, o.Encoding); err != nil {
+		return err
+	}
+	dialect := sess.Caps().Dialect
+	o = defaults(o)
+	// ON CONFLICT is PostgreSQL's alone: Redshift, Greenplum and Vertica report the same dialect without it
+	pgConflict := dialect == "postgres" && (o.Driver == "" || o.Driver == config.Postgres)
+	switch o.OnConflict {
+	case "", "stop":
+	case "update", "replace":
+		if o.Source == "sql" || !pgConflict && dialect != "mysql" {
+			return fmt.Errorf("on conflict %q: not supported for %s", o.OnConflict, dialect)
+		}
+		if o.CreateTable { // a new table has no key to conflict on, and it would be left behind empty
+			return fmt.Errorf("on conflict %q cannot be combined with creating the table: a new table has no primary key", o.OnConflict)
+		}
+	default:
+		return fmt.Errorf("on conflict %q: not supported for %s", o.OnConflict, dialect)
 	}
 	batch := o.Batch
 	if batch <= 0 {
 		batch = 500
 	}
+	var ap db.Session = sess // the session the batches run on: a pinned one inside the transaction
+	inTx := false
 	step := func(stmts []db.Statement, rows int) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := sess.Apply(ctx, stmts); err != nil {
+		if err := ap.Apply(ctx, stmts); err != nil {
 			if rows > 0 {
-				return fmt.Errorf("rows %d-%d: %w", p.Rows+1, p.Rows+int64(rows), err)
+				err = fmt.Errorf("rows %d-%d: %w", p.Rows+1, p.Rows+int64(rows), err)
+				if p.Rows > 0 && !inTx {
+					err = fmt.Errorf("%w (processed %d rows; rows before the failure were committed)", err, p.Rows)
+				}
 			}
 			return err
 		}
