@@ -306,6 +306,40 @@ func secureConfigFile(path string, c Config) error {
 	return nil
 }
 
+// validate checks that the delimiter and quote are one character each and cannot be mistaken for each other
+// or for a line break, so an export reads back the way it was written.
+func (c CSV) validate() error {
+	one := func(key, v string) (rune, error) {
+		r := []rune(v)
+		if len(r) != 1 || r[0] == utf8.RuneError {
+			return 0, fmt.Errorf("csv.%s: %q must be exactly one character", key, v)
+		}
+		return r[0], nil
+	}
+	var d, q rune
+	var err error
+	if c.Delimiter != "" {
+		if d, err = one("delimiter", c.Delimiter); err != nil {
+			return err
+		}
+		if d == '\n' || d == '\r' {
+			return errors.New("csv.delimiter must not be a line break")
+		}
+	}
+	if d == 0 {
+		d = ','
+	}
+	if c.Quote != "" {
+		if q, err = one("quote", c.Quote); err != nil {
+			return err
+		}
+		if q >= 0x7f || q == '\n' || q == '\r' || q == d {
+			return fmt.Errorf("csv.quote: %q must be a printable ASCII character that is not the delimiter or a line break", c.Quote)
+		}
+	}
+	return nil
+}
+
 func (c Config) validate() error {
 	if _, err := safemode.Parse(c.General.DefaultSafeMode); err != nil {
 		return fmt.Errorf("general.default_safe_mode: %w", err)
