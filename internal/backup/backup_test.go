@@ -147,3 +147,178 @@ func TestPlanToolsOverrideAndNewDatabase(t *testing.T) {
 		t.Fatal("pg_dump is not configured and not on PATH")
 	}
 }
+
+func TestExtraFilenameCommonOptions(t *testing.T) {
+	fakeTools(t, "pg_dump", "pg_restore", "mysqldump", "mysql")
+	conn := func(d string) config.Connection {
+		return config.Connection{Name: "prod", Driver: d, Host: "h", Port: 1, User: "u", Password: "x", Database: "d"}
+	}
+	cmd, err := Plan(Options{Conn: conn("postgres"), File: "out/f", Extra: []string{"--no-owner", "--inserts"}}, false)
+	if err != nil || !strings.HasSuffix(strings.Join(cmd.Args, " "), "-f out/f.part") && !strings.Contains(strings.Join(cmd.Args, " "), "--no-owner --inserts") {
+		t.Fatalf("%v %v", cmd, err)
+	}
+	cmd, _ = Plan(Options{Conn: conn("mysql"), File: "f", Extra: []string{"--no-data"}}, false)
+	a := cmd.Args
+	if a[len(a)-1] != "d" || a[len(a)-2] != "--" || a[len(a)-3] != "--no-data" {
+		t.Errorf("extra must precede --: %v", a)
+	}
+	cmd, _ = Plan(Options{Conn: conn("postgres"), File: "f", Format: "custom", Extra: []string{"--clean"}}, true)
+	if a := cmd.Args; a[len(a)-1] != "f" || a[len(a)-2] != "--clean" {
+		t.Errorf("pg_restore keeps file last: %v", a)
+	}
+	for _, bad := range []string{"-f", "--file=x", "-h", "-hfoo", "-pSECRET", "--password", "-o x", "--out=/tmp/x"} {
+		if _, err := Plan(Options{Conn: conn("postgres"), File: "f", Extra: []string{bad}}, false); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	cmd, _ = Plan(Options{Conn: conn("postgres"), File: "dir/old.sql", Filename: "{connection}-{database}.sql"}, false)
+	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "dir/prod-d.sql.part") {
+		t.Errorf("filename: %v", cmd.Args)
+	}
+	cmd, _ = Plan(Options{Conn: conn("postgres"), Filename: "../x.sql"}, false)
+	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "x.sql.part") || strings.Contains(cmd.Args[len(cmd.Args)-1], "..") {
+		t.Errorf("filename escaped: %v", cmd.Args)
+	}
+	if len(CommonOptions("postgres", false)) != 5 || len(CommonOptions("postgres", true)) != 4 || len(CommonOptions("redis", false)) != 0 ||
+		CommonOptions("mysql", true)[0].Flag != "--force" || len(CommonOptions("mongodb", true)) != 3 {
+		t.Error("common options")
+	}
+}
+
+// Cancel must take the whole process group down, not only the shell.
+func TestRunCancelKillsChildren(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := Run(ctx, commandSh("sleep 30 & echo started; wait"), func(string) {})
+	if err == nil || time.Since(start) > 3*time.Second {
+		t.Errorf("cancel: %v after %v", err, time.Since(start))
+	}
+}
+
+func mkConn(d string) config.Connection {
+	return config.Connection{Name: "prod", Driver: d, Host: "h", Port: 1, User: "u", Password: "x", Database: "d"}
+}
+
+// R-001: Extra is an exact allow-list; nothing can leave the backups folder, change host/db or run a command.
+func TestExtraAllowList(t *testing.T) {
+	fakeTools(t, "pg_dump", "pg_restore", "mysqldump", "mysql", "mongodump", "mongorestore", "psql")
+	bad := []string{"-c", "-d", "--dbname=host=evil", "-L", "-r", "-T", "--command=x", "--log-file=x", "--defaults-file=x", "--tab=/x", "--result-file=/x",
+		"--fil=x", "--hos=evil", "-f", "-h", "--clean=1", "-j", "-j x", "--jobs=x", "--jobs=-1", "x", "--no-owner x"}
+	for _, drv := range []string{"postgres", "mysql", "mongodb"} {
+		for _, restore := range []bool{false, true} {
+			for _, b := range bad {
+				if _, err := Plan(Options{Conn: mkConn(drv), File: "f", Extra: []string{b}}, restore); err == nil {
+					t.Errorf("%s restore=%v: %q accepted", drv, restore, b)
+				}
+			}
+		}
+	}
+	if _, err := Plan(Options{Conn: mkConn("postgres"), File: "f", Format: "custom", Extra: []string{"-j", "4", "--jobs=2"}}, true); err != nil {
+		t.Errorf("-j N on pg_restore: %v", err)
+	}
+	if _, err := Plan(Options{Conn: mkConn("postgres"), File: "f", Extra: []string{"-j 4"}}, false); err == nil {
+		t.Error("-j on pg_dump accepted")
+	}
+	for _, drv := range []string{"postgres", "mysql", "mongodb"} {
+		for _, restore := range []bool{false, true} {
+			for _, o := range CommonOptions(drv, restore) {
+				if _, err := Plan(Options{Conn: mkConn(drv), File: "f", Format: "custom", Extra: []string{o.Flag}}, restore); err != nil {
+					t.Errorf("%s: common option %q refused: %v", drv, o.Flag, err)
+				}
+			}
+		}
+	}
+}
+
+// R-009: a custom-format restore names its target database.
+func TestPgRestoreHasDatabase(t *testing.T) {
+	fakeTools(t, "pg_restore")
+	c := mkConn("postgres")
+	c.Database = "it's"
+	cmd, err := Plan(Options{Conn: c, File: "f", Format: "custom"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := strings.Join(cmd.Args, " ")
+	if !strings.Contains(a, `-d dbname='it\'s'`) {
+		t.Errorf("no -d: %v", cmd.Args)
+	}
+}
+
+// R-013: OutputPath is the file Plan writes, and {tag} is expanded.
+func TestOutputPath(t *testing.T) {
+	fakeTools(t, "pg_dump")
+	o := Options{Conn: mkConn("postgres"), File: "dir/old.sql", Filename: "{connection}-{database}-{tag}.sql", Tag: "prod"}
+	p := OutputPath(o)
+	if !strings.HasSuffix(p, "dir/prod-d-prod.sql") && !strings.HasSuffix(p, "dir/prod-d-prod.sql") {
+		t.Errorf("OutputPath %q", p)
+	}
+	cmd, _ := Plan(o, false)
+	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], p+".part") {
+		t.Errorf("Plan writes %v, OutputPath %q", cmd.Args, p)
+	}
+}
+
+// P2-09 / P2-08: restore flags follow the tool that runs.
+func TestRestoreFlagsFollowTool(t *testing.T) {
+	fakeTools(t, "pg_restore", "psql", "mongorestore", "mysql")
+	hasOplog := func(o []Option, flag string) bool {
+		for _, x := range o {
+			if x.Flag == flag {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasOplog(CommonOptions("mongodb", true), "--oplogReplay") || hasOplog(CommonOptions("mongodb", true), "--oplog") {
+		t.Error("mongorestore takes --oplogReplay, not --oplog")
+	}
+	if _, err := Plan(Options{Conn: mkConn("mongodb"), File: "f", Extra: []string{"--oplogReplay"}}, true); err != nil {
+		t.Errorf("--oplogReplay refused: %v", err)
+	}
+	if _, err := Plan(Options{Conn: mkConn("mysql"), File: "f", Extra: []string{"--single-transaction"}}, true); err == nil {
+		t.Error("mysqldump-only flag accepted for the mysql client")
+	}
+	// plain SQL restore runs psql: pg_restore-only flags are dropped, with a line saying so
+	cmd, err := Plan(Options{Conn: mkConn("postgres"), File: "f.sql", Extra: []string{"--clean", "-j", "4", "--single-transaction"}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Join(cmd.Args, " ")
+	if strings.Contains(line, "--clean") || strings.Contains(line, "-j") || !strings.Contains(line, "--single-transaction") {
+		t.Errorf("psql args: %s", line)
+	}
+	var out []string
+	_ = Run(context.Background(), cmd, func(l string) { out = append(out, l) })
+	if len(out) == 0 || !strings.Contains(out[0], "--clean") || !strings.Contains(out[0], "-j 4") {
+		t.Errorf("no dropped-flags note: %v", out)
+	}
+	// custom restore keeps them
+	cmd, err = Plan(Options{Conn: mkConn("postgres"), File: "f.dump", Format: "custom", Extra: []string{"--clean"}}, true)
+	if err != nil || !strings.Contains(strings.Join(cmd.Args, " "), "--clean") {
+		t.Errorf("pg_restore: %v %v", cmd, err)
+	}
+}
+
+// P2-10: a dump the tool writes itself ends up 0600, not umask-readable.
+func TestToolWrittenDumpIs0600(t *testing.T) {
+	dir := t.TempDir()
+	bin := t.TempDir()
+	script := "#!/bin/sh\nwhile [ $# -gt 0 ]; do if [ \"$1\" = -f ]; then f=$2; fi; shift; done\necho data > \"$f\"\nchmod 644 \"$f\" 2>/dev/null; exit 0\n"
+	// the stub re-chmods only to prove the final chmod, not luck, sets the mode
+	os.WriteFile(filepath.Join(bin, "pg_dump"), []byte(script), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	file := filepath.Join(dir, "out.sql")
+	cmd, err := Plan(Options{Conn: mkConn("postgres"), File: file}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(context.Background(), cmd, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(file)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v err %v", st.Mode(), err)
+	}
+}
