@@ -74,13 +74,51 @@ func openCSV(r io.Reader, o Options) ([]string, func() ([]any, error), error) {
 	if b, _ := br.Peek(3); string(b) == "\ufeff" {
 		br.Discard(3)
 	}
-	cr := csv.NewReader(br)
-	if d := []rune(o.CSV.Delimiter); len(d) > 0 {
-		cr.Comma = d[0]
+	delim := ','
+	if o.CSV.Delimiter != "" {
+		d := []rune(o.CSV.Delimiter)
+		if len(d) != 1 {
+			return nil, nil, fmt.Errorf("csv delimiter %q must be exactly one character", o.CSV.Delimiter)
+		}
+		delim = d[0]
 	}
+	q := o.Quote
+	if q == 0 {
+		if cq := []rune(o.CSV.Quote); len(cq) == 1 {
+			q = cq[0]
+		} else if len(cq) > 1 {
+			return nil, nil, fmt.Errorf("csv quote %q must be exactly one character", o.CSV.Quote)
+		}
+	}
+	if q == 0 {
+		q = '"'
+	}
+	if q >= 0x7f || q == delim || q == '\n' || q == '\r' {
+		return nil, nil, fmt.Errorf("csv quote %q must be a printable ASCII character that is not the delimiter or a line break", q)
+	}
+	var cr *csv.Reader
+	back := func(f []string) {}
+	if q != '"' {
+		cr = csv.NewReader(transform.NewReader(br, swapQuote{byte(q)}))
+		sw := strings.NewReplacer(`"`, string(q), string(q), `"`)
+		back = func(f []string) {
+			for i := range f {
+				f[i] = sw.Replace(f[i])
+			}
+		}
+	} else {
+		cr = csv.NewReader(br)
+	}
+	cr.Comma = delim
 	cr.FieldsPerRecord = -1
-	cr.LazyQuotes = true // shortcut: Quote and LineBreak settings are ignored (encoding/csv fixes them), add a hand parser if someone needs another quote char
-	rec, err := cr.Read()
+	// Strict quotes: a stray quote must fail with its line, not swallow the rest of the file into one field.
+	// shortcut: LineBreak settings are ignored (encoding/csv fixes them), add a hand parser if someone needs another
+	read := func() ([]string, error) {
+		rec, err := cr.Read()
+		back(rec)
+		return rec, err
+	}
+	rec, err := read()
 	if err == io.EOF {
 		return nil, func() ([]any, error) { return nil, io.EOF }, nil
 	}
