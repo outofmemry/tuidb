@@ -2,7 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"webtuidb/internal/db"
 )
