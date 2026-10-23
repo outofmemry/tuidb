@@ -250,6 +250,11 @@ func Load(path string) (Config, error) {
 			}
 		}
 	}
+	c.Theme.File = expandPathSetting(c.Theme.File) // before useInstalledTheme and the consumers stat it
+	c.useInstalledTheme()
+	if strings.TrimSpace(c.Export.Filename) == "" { // an empty pattern means "the default", as it always did
+		c.Export.Filename = Defaults().Export.Filename
+	}
 	if err := secureConfigFile(path, c); err != nil {
 		return c, err
 	}
@@ -269,10 +274,21 @@ func Load(path string) (Config, error) {
 	return c, c.validate()
 }
 
+// expandPathSetting expands $VAR and a leading ~/ like [[source]] path does.
+func expandPathSetting(p string) string {
+	p = os.ExpandEnv(p)
+	if rest, ok := strings.CutPrefix(p, "~/"); ok {
+		if h, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(h, rest)
+		}
+	}
+	return p
+}
+
 // secureConfigFile chmods config.toml to 0600 when it holds a plaintext secret (web password, AI key, MCP token)
 // and is readable by group/others.
 func secureConfigFile(path string, c Config) error {
-	secret := c.Web.Password != "" || c.AI.APIKey != ""
+	secret := c.Web.Password != "" || c.AI.APIKey != "" || c.Security.Passcode != "" // the bcrypt hash of a short passcode is brute-forceable offline
 	for _, p := range c.AI.Providers {
 		secret = secret || p.APIKey != ""
 	}
