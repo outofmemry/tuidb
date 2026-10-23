@@ -259,3 +259,115 @@ func TestCanonicalShiftPunct(t *testing.T) {
 		}
 	}
 }
+
+func TestParseFoldsShiftPunctLikeCanonical(t *testing.T) {
+	for spec, ev := range map[string]string{
+		"C-S-1": "ctrl+shift+1", "M-S-1": "alt+shift+1", "M-S-'": "alt+shift+'", "C-M-S-/": "ctrl+alt+shift+/",
+	} {
+		got, err := Parse(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := Canonical(ev); got != want {
+			t.Errorf("Parse(%q) = %q, want Canonical(%q) = %q", spec, got, ev, want)
+		}
+	}
+	if got, _ := Parse("C-S-1"); got != "ctrl+!" {
+		t.Errorf("Parse(C-S-1) = %q", got)
+	}
+}
+
+func TestBuildExtraPluginBindings(t *testing.T) {
+	plug := Binding{Action: "plugin:count", Key: "alt+P", Context: Global, Desc: "plugin: count"}
+	m, err := Build("C-d", nil, plug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, b := range m.All() {
+		found = found || (b.Action == "plugin:count" && b.Key == "alt+P")
+	}
+	if !found {
+		t.Fatal("plugin binding missing from All()")
+	}
+	// a [keys] override applies to it
+	m, err = Build("C-d", map[string][]string{"plugin:count": {"M-Q"}}, plug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range m.All() {
+		if b.Action == "plugin:count" && (b.Key != "alt+Q" || b.Desc != "plugin: count") {
+			t.Fatalf("override not applied: %+v", b)
+		}
+	}
+	// a conflict with a default errors
+	if _, err := Build("C-d", nil, Binding{Action: "plugin:x", Key: "alt+q", Context: Global}); err == nil {
+		t.Fatal("expected a conflict with close_pane")
+	}
+	if _, err := Build("C-d", nil, plug, Binding{Action: "plugin:other", Key: "alt+P", Context: Global}); err == nil {
+		t.Fatal("expected a conflict between two plugins")
+	}
+}
+
+// R-002: a plugin key that clashes is skipped and reported; the others stay.
+func TestBuildCheckedSkipsConflicts(t *testing.T) {
+	extra := []Binding{
+		{Action: "plugin:ok", Key: "alt+Z", Context: Global, Desc: "plugin: ok"},
+		{Action: "plugin:clash", Key: "alt+J", Context: Global, Desc: "plugin: clash"}, // alt+J is jobs
+		{Action: "plugin:dup", Key: "alt+Z", Context: Global, Desc: "plugin: dup"},     // taken by the first plugin
+		{Action: "plugin:bad", Key: "nonsense+++", Context: Global, Desc: "plugin: bad"},
+	}
+	if _, err := Build("C-b", nil, extra...); err == nil {
+		t.Fatal("Build should still fail on a clash")
+	}
+	m, conflicts, err := BuildChecked("C-b", nil, extra...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 3 {
+		t.Fatalf("conflicts = %q", conflicts)
+	}
+	have := map[string]bool{}
+	for _, b := range m.All() {
+		have[b.Action] = true
+	}
+	if !have["plugin:ok"] || have["plugin:clash"] || have["plugin:dup"] || have["plugin:bad"] || !have["jobs"] {
+		t.Errorf("bindings = %v", have)
+	}
+}
+
+// P1-05: an override of an installed plugin's action must be known to the first Build.
+func TestBuildCheckedKnowsExtraActionsInOverrides(t *testing.T) {
+	extra := []Binding{{Action: "plugin:x", Key: "alt+P", Context: Global, Desc: "plugin: x"}}
+	m, conflicts, err := BuildChecked("C-a", map[string][]string{"plugin:x": {"M-Q"}}, extra...)
+	if err != nil || len(conflicts) != 0 || m == nil {
+		t.Fatalf("err=%v conflicts=%v", err, conflicts)
+	}
+	found := false
+	for _, b := range m.All() {
+		if b.Action == "plugin:x" && b.Key == "alt+Q" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("override key not bound")
+	}
+}
+
+func TestTakenFromPerContext(t *testing.T) { // P2-79
+	old := &Map{bindings: []Binding{{Action: "copy_cells_as", Key: "alt+C", Context: Grid}, {Action: "copy_cells_as", Key: "alt+C", Context: Results}}}
+	same := &Map{bindings: old.All()}
+	if err := TakenFrom(old, same, "x"); err != nil {
+		t.Errorf("unchanged: %v", err)
+	}
+	lostOne := &Map{bindings: old.All()[:1]}
+	if err := TakenFrom(old, lostOne, "x"); err == nil {
+		t.Error("an action losing only its Results binding must be reported")
+	}
+	if err := TakenFrom(old, lostOne, "copy_cells_as"); err != nil {
+		t.Errorf("the edited action may change: %v", err)
+	}
+	if err := TakenFrom(old, &Map{}, "x"); err == nil {
+		t.Error("an action losing every binding must be reported")
+	}
+}
