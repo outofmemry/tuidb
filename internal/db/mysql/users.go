@@ -42,6 +42,8 @@ func keywords(in []string) (string, error) {
 	return strings.Join(out, ", "), nil
 }
 
+var mysqlLimits = []string{"MAX_QUERIES_PER_HOUR", "MAX_UPDATES_PER_HOUR", "MAX_CONNECTIONS_PER_HOUR", "MAX_USER_CONNECTIONS"}
+
 func acct(name, host string) string {
 	if host == "" {
 		host = "%"
@@ -83,6 +85,7 @@ func (s *session) Users(ctx context.Context) ([]db.User, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	s.fillLimits(ctx, out)
 	for i := range out {
 		gr, err := s.db().QueryContext(ctx, "SHOW GRANTS FOR "+acct(out[i].Name, out[i].Host))
 		if err != nil {
