@@ -126,13 +126,75 @@ stale sidebar marks dropping the wrong tables after a database switch, and web d
 
 ---
 
+**M9, M10, M11 and M12 (2026-10-28), both UIs.** M9: grid find with column / operator / match case and replace one or
+all, row-detail multi-row edit, structure data types from `db.DataTypesOf`, export file-name patterns (`{connection}
+{database} {table} {tag} {date} {time}`, default `{table}-{date}`) with header toggle and NULL text, import file
+encoding plus "Import into this table…", beautify / uglify the statement under the cursor (`db.StatementRangeAt`),
+history and saved-query menus (insert, add to queries, rename, clear all), Search in Database across all schemas,
+editable results decided by `db.EditableSelect` (strict rule kept as fallback), filter bar clear-all / export
+(`filter_clear_all` alt+c, `filter_export` alt+e, `filter_add_copy` alt+n; grid `find` alt+/, `find_next` alt+g, `find_prev` alt+G; raw `/` `n` `N` still work in the grid). M10: web
+result-tab pin, console pane, Connections duplicate / copy URL and the missing form fields, history and saved-query
+drawer actions, sidebar menu parity and `matching` search, quick look Raw / Tree / PRETTY / MINIFY / hex / save / load,
+grid range selection, row-detail quick values. M11: web SQL / Mongo autocomplete fed by the session (`Completion.ts`),
+import wizard matching / encoding / quote / on-conflict / column types (`importer.Options`), Mongo syntax toggle,
+search pause / resume, filter add-copy, TUI trigger grid editor and row-detail PRETTY / MINIFY. M12: web structure
+editor (`StructureEditor.tsx` → `POST /structure/plan`), editable query results with commit / preview / discard,
+tab-reuse rule, resizable columns saved to `widths`, tabs restored from sessionStorage and `reopen_workspaces`,
+"taking too long" prompt (exec routes no longer hard-time-out server-side), Redis `:` folders and saved-query
+folders, help listings in keymap table order in both UIs.
+Shortcuts left in code (`// shortcut:` comments): "load more" makes a web result read-only; web result delete /
+duplicate / set-value act on one row; undo only, no redo; saved-query rename is read + save + delete, not atomic;
+Vertica still reads `pg_catalog`; "last workspaces" for reopen live in the browser's localStorage; the web assumes
+an 8px cell when saving `widths`; rename of a table in the web structure editor asks you to reopen the tab.
+Not verified live: none of the new web dialogs were exercised in a browser; drivers other than Postgres untested.
+
 **Review fixes (2026-10-28).** All 18 P1 and 100 P2 findings from `review-latest.md` are fixed in both UIs, with
-tests, except these partials: Vertica still reads `pg_catalog` for sidebar / structure (P2-010); `pinned.PlanTable` takes
-no context so the diff jobs cancel between tables, not inside one (P2-055); history import still appends one entry at a
-time, off the UI loop (P2-057); `$expr` is an allow-list plus an explicit "advanced" opt-in (P2-083); background jobs
-are capped at 4 running and 3 finished exports per session (P2-084); `execute_read_query` is wrapped in a READ ONLY
-transaction only on Postgres / MySQL (P2-094). Key changes: `close_all_tabs` moved to `alt+A` (browser owns `ctrl+w`),
-`alt+shift+letter` now reaches the `alt+K`-style bindings, web punctuation chords (`alt+"`, `alt+.`) work on macOS.
+tests, and a second pass closed the items the first left partial: clipboard CSV is formula-neutralised, saved queries
+have `GET /api/queries/{path}` with an ETag for `If-Match`, `alt+shift+punctuation` folds in the TUI too, Redshift /
+SingleStore caps gate the schema diff and the FK editor, board Y overrides clear `Ys`, `base_url`-only AI providers
+infer OpenAI, filter export uses only applied filters, history import writes in batches with deterministic ids, job
+disk use has a 1 GiB per-session budget, MCP read-only tokens are refused on dialects without READ ONLY transactions
+and function-call writes are blocked, MCP calls re-check `closed` under the lock, the import button cannot double-start.
+CLI / packaging: a URL overlays a saved connection of the same name instead of being discarded; `--mcp-config`
+includes `--config`; exactly one mode flag is allowed and positional args are rejected in non-URL modes; the Docker
+image refuses `--insecure-listen` without `WEBTUIDB_TOKEN` / `WEBTUIDB_PASSWORD` (or `WEBTUIDB_INSECURE=1`); a
+tolerable chmod failure on `connections.toml` warns instead of aborting. Vertica now says catalog browsing is not
+implemented (Schemas / Views caps off) rather than failing on `pg_catalog`. Third review pass (4 P1, 25 P2, uncommitted): CSV neutralisation decides by value so negative decimals stay numbers and plain/TSV copy is covered with a round-trip strip on paste and import; MySQL `replace` import is an upsert, blank or duplicate CSV headers are rejected, quote / delimiter / `null_as` are honoured on import, imports run in one transaction on pinned Postgres / MySQL; `=` search is equality and all-schemas uses `Databases()` where schemas do not exist; type lists are explicit; `Parse` and the web fold shift the same way; the MCP side-effect check runs on a literal-stripped copy and covers `dblink_*`, re-entry functions and boards; history ids share one scheme and imports sort by time; filter-bar keys are no-prefix bindings in both UIs. Remaining by design: diff jobs cancel
+between tables (P2-055); `$expr` is an allow-list plus explicit "advanced" (P2-083).
+
+**M13, M14 and M15 (2026-10-28), both UIs, uncommitted.** M13: ER diagram add-FK form / delete table / schema switch /
+copy column / custom colour (`diagram.WithFK`, `State.DiagramColors`); board panel kinds `input`, `dropdown`, `exporter`
+(`board.ExportPanel`, `DropdownOptions`) with a Status line; MySQL resource limits and PostgreSQL CONNECTION LIMIT
+(`User.Limits`, change kind `limits`), attribute toggles, check / uncheck all; backup extra options from an exact
+allow-list (`backup.AllowedExtra`), file-name patterns (`backup.OutputPath`) and live tool output with cancel (process
+group kill); assistant new / clear / history with search (`store.Chats` under `chats/<connection>/`), Stop; plugin
+`key = "…"` bound as `plugin:<name>` (`keymap.BuildChecked` skips clashes and both UIs report them) and `.js` plugins
+on goja (`context`, `query` in a read-only transaction, `copy`, `open`, `notify`, `sql`; effects capped); `close_pane`
+(alt+q; alt+w was taken); Vim visual mode, counts (product capped at 10000), `:w :q :wq :q! :<n> :noh`; folds keyed by
+statement text; the caret difference is in the help text. M14: `internal/menus` is the single list every context menu
+in both UIs renders from and `/api/meta` exports; `make parity` (CI) tests actions ↔ `SUPPORTED` ↔ handlers, `-keys`
+↔ `/api/meta` ↔ both help screens, `config.Parity` for every UI key (with a `Why` where one UI cannot apply it), menus,
+welcome, 31 dialog pairs (`menus.Dialogs`) and capability gating; fixes: TUI grid / result / filter-bar menus, web
+clone-with-content, typed-name delete / truncate, bootstrap-failure report, `Users` / `Functions` / `Sequences` gating.
+M15: copy cells as (seven formats), copy column, structure / process-list copy-as, select word / all, column header
+menu, header detail line, `+` menu (view / matview / function / schema / database / group), database picker menu,
+Open Anything alt+enter / Tab / Open docs / SSH log, double-click behaviours, Tab between cells, process list
+multi-kill / sort / Dismiss, console find / copy / errors-only, jobs centre (`jobs`, alt+J) with stop / reveal / download
+and bell + OSC 9 / 777 or desktop notifications, reveal in file manager, web deep links (`/s/<sid>/t/<schema>/<table>`,
+`/s/<sid>/q/<path>`, token carried, "Copy link"), status-bar reconnect, tab drag / move (alt+{ alt+}), file and
+query / connection drag-and-drop, zen (`toggle_panels`, alt+0), binary hex / base64 / text / image / PDF / WKT + Map
+views (`db.WKT`, `db.SniffImage`, `[table] decode_spatial` / `image_preview`), NULL / EMPTY / DEFAULT parity, eight new
+theme keys, `[web] auto_hide_scrollbars` / `toolbar`, `[general] hints`, last-connected + "recent" sort, password-command
+presets, in-app settings editor over `config.Schema` with a keymap editor (`config.ApplyValues`, `WriteKeys`), passcode
+lock (`[security] passcode`, `-set-passcode`, `lock` alt+L), `-changelog` / `-bugreport` / `-check-update`, local crash
+log, themes from git (`-theme-install`, `-theme-update`), mouse (focus, tabs, sidebar, grid cursor, header sort and
+resize, double-click edit, right-click menus), web keyboard / aria / reduced motion, production cue on the frame and
+a top bar. Independent review (3 P1, 11 P2, 10 P3) fixed in the same pass.
+Shortcuts left in code (`// shortcut:`): web diagram colours / positions and sidebar item colours live in localStorage;
+`ApplyValues` and `-bugreport` drop TOML comments; a panic inside a `tea.Cmd` goroutine is not crash-logged; the web's
+"Enable SSH log" only says to restart with `--ssh-log`; result-grid header menu cannot hide columns in the TUI; plugin
+contexts are honoured but a wrong context only reports; `editor.params_in_strings` is accepted but unused (marked
+reserved in `config.Parity`); none of the new web dialogs were exercised in a browser against a live database.
 
 # webtuidb — a TablePlus clone for the terminal
 
