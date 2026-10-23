@@ -62,3 +62,22 @@ func TestWriteFileAtomicEmptyPath(t *testing.T) {
 		t.Fatal("empty path accepted")
 	}
 }
+
+func TestCSVAndExportFilenameValidation(t *testing.T) {
+	for _, c := range []CSV{{Delimiter: "||"}, {Quote: "ab"}, {Quote: ","}, {Delimiter: ";", Quote: ";"}, {Quote: "\n"}, {Quote: "é"}} {
+		if c.validate() == nil {
+			t.Errorf("%+v must be rejected", c)
+		}
+	}
+	if err := (CSV{Delimiter: ";", Quote: "'"}).validate(); err != nil {
+		t.Error(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[export]\nfilename = \"\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil || c.Export.Filename != Defaults().Export.Filename {
+		t.Errorf("empty filename: %v %q", err, c.Export.Filename)
+	}
+}
