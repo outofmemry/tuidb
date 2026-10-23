@@ -129,6 +129,14 @@ func openCSV(r io.Reader, o Options) ([]string, func() ([]any, error), error) {
 	pending := rec
 	if o.Header {
 		cols, pending = rec, nil
+		for i, c := range cols {
+			if strings.TrimSpace(c) == "" {
+				return nil, nil, fmt.Errorf("column %d has no name; give it a name in the file", i+1)
+			}
+			if !o.KeepFormulaQuote {
+				cols[i] = unquoteFormula(c)
+			}
+		}
 	} else {
 		for i := range rec {
 			cols = append(cols, fmt.Sprintf("column%d", i+1))
