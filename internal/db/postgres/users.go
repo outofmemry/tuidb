@@ -43,12 +43,16 @@ func keywords(in []string, sep string) (string, error) {
 func (s *session) Users(ctx context.Context) ([]db.User, error) {
 	var out []db.User
 	idx := map[string]int{}
-	err := s.query(ctx, `SELECT rolname::text, rolsuper, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication, rolbypassrls
+	err := s.query(ctx, `SELECT rolname::text, rolsuper, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication, rolbypassrls, rolconnlimit
 		FROM pg_roles WHERE rolname !~ '^pg_' ORDER BY 1`, nil, func(r pgx.Rows) error {
 		var u db.User
 		var f [6]bool
-		if err := r.Scan(&u.Name, &f[0], &f[1], &f[2], &f[3], &f[4], &f[5]); err != nil {
+		var lim int32
+		if err := r.Scan(&u.Name, &f[0], &f[1], &f[2], &f[3], &f[4], &f[5], &lim); err != nil {
 			return err
+		}
+		if lim >= 0 {
+			u.Limits = map[string]int{"CONNECTION_LIMIT": int(lim)}
 		}
 		for i, n := range []string{"SUPERUSER", "CREATEROLE", "CREATEDB", "LOGIN", "REPLICATION", "BYPASSRLS"} {
 			if f[i] {
