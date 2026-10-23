@@ -1,6 +1,8 @@
 package diagram
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
