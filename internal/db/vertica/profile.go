@@ -34,6 +34,23 @@ func (session) Schemas(context.Context) ([]string, error)              { return 
 func (session) DDL(context.Context, db.ObjRef) (string, error)         { return "", ErrCatalog }
 func (session) Indexes(context.Context, db.ObjRef) ([]db.Index, error) { return nil, nil }
 
+func (session) Columns(context.Context, db.ObjRef) ([]db.Column, error) { return nil, ErrCatalog }
+func (session) Databases(context.Context) ([]string, error)             { return nil, ErrCatalog }
+func (s session) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
+	if old == nil { // CREATE is built from the TableDef alone; only ALTER reads pg_catalog
+		return s.Session.PlanTable(nil, new)
+	}
+	return nil, ErrCatalog
+}
+
+// Script refuses CREATE, which the wrapped driver builds from pg_catalog; DROP/TRUNCATE/SELECT scripts read no catalog.
+func (s session) Script(ctx context.Context, kind db.ScriptKind, ref db.ObjRef) (string, error) {
+	if kind == db.ScriptCreate {
+		return "", ErrCatalog
+	}
+	return s.Session.Script(ctx, kind, ref)
+}
+
 func (session) Triggers(context.Context, db.ObjRef) ([]db.Trigger, error) { return nil, nil }
 
 func (session) ForeignKeys(context.Context, db.ObjRef) ([]db.ForeignKey, error) { return nil, nil }
