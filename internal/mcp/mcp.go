@@ -563,7 +563,12 @@ func allowed(tok *config.MCPToken, conn string) bool {
 	return tok == nil || len(tok.Connections) == 0 || slices.Contains(tok.Connections, conn)
 }
 
-// connReadOnly reports whether the saved connection is configured read_only (the driver then enforces it on the server).
+// readOnlyRunner is the session read-only statements must run on (see ReadOnlyTx).
+func (s *Server) readOnlyRunner(ctx context.Context, o *open, conn, dialect string) (db.Session, func(), error) {
+	return ReadOnlyTx(ctx, o.sess, dialect, s.connReadOnly(conn))
+}
+
+// connReadOnly reports whether the saved connection is configured read_only (enforced on the server only for the dialects in serverReadOnly).
 func (s *Server) connReadOnly(name string) bool {
 	i := slices.IndexFunc(s.conns, func(c config.Connection) bool { return c.Name == name })
 	return i >= 0 && s.conns[i].ReadOnly
