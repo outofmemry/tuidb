@@ -442,6 +442,7 @@ func plan(o Options, restore bool) (*exec.Cmd, error) {
 			return dump(plain(o, env, tool.Path, args...), o.File, false, false), nil
 		}
 		if o.Format == "custom" {
+			conn = append(conn, "-d", "dbname='"+strings.NewReplacer(`\`, `\\`, "'", `\'`).Replace(d)+"'") // pg_restore without -d prints the script instead of restoring
 			return plain(o, env, tool.Path, append(append(conn, scope...), o.File)...), nil
 		}
 		psql := c.Tools["psql"]
@@ -568,9 +569,13 @@ func Run(ctx context.Context, cmd *exec.Cmd, out func(line string)) error {
 	j := jobs[cmd]
 	delete(jobs, cmd)
 	jobsMu.Unlock()
+	if j != nil && j.note != "" {
+		out(j.note)
+	}
 	r, w := io.Pipe()
 	cmd.Stdout, cmd.Stderr = w, w
 	cmd.WaitDelay = time.Second // closes the pipe even if a grandchild keeps it open
+	inOwnGroup(cmd)
 	fin := func(err error) error { return err }
 	if j != nil && j.prep != nil {
 		var err error
@@ -585,7 +590,7 @@ func Run(ctx context.Context, cmd *exec.Cmd, out func(line string)) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = cmd.Process.Kill()
+			killGroup(cmd)
 		case <-done:
 		}
 	}()
