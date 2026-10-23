@@ -67,7 +67,17 @@ func (s *session) Objects(ctx context.Context, schema string) ([]db.Object, erro
 		return nil, err
 	}
 	s.mu.Lock()
-	s.versioned = versioned
+	if s.versioned == nil {
+		s.versioned = map[string]bool{}
+	}
+	for k := range s.versioned { // replace this database's entries only: another database may have been listed before
+		if strings.HasPrefix(k, cur+".") {
+			delete(s.versioned, k)
+		}
+	}
+	for k, v := range versioned {
+		s.versioned[k] = v
+	}
 	s.mu.Unlock()
 	rr, err := s.db().QueryContext(ctx, "SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.routines WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_TYPE DESC, ROUTINE_NAME", cur)
 	if err != nil {
@@ -83,7 +93,7 @@ func (s *session) Objects(ctx context.Context, schema string) ([]db.Object, erro
 		if typ == "PROCEDURE" {
 			k = db.KindProcedure
 		}
-		out = append(out, db.Object{ObjRef: db.ObjRef{Name: name, Kind: k}})
+		out = append(out, db.Object{ObjRef: db.ObjRef{Schema: refSchema, Name: name, Kind: k}})
 	}
 	return out, rr.Err()
 }
