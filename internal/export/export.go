@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +35,8 @@ type Options struct {
 	// RawFormulas turns off the CSV default of prefixing text cells that start with = + - @ tab or CR with ',
 	// which stops a spreadsheet running them. Numbers are never prefixed.
 	RawFormulas bool
+	NoHeader    bool   // csv only: skip the header row
+	NullAs      string // csv only: text written for NULL; "" falls back to CSV.NullAs, then an empty cell
 }
 
 const pageSize = 1000
@@ -129,7 +133,11 @@ func open(w io.Writer, o Options) (*stream, error) {
 	}
 	switch o.Format {
 	case "csv":
-		s.e = &csvEnc{w: w, c: o.CSV, safe: !o.RawFormulas}
+		null := o.NullAs
+		if null == "" {
+			null = o.CSV.NullAs
+		}
+		s.e = &csvEnc{w: w, c: o.CSV, safe: !o.RawFormulas, noHead: o.NoHeader, null: null}
 	case "json":
 		s.e = &jsonEnc{w: w}
 	case "sql":
