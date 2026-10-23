@@ -162,3 +162,63 @@ func TestBoardButtonsAndDependents(t *testing.T) {
 		t.Fatalf("%+v", l)
 	}
 }
+
+func TestInputDropdownExporter(t *testing.T) {
+	b := Board{Panels: []Panel{
+		{Title: "Region", Kind: "dropdown", Var: "region", Options: []string{"eu", "us"}, Default: "eu"},
+		{Title: "Pick", Kind: "dropdown", Var: "day", Query: "select day from orders"},
+		{Title: "N", Kind: "input", Var: "n", Default: "5"},
+		{Title: "Out", Kind: "exporter", Format: "csv", Query: "select day, total from orders where n = $n and r = $region"},
+	}}
+	f := &fake{}
+	if got := Run(context.Background(), f, b, nil, 10); len(got) != 0 || len(f.got) != 0 {
+		t.Fatalf("input/dropdown/exporter must be skipped: %v %v", got, f.got)
+	}
+	res, err := ExportPanel(context.Background(), f, b, b.Panels[3], map[string]string{"region": "us"}, 10)
+	if err != nil || len(res.Rows) != 2 || len(f.got) != 1 || !strings.Contains(f.got[0], "n = '5'") && !strings.Contains(f.got[0], "n = 5") || !strings.Contains(f.got[0], "us") {
+		t.Fatalf("%v %v %v", err, res, f.got)
+	}
+	if o, _, _ := DropdownOptions(context.Background(), f, b, b.Panels[0], nil); len(o) != 2 || o[1] != "us" {
+		t.Fatal(o)
+	}
+	if o, _, err := DropdownOptions(context.Background(), f, b, b.Panels[1], nil); err != nil || len(o) != 2 || o[0] != "mon" {
+		t.Fatal(o, err)
+	}
+}
+
+func TestDropdownSkipsNullAndFormatsBytes(t *testing.T) { // P2-55, P2-56
+	f := &optFake{rows: [][]any{{"a"}, {nil}, {[]byte("hi")}, {int64(3)}}}
+	b := Board{Panels: []Panel{{Kind: "dropdown", Var: "v", Query: "select x"}}}
+	o, cut, err := DropdownOptions(context.Background(), f, b, b.Panels[0], nil)
+	if cut || err != nil || strings.Join(o, "|") != "a|\\x6869|3" {
+		t.Errorf("%v %q", err, o)
+	}
+	if DropdownLimit <= 500 || f.limit != DropdownLimit {
+		t.Errorf("limit %d / %d", DropdownLimit, f.limit)
+	}
+}
+
+type optFake struct {
+	fake
+	rows  [][]any
+	limit int
+}
+
+func (f *optFake) Exec(_ context.Context, _ string, limit int) (*db.Result, error) {
+	f.limit = limit
+	return &db.Result{Columns: []db.ResultColumn{{Name: "x"}}, Rows: f.rows}, nil
+}
+
+func TestDropdownTruncatedCountsRawRows(t *testing.T) { // NULLs are skipped, but the limit is judged on the raw rows
+	rows := make([][]any, DropdownLimit)
+	for i := range rows {
+		rows[i] = []any{nil}
+	}
+	rows[0] = []any{"a"}
+	f := &optFake{rows: rows}
+	b := Board{Panels: []Panel{{Kind: "dropdown", Var: "v", Query: "select x"}}}
+	o, cut, err := DropdownOptions(context.Background(), f, b, b.Panels[0], nil)
+	if err != nil || len(o) != 1 || !cut {
+		t.Errorf("%v %d %v", err, len(o), cut)
+	}
+}
