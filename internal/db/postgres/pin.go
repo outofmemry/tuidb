@@ -71,3 +71,49 @@ func (s *pinned) Close() error {
 	}
 	return nil
 }
+
+// Apply runs the statements on the pinned connection. When the engine has transactions, no statement needs to
+// run outside one and the pin holds none of its own, the batch gets its own BEGIN/COMMIT, so a failure midway
+// does not leave the earlier statements committed. Inside the user's transaction they just join it.
+func (s *pinned) Apply(ctx context.Context, stmts []db.Statement) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.c == nil {
+		return errors.New("pinned session closed")
+	}
+	for _, st := range stmts {
+		if s.session.c.ReadOnly && !st.ReadOnly && !db.IsReadOnly("postgres", st.Text) {
+			return errReadOnly
+		}
+	}
+	s.session.colMu.Lock()
+	s.session.cols = map[string][]string{} // structure may change
+	s.session.colMu.Unlock()
+	own := wantTx(s.session.caps.Transactions, stmts) && s.c.PgConn().TxStatus() == 'I'
+	return applyOn(ctx, s.c.Conn, own, stmts)
+}
+
+// applyOn runs stmts on ex, wrapped in BEGIN/COMMIT (ROLLBACK on error) when own is set.
+func applyOn(ctx context.Context, ex execer, own bool, stmts []db.Statement) error {
+	if own {
+		if _, err := ex.Exec(ctx, "BEGIN"); err != nil {
+			return fmt.Errorf("begin: %w", err)
+		}
+	}
+	for _, st := range stmts {
+		if _, err := ex.Exec(ctx, st.Text, st.Args...); err != nil {
+			if own {
+				rctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				ex.Exec(rctx, "ROLLBACK")
+				cancel()
+			}
+			return fmt.Errorf("apply %q: %w", firstLine(st.Shown()), err)
+		}
+	}
+	if own {
+		if _, err := ex.Exec(ctx, "COMMIT"); err != nil {
+			return fmt.Errorf("commit: %w", err)
+		}
+	}
+	return nil
+}
