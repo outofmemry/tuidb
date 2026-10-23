@@ -37,7 +37,7 @@ func TestPlan(t *testing.T) {
 	}{
 		{"pg plain", Options{Conn: conn("postgres"), File: "f.sql", SchemaOnly: true}, false, "-h h -p 1 -U u -s -F p -f f.sql.part"},
 		{"pg custom gz", Options{Conn: conn("postgres"), File: "f", Format: "custom", Gzip: true}, false, "-h h -p 1 -U u -F c -f f.part"},
-		{"pg restore custom", Options{Conn: conn("postgres"), File: "f", Format: "custom", DataOnly: true}, true, "-h h -p 1 -U u -a f"},
+		{"pg restore custom", Options{Conn: conn("postgres"), File: "f", Format: "custom", DataOnly: true}, true, "-h h -p 1 -U u -d dbname='d' -a f"},
 		{"pg restore plain", Options{Conn: conn("postgres"), File: "f.sql"}, true, "-h h -p 1 -U u -v ON_ERROR_STOP=1 -f f.sql"},
 		{"mysql", Options{Conn: conn("mysql"), File: "f.sql"}, false, "-h h -P 1 -u u --single-transaction --routines --events -- d"},
 		{"mysql gz", Options{Conn: conn("mysql"), File: "f.gz", Gzip: true}, false, "--routines --events -- d"},
