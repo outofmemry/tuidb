@@ -251,3 +251,20 @@ func (s *Machine) Feed(ctx, key string) Result {
 	}
 	return Result{Passthrough: true}
 }
+
+// TakenFrom reports an action that has a binding in old but none in next (same context and prefix-ness), other than
+// the one being edited: a user binding wins over a default, so rebinding onto a default's key would silently remove
+// that action, or just one of its context bindings such as Grid but not Results (P2-79).
+func TakenFrom(old, next *Map, edited string) error {
+	have := map[string]bool{}
+	id := func(b Binding) string { return fmt.Sprintf("%s|%s|%t", b.Action, b.Context, b.NoPrefix) }
+	for _, b := range next.All() {
+		have[id(b)] = true
+	}
+	for _, b := range old.All() {
+		if b.Action != edited && !have[id(b)] {
+			return fmt.Errorf("this takes the key from %s (%s): pick another key", b.Action, Display(b.Key))
+		}
+	}
+	return nil
+}
