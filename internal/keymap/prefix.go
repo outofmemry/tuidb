@@ -62,7 +62,13 @@ func Build(prefix string, overrides map[string][]string, extra ...Binding) (*Map
 				if err != nil {
 					return nil, fmt.Errorf("[keys] %s: %w", action, err)
 				}
-				user = append(user, Binding{Action: action, Key: k, Context: ctx, NoPrefix: noPrefix, Desc: descOf(action)})
+				d := descOf(action)
+				for _, e := range extra {
+					if e.Action == action {
+						d = e.Desc
+					}
+				}
+				user = append(user, Binding{Action: action, Key: k, Context: ctx, NoPrefix: noPrefix, Desc: d})
 			}
 		}
 	}
@@ -78,6 +84,11 @@ func Build(prefix string, overrides map[string][]string, extra ...Binding) (*Map
 		return false
 	}
 	for _, b := range DefaultBindings() {
+		if _, over := overrides[b.Action]; !over && !taken(b) {
+			m.bindings = append(m.bindings, b)
+		}
+	}
+	for _, b := range extra {
 		if _, over := overrides[b.Action]; !over && !taken(b) {
 			m.bindings = append(m.bindings, b)
 		}
