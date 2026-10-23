@@ -555,3 +555,182 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 		}
 	}
 }
+
+// decode wraps r so the rest of the package sees UTF-8. A byte the chosen encoding cannot map would come out as
+// U+FFFD without an error (a UTF-8 file read as utf-16le becomes CJK-looking rows), so a replacement character the
+// source did not contain is an error.
+func decode(r io.Reader, name string) (io.Reader, error) {
+	switch strings.ToLower(name) {
+	case "", "utf-8", "utf8":
+		return r, nil
+	}
+	e, err := ianaindex.IANA.Encoding(name)
+	if err != nil || e == nil {
+		return nil, fmt.Errorf("unknown encoding %q", name)
+	}
+	g := &fffdGuard{name: name}
+	return &guarded{r: e.NewDecoder().Reader(io.TeeReader(r, g)), g: g}, nil
+}
+
+// fffdGuard is the writer the raw bytes are tee'd into: it counts U+FFFD as the file itself spells it in UTF-8 or
+// UTF-16, to compare with the replacement characters the decoder produced. The 2-byte tail catches a sequence
+// split across two reads.
+type fffdGuard struct {
+	name string
+	raw  int // U+FFFD the file really contains (approximate for single-byte encodings, where it never occurs)
+	out  int // U+FFFD in the decoded text
+	tail []byte
+}
+
+var rawFFFD = [][]byte{{0xEF, 0xBF, 0xBD}, {0xFD, 0xFF}, {0xFF, 0xFD}}
+
+func (g *fffdGuard) Write(p []byte) (int, error) {
+	buf := append(g.tail, p...)
+	for _, pat := range rawFFFD {
+		g.raw += bytes.Count(buf, pat) - bytes.Count(g.tail, pat) // the tail was counted by the previous write
+	}
+	g.tail = append(g.tail[:0], buf[max(0, len(buf)-2):]...)
+	return len(p), nil
+}
+
+type guarded struct {
+	r io.Reader
+	g *fffdGuard
+}
+
+func (g *guarded) Read(p []byte) (int, error) {
+	n, err := g.r.Read(p)
+	if c := bytes.Count(p[:n], []byte("\ufffd")); c > 0 {
+		g.g.out += c
+		if g.g.out > g.g.raw {
+			return 0, fmt.Errorf("the file is not valid %s: some bytes cannot be decoded, pick another encoding", g.g.name)
+		}
+	}
+	return n, err
+}
+
+// readAll reads r in chunks, checking ctx between them so a cancel is not ignored while a big file loads.
+func readAll(ctx context.Context, r io.Reader) ([]byte, error) {
+	var out []byte
+	buf := make([]byte, 1<<20)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		n, err := r.Read(buf)
+		out = append(out, buf[:n]...)
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+// swapQuote exchanges '"' and q so encoding/csv, which only knows '"', can read a file quoted with q.
+// Parsed fields come back with the two swapped, so openCSV swaps them again.
+type swapQuote struct{ q byte }
+
+func (swapQuote) Reset() {}
+func (t swapQuote) Transform(dst, src []byte, atEOF bool) (int, int, error) {
+	n := min(len(dst), len(src))
+	for i := 0; i < n; i++ {
+		switch src[i] {
+		case '"':
+			dst[i] = t.q
+		case t.q:
+			dst[i] = '"'
+		default:
+			dst[i] = src[i]
+		}
+	}
+	if n < len(src) {
+		return n, n, transform.ErrShortDst
+	}
+	return n, n, nil
+}
+
+// upsert turns plain INSERT statements into upserts for onConflict "update" or "replace". Both are the same
+// upsert over the mapped columns: MySQL REPLACE would delete the row first, wiping unmapped columns and cascading.
+func upsert(stmts []db.Statement, onConflict, dialect string, pk, cols []string) []db.Statement {
+	if onConflict != "update" && onConflict != "replace" {
+		return stmts
+	}
+	d, _ := db.DialectFor(dialect)
+	out := make([]db.Statement, len(stmts))
+	for i, st := range stmts {
+		out[i] = st
+		if !strings.HasPrefix(st.Text, "INSERT INTO ") {
+			continue
+		}
+		var set []string
+		for _, c := range cols {
+			if slices.Contains(pk, c) {
+				continue
+			}
+			if dialect == "mysql" {
+				set = append(set, d.Quote(c)+" = VALUES("+d.Quote(c)+")")
+			} else {
+				set = append(set, d.Quote(c)+" = EXCLUDED."+d.Quote(c))
+			}
+		}
+		if dialect == "mysql" && len(set) == 0 && len(cols) > 0 {
+			set = append(set, d.Quote(cols[0])+" = "+d.Quote(cols[0]))
+		}
+		var tail string
+		switch {
+		case dialect == "mysql":
+			tail = " ON DUPLICATE KEY UPDATE " + strings.Join(set, ", ")
+		case len(set) == 0:
+			tail = " ON CONFLICT DO NOTHING"
+		default:
+			q := make([]string, len(pk))
+			for j, c := range pk {
+				q[j] = d.Quote(c)
+			}
+			tail = " ON CONFLICT (" + strings.Join(q, ", ") + ") DO UPDATE SET " + strings.Join(set, ", ")
+		}
+		out[i].Text = strings.TrimRight(st.Text, "; ") + tail
+		if st.Display != "" {
+			out[i].Display = strings.TrimRight(st.Display, "; ") + tail
+		}
+	}
+	return out
+}
+
+// uniqueTargets rejects two file columns that land on the same table column, naming both. When the table is
+// being created the later ones get a numeric suffix instead (def is updated in place).
+func uniqueTargets(cols, target []string, def []db.Column, dialect string, create bool) error {
+	key := func(n string) string {
+		if dialect == "mysql" {
+			return strings.ToLower(n)
+		}
+		return n
+	}
+	first := map[string]int{}
+	j := 0
+	for i, t := range target {
+		if t == "" {
+			continue
+		}
+		k := key(t)
+		if f, dup := first[k]; dup {
+			if !create {
+				return fmt.Errorf("file columns %d (%q) and %d (%q) both go to table column %q; map one to another column or skip it", f+1, cols[f], i+1, cols[i], t)
+			}
+			for n := 2; ; n++ {
+				cand := fmt.Sprintf("%s_%d", t, n)
+				if _, taken := first[key(cand)]; !taken {
+					t = cand
+					break
+				}
+			}
+			target[i], def[j].Name = t, t
+			k = key(t)
+		}
+		first[k] = i
+		j++
+	}
+	return nil
+}
