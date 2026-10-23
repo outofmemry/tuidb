@@ -79,9 +79,12 @@ Unknown actions, unparsable keys, two of your bindings on the same key, and bind
 (it cancels the prefix) are reported at startup with the offending line.
 
 In a grid, `Enter` opens the cell in a popover editor (JSON is pretty-printed; `Ctrl+s` saves, `Esc` cancels)
-and `e` edits inline. Also handy: `/` find (then `n` / `N`), `s` sort the column, `#` exact row count, `L` limit and offset,
+and `e` edits inline. Also handy: `/` find (then `n` / `N`; after the prefix the same actions are `alt+/` find, `alt+g` find next, `alt+G` find previous, so the prefix `/` and `n` keep their global meaning), `s` sort the column, `#` exact row count, `L` limit and offset,
 paste rows (`v`) and cells (`V`), and in the results pane `p` pins a result so the next run keeps it. A query result
 is editable when it is a plain `SELECT ... FROM table` that includes the primary key.
+
+In the filter bar `alt+n` adds a filter as a copy of this one, `alt+c` clears all filters and `alt+e` exports the
+filtered rows (actions `filter_add_copy`, `filter_clear_all`, `filter_export`).
 
 ## Connections
 
