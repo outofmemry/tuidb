@@ -48,6 +48,8 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 			return nil, err
 		}
 		texts = []string{"RENAME DATABASE " + dialect.Quote(ref.Name) + " TO " + n}
+	case db.OpCreateSchema, db.OpDropSchema:
+		return nil, fmt.Errorf("clickhouse has no schemas: a schema is a database, use create / drop database")
 	default:
 		return nil, fmt.Errorf("clickhouse does not support %q", op)
 	}
