@@ -23,9 +23,13 @@ type Var struct {
 
 type Panel struct {
 	Title, Kind, Query, Chart string
-	Target                    string `toml:"target,omitempty"`     // kind "button": the panel title it runs when clicked
-	RefreshOn                 string `toml:"refresh_on,omitempty"` // re-run this panel when the named panel runs or its button is clicked
-	Table                     string `toml:"table,omitempty"`      // kind "import": the import wizard's target table
+	Target                    string   `toml:"target,omitempty"`                           // kind "button": the panel title it runs when clicked
+	RefreshOn                 string   `toml:"refresh_on,omitempty"`                       // re-run this panel when the named panel runs or its button is clicked
+	Table                     string   `toml:"table,omitempty"`                            // kind "import": the import wizard's target table
+	Var                       string   `toml:"var,omitempty" json:"var,omitempty"`         // kind input/dropdown: the $var it sets
+	Options                   []string `toml:"options,omitempty" json:"options,omitempty"` // kind dropdown: fixed list; empty + Query = first column of the query
+	Format                    string   `toml:"format,omitempty" json:"format,omitempty"`   // kind exporter: csv|json|sql|excel
+	Default                   string   `toml:"default,omitempty" json:"default,omitempty"`
 }
 
 type Board struct {
