@@ -3,6 +3,7 @@ package diagram
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
