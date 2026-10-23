@@ -136,6 +136,12 @@ func (s *session) PlanUser(c db.UserChange) ([]db.Statement, error) {
 			}
 			return t
 		}), nil
+	case "limits":
+		n, ok := c.User.Limits["CONNECTION_LIMIT"]
+		if !ok || n < -1 {
+			return nil, fmt.Errorf("limits needs CONNECTION_LIMIT (-1 for none)")
+		}
+		return []db.Statement{{Text: fmt.Sprintf("ALTER ROLE %s CONNECTION LIMIT %d", role, n)}}, nil
 	case "drop":
 		return []db.Statement{{Text: "DROP ROLE " + role}}, nil
 	case "password":
