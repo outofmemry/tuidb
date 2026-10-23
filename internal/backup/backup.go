@@ -322,8 +322,83 @@ func plain(o Options, env []string, name string, args ...string) *exec.Cmd {
 var sslModes = map[string]string{"disable": "DISABLED", "prefer": "PREFERRED", "require": "REQUIRED",
 	"verify-ca": "VERIFY_CA", "verify-full": "VERIFY_IDENTITY", "verify-identity": "VERIFY_IDENTITY"}
 
+// OutputPath is the file Plan reads (restore) or writes (backup) once Filename is applied.
+func OutputPath(o Options) string {
+	if o.Filename == "" {
+		return o.File
+	}
+	name := o.Filename
+	if strings.Contains(name, "{") {
+		name = export.Filename(name, map[string]string{"connection": o.Conn.Name, "database": o.db(), "table": o.db(), "tag": o.Tag})
+	}
+	name = filepath.Base(name)
+	if o.File == "" {
+		return name
+	}
+	return filepath.Join(filepath.Dir(o.File), name)
+}
+
 // Plan builds the command; the caller runs it with Run.
 func Plan(o Options, restore bool) (*exec.Cmd, error) {
+	extra, err := checkExtra(o.Conn.Driver, restore, o.Extra)
+	if err != nil {
+		return nil, err
+	}
+	o.File = OutputPath(o)
+	cmd, err := plan(o, restore)
+	if err != nil || len(extra) == 0 {
+		return cmd, err
+	}
+	psql := restore && o.Conn.Driver == config.Postgres && o.Format != "custom"
+	if psql { // the allow-list is pg_restore's; psql takes few of them
+		var keep, dropped []string
+		for i := 0; i < len(extra); i++ {
+			switch {
+			case psqlExtra[extra[i]]:
+				keep = append(keep, extra[i])
+			case extra[i] == "-j": // takes the next token
+				dropped = append(dropped, extra[i]+" "+extra[i+1])
+				i++
+			default:
+				dropped = append(dropped, extra[i])
+			}
+		}
+		if len(dropped) > 0 {
+			jobsMu.Lock()
+			if jobs[cmd] == nil {
+				jobs[cmd] = &job{}
+			}
+			jobs[cmd].note = "note: psql restores a plain SQL file and does not take " + strings.Join(dropped, " ") + "; left out"
+			jobsMu.Unlock()
+		}
+		if extra = keep; len(extra) == 0 {
+			return cmd, nil
+		}
+	}
+	at := len(cmd.Args)
+	if psql {
+		for i, a := range cmd.Args {
+			if a == "-f" {
+				at = i
+				break
+			}
+		}
+	}
+	for i, a := range cmd.Args {
+		if a == "--" {
+			at = i
+			break
+		}
+	}
+	if at == len(cmd.Args) && restore && o.Conn.Driver == config.Postgres && o.Format == "custom" {
+		at-- // pg_restore ends with the archive file
+	}
+	args := append(append(append([]string(nil), cmd.Args[:at]...), extra...), cmd.Args[at:]...)
+	cmd.Args = args
+	return cmd, nil
+}
+
+func plan(o Options, restore bool) (*exec.Cmd, error) {
 	if restore && o.NewDatabase != "" {
 		o.Database = o.NewDatabase
 	}
