@@ -187,7 +187,8 @@ func (m *Map) Lookup(ctx, key string) (string, bool) {
 	return "", false
 }
 
-// Bindings lists what is valid after the prefix in ctx (focused context shadows global), for which-key.
+// Bindings lists what is valid after the prefix in ctx (focused context shadows global), for which-key,
+// in defaults-table order (the web help dialog shows the same order).
 func (m *Map) Bindings(ctx string) []Binding {
 	taken := map[string]bool{}
 	var out []Binding
@@ -203,7 +204,6 @@ func (m *Map) Bindings(ctx string) []Binding {
 			break
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
 }
 
