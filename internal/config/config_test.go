@@ -76,8 +76,8 @@ func TestConnectionsRoundTripAndPerms(t *testing.T) {
 }
 
 func TestConnectionsRejectBad(t *testing.T) {
-	if _, err := LoadConnections(write(t, "[[connection]]\nname='a'\ndriver='oracle'\n")); err == nil {
-		t.Error("unknown driver")
+	if cs, err := LoadConnections(write(t, "[[connection]]\nname='a'\ndriver='oracle'\n")); err != nil || len(cs) != 1 || cs[0].Unusable == "" {
+		t.Errorf("unknown driver loads as unusable: %v %+v", err, cs)
 	}
 	if _, err := LoadConnections(write(t, "[[connection]]\nname='a'\ndriver='redis'\n[[connection]]\nname='a'\ndriver='redis'\n")); err == nil {
 		t.Error("duplicate names")
@@ -233,7 +233,7 @@ func TestWriteFileAtomicKeepsOldFileOnFailure(t *testing.T) {
 }
 
 func TestUnimplementedSettingsAreRejected(t *testing.T) {
-	for _, body := range []string{"[editor]\nwrap = true\n", "[sidebar]\nlazy_load = true\n", "[editor]\nquery_params = true\n"} {
+	for _, body := range []string{"[editor]\nwrapp = true\n", "[sidebar]\nlazy_loadd = true\n", "[editor]\nparam_format = \"colon\"\nparams_in_stringss = true\n"} {
 		if _, err := Load(write(t, body)); err == nil {
 			t.Errorf("%q is not implemented and must be reported, not ignored", body)
 		}
@@ -242,13 +242,13 @@ func TestUnimplementedSettingsAreRejected(t *testing.T) {
 
 func TestSaveConnectionsKeepsOtherProcessAdditions(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "connections.toml")
-	mk := func(n string) Connection { return Connection{Name: n, Driver: SQLite, Database: n + ".db"} }
+	mk := func(n string) Connection { return Connection{Name: n, Driver: Postgres, Database: n} }
 	if err := SaveConnections(p, []Connection{mk("a"), mk("b")}); err != nil {
 		t.Fatal(err)
 	}
 	mine, _ := LoadConnections(p)
 	b, _ := os.ReadFile(p) // the other process adds c behind our back
-	os.WriteFile(p, append(b, "\n[[connection]]\nname = \"c\"\ndriver = \"sqlite\"\ndatabase = \"c.db\"\n"...), 0o600)
+	os.WriteFile(p, append(b, "\n[[connection]]\nname = \"c\"\ndriver = \"postgres\"\ndatabase = \"c.db\"\n"...), 0o600)
 	if err := SaveConnections(p, mine[1:]); err != nil { // we delete a, never having seen c
 		t.Fatal(err)
 	}
@@ -281,7 +281,7 @@ func TestURLTLSVariantsAndUnknownValues(t *testing.T) {
 
 func TestEnumAndUnimplementedSettingsRejected(t *testing.T) {
 	for _, body := range []string{"[editor]\nindent = \"tab\"\n", "[editor]\ncomplete_key = \"ente\"\n", "[sidebar]\nmatching = \"fuzzyy\"\n",
-		"[general]\nlog_original_values = true\n", "[csv]\ndelimiter = \";\"\n"} {
+		"[editor]\nparam_format = \"semicolon\"\n"} {
 		if _, err := Load(write(t, body)); err == nil {
 			t.Errorf("%q must be rejected", body)
 		}
@@ -356,5 +356,24 @@ func TestMigrateLegacyKeepsNewDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cfg, "tuidb", "config.toml")); err != nil {
 		t.Errorf("legacy dir must be left untouched when webtuidb exists: %v", err)
+	}
+}
+
+func TestAIAndMCP(t *testing.T) {
+	c, err := Load(write(t, "[ai]\nprovider='openai'\napi_key_cmd='echo sekret'\n[mcp]\nenabled=true\n[[mcp.token]]\nname='a'\nvalue='v'\nscope='read-only'\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, err := ResolveAIKey(c.AI); err != nil || k != "sekret" || c.MCP.Port != 51003 || !c.MCP.ApprovalForUnsafe || len(c.MCP.Tokens) != 1 {
+		t.Errorf("got %q %v %+v", k, err, c.MCP)
+	}
+	if _, err := Load(write(t, "[[mcp.token]]\nname='a'\nscope='root'\n")); err == nil {
+		t.Error("bad scope accepted")
+	}
+	if _, err := Load(write(t, "[[mcp.token]]\nname='a'\nscope='full'\n[[mcp.token]]\nname='a'\nscope='full'\n")); err == nil {
+		t.Error("duplicate token name accepted")
+	}
+	if _, err := Load(write(t, "[ai]\nprovider='x'\n")); err == nil {
+		t.Error("bad provider accepted")
 	}
 }
