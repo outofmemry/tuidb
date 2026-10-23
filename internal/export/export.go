@@ -280,6 +280,9 @@ func (e *csvEnc) write(cells []string) error {
 }
 
 func (e *csvEnc) head(cols []string) error {
+	if e.noHead {
+		return nil
+	}
 	cells := append([]string(nil), cols...)
 	if e.safe {
 		for i, c := range cells {
@@ -292,19 +295,17 @@ func (e *csvEnc) head(cols []string) error {
 func (e *csvEnc) row(vals []any) error {
 	cells := make([]string, len(vals))
 	for i, v := range vals {
-		if v == nil || db.IsNull(v) { // an empty cell is NULL; the importer's EmptyIsNull reads it back
+		if v == nil || db.IsNull(v) { // an empty cell is NULL (the importer's EmptyIsNull reads it back) unless null_as is set
+			cells[i] = e.null
 			continue
 		}
-		cells[i] = db.FormatValue(v)
-		switch v.(type) {
-		case int64, uint64, float64: // a number cannot carry a payload, and "'-5" would stop being one
-			if _, ok := v.(float64); ok && e.c.Decimal != "" {
-				cells[i] = strings.Replace(cells[i], ".", e.c.Decimal, 1)
-			}
-		default:
-			if e.safe {
-				cells[i] = neutralize(cells[i])
-			}
+		if e.safe {
+			cells[i] = NeutralizeValue(v)
+		} else {
+			cells[i] = db.FormatValue(v)
+		}
+		if _, ok := v.(float64); ok && e.c.Decimal != "" {
+			cells[i] = strings.Replace(cells[i], ".", e.c.Decimal, 1)
 		}
 	}
 	return e.write(cells)
