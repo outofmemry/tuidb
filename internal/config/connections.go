@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,12 +36,20 @@ const (
 	Cassandra  = "cassandra"
 	DynamoDB   = "dynamodb"
 	D1         = "d1" // Cloudflare D1 over the REST API: Host = account id, Password = API token, Database = database name or id
+
+	// Capability profiles of the postgres / mysql drivers.
+	Redshift    = "redshift"
+	Greenplum   = "greenplum"
+	Vertica     = "vertica"
+	SingleStore = "singlestore"
 )
 
-var Drivers = []string{Postgres, MySQL, MariaDB, Cockroach, SQLite, DuckDB, ClickHouse, Cassandra, DynamoDB, D1, Redis, Mongo}
+// Cockroach, SQLite, DuckDB and D1 have no driver (their stubs are gone), so they are not in Drivers;
+// the constants stay because the UIs still name them.
+var Drivers = []string{Postgres, MySQL, MariaDB, Redshift, Greenplum, Vertica, SingleStore, ClickHouse, Cassandra, DynamoDB, Redis, Mongo}
 
-// 0 means "no port": file engines, D1 (https) and DynamoDB (AWS endpoint unless host is set).
-var defaultPorts = map[string]int{Postgres: 5432, MySQL: 3306, MariaDB: 3306, Cockroach: 26257, ClickHouse: 9000, Cassandra: 9042, Redis: 6379, Mongo: 27017}
+// 0 means "no port": DynamoDB (AWS endpoint unless host is set).
+var defaultPorts = map[string]int{Postgres: 5432, MySQL: 3306, MariaDB: 3306, Redshift: 5439, Greenplum: 5432, Vertica: 5433, SingleStore: 3306, ClickHouse: 9000, Cassandra: 9042, Redis: 6379, Mongo: 27017}
 
 // FileBased engines open a local file named by Connection.Database; they have no host, login or SSH tunnel.
 func FileBased(driver string) bool { return driver == SQLite || driver == DuckDB }
@@ -47,34 +57,53 @@ func FileBased(driver string) bool { return driver == SQLite || driver == DuckDB
 func DefaultPort(driver string) int { return defaultPorts[driver] }
 
 type SSH struct {
-	Host     string `toml:"host"`
-	Port     int    `toml:"port,omitempty"`
-	User     string `toml:"user"`
-	Key      string `toml:"key,omitempty"`
-	Password string `toml:"password,omitempty"`
+	Host      string `toml:"host"`
+	Port      int    `toml:"port,omitempty"`
+	User      string `toml:"user"`
+	Key       string `toml:"key,omitempty"`
+	Password  string `toml:"password,omitempty"`
+	ProxyJump string `toml:"proxy_jump,omitempty"` // "user@bastion:22" hop, or taken from ~/.ssh/config when empty (M5)
 }
 
 type Connection struct {
-	Name        string   `toml:"name"`
-	Driver      string   `toml:"driver"`
-	Host        string   `toml:"host"`
-	Port        int      `toml:"port,omitempty"`
-	User        string   `toml:"user,omitempty"`
-	Password    string   `toml:"password,omitempty"`
-	PasswordCmd string   `toml:"password_cmd,omitempty"` // stdout becomes the password
-	Database    string   `toml:"database,omitempty"`
-	Tag         string   `toml:"tag,omitempty"`
-	Color       string   `toml:"color,omitempty"`
-	SafeMode    string   `toml:"safe_mode,omitempty"`
-	Group       string   `toml:"group,omitempty"` // "A/B" nests
-	SSLMode     string   `toml:"ssl_mode,omitempty"`
-	SSLCert     string   `toml:"ssl_cert,omitempty"`
-	SSLKey      string   `toml:"ssl_key,omitempty"`
-	SSLCA       string   `toml:"ssl_ca,omitempty"`
-	Bootstrap   []string `toml:"bootstrap,omitempty"`
+	Name        string            `toml:"name"`
+	Driver      string            `toml:"driver"`
+	Host        string            `toml:"host"`
+	Port        int               `toml:"port,omitempty"`
+	User        string            `toml:"user,omitempty"`
+	Password    string            `toml:"password,omitempty"`
+	PasswordCmd string            `toml:"password_cmd,omitempty"` // stdout becomes the password
+	Database    string            `toml:"database,omitempty"`
+	Tag         string            `toml:"tag,omitempty"`
+	Color       string            `toml:"color,omitempty"`
+	SafeMode    string            `toml:"safe_mode,omitempty"`
+	Group       string            `toml:"group,omitempty"` // "A/B" nests
+	SSLMode     string            `toml:"ssl_mode,omitempty"`
+	SSLCert     string            `toml:"ssl_cert,omitempty"`
+	SSLKey      string            `toml:"ssl_key,omitempty"`
+	SSLCA       string            `toml:"ssl_ca,omitempty"`
+	Bootstrap   []string          `toml:"bootstrap,omitempty"`
+	Encoding    string            `toml:"encoding,omitempty"`    // client encoding override: PostgreSQL client_encoding, MySQL charset
+	ReadOnly    bool              `toml:"read_only,omitempty"`   // refuse every non-read-only statement on this connection (M5)
+	SocksProxy  string            `toml:"socks_proxy,omitempty"` // "host:port" SOCKS5 proxy for the database dial (M5)
+	IAMAuth     bool              `toml:"iam_auth,omitempty"`    // AWS RDS IAM token instead of the password (postgres, mysql) (M5)
+	Unusable    string            `toml:"-"`                     // why the connection cannot be opened (e.g. its driver was removed); it is kept and saved as is
+	Source      string            `toml:"-"`                     // the [[source]] file this connection came from; "" = connections.toml
+	Tools       map[string]string `toml:"tools,omitempty"`       // dump tool paths: pg_dump, pg_restore, psql, mysqldump, mysql, mongodump... (M7)
+	// DriverVersion and LazyLoad come from the URL options driverVersion / lazyload (TablePlus spelling).
+	DriverVersion string `toml:"driver_version,omitempty"`
+	LazyLoad      bool   `toml:"lazy_load,omitempty"`
+	// Open is the table a URL asked to open right after connecting; never saved.
+	Open *OpenTarget `toml:"-"`
 	// Options carries driver-specific extras from URL query params / config (e.g. authSource for mongodb).
 	Options map[string]string `toml:"options,omitempty"`
 	SSH     *SSH              `toml:"ssh,omitempty"`
+}
+
+// OpenTarget is the table (and optional filter) named by the URL options schema, table, column,
+// operation, value and condition.
+type OpenTarget struct {
+	Schema, Table, Column, Operation, Value, Condition string
 }
 
 type connectionsFile struct {
@@ -97,6 +126,9 @@ func (c Connection) Validate() error {
 	if _, err := safemode.Parse(c.SafeMode); err != nil {
 		return fmt.Errorf("connection %q: safe_mode: %w", c.Name, err)
 	}
+	if c.Encoding != "" && !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(c.Encoding) {
+		return fmt.Errorf("connection %q: encoding %q must be a plain charset name", c.Name, c.Encoding)
+	}
 	if c.SSLMode != "" && !contains(SSLModes, c.SSLMode) {
 		return fmt.Errorf("connection %q: unknown ssl_mode %q (want %s)", c.Name, c.SSLMode, strings.Join(SSLModes, "|"))
 	}
@@ -113,9 +145,15 @@ func (c Connection) EffectivePort() int {
 	return DefaultPort(c.Driver)
 }
 
+// ErrPasswordAsk means the password must be prompted for (password = "ask").
+var ErrPasswordAsk = errors.New("password: ask")
+
 // ResolvePassword returns the literal password, or the stdout of password_cmd.
 func (c Connection) ResolvePassword(ctx context.Context) (string, error) {
 	if c.PasswordCmd == "" {
+		if c.Password == PasswordAsk {
+			return "", ErrPasswordAsk
+		}
 		return c.Password, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -172,7 +210,10 @@ func splitCommand(s string) ([]string, error) {
 
 func ConnectionsPath() string { return filepath.Join(ConfigDir(), "connections.toml") }
 
-func LoadConnections(path string) ([]Connection, error) {
+func LoadConnections(path string) ([]Connection, error) { return loadConnections(path, true) }
+
+// loadConnections: fix=false leaves permissions alone (shared source files are not ours to chmod).
+func loadConnections(path string, fix bool) ([]Connection, error) {
 	var f connectionsFile
 	md, err := toml.DecodeFile(path, &f)
 	if errors.Is(err, os.ErrNotExist) {
@@ -190,13 +231,28 @@ func LoadConnections(path string) ([]Connection, error) {
 		return nil, fmt.Errorf("%s: unknown setting %q", path, k.String())
 	}
 	// The file holds plaintext passwords: it is only ever read with owner-only permissions.
-	if st, err := os.Stat(path); err == nil && st.Mode().Perm()&0o077 != 0 {
+	if st, err := os.Stat(path); fix && err == nil && st.Mode().Perm()&0o077 != 0 {
 		if err := os.Chmod(path, 0o600); err != nil {
 			return nil, fmt.Errorf("%s is readable by other users and could not be fixed: %w", path, err)
 		}
 	}
 	seen := map[string]bool{}
-	for _, c := range f.Connection {
+	for i := range f.Connection {
+		c := &f.Connection[i]
+		if !slices.Contains(Drivers, c.Driver) && strings.TrimSpace(c.Name) != "" {
+			// A driver that no longer exists (sqlite, duckdb, ...) must not make the whole file unloadable.
+			probe := *c
+			probe.Driver = Postgres
+			if err := probe.Validate(); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+			c.Unusable = fmt.Sprintf("driver %q is not supported by this build", c.Driver)
+			if seen[c.Name] {
+				return nil, fmt.Errorf("%s: duplicate connection name %q", path, c.Name)
+			}
+			seen[c.Name] = true
+			continue
+		}
 		if err := c.Validate(); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
@@ -237,7 +293,11 @@ func SaveConnections(path string, conns []Connection) error {
 	loadedMu.Unlock()
 	if hadSnapshot {
 		var disk connectionsFile
-		if _, err := toml.DecodeFile(path, &disk); err == nil {
+		if _, err := toml.DecodeFile(path, &disk); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("%s changed on disk and is not valid TOML, refusing to overwrite it: %w", path, err)
+			}
+		} else {
 			have := map[string]bool{}
 			for _, c := range conns {
 				have[c.Name] = true
@@ -253,25 +313,32 @@ func SaveConnections(path string, conns []Connection) error {
 	for _, c := range conns {
 		names[c.Name] = true
 	}
-	loadedMu.Lock()
-	loaded[path] = names
-	loadedMu.Unlock()
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(connectionsFile{Connection: conns}); err != nil {
 		return err
 	}
-	return WriteFileAtomic(path, buf.Bytes())
+	if err := WriteFileAtomic(path, buf.Bytes()); err != nil {
+		return err // the snapshot stays: nothing was written, so nothing is "known" yet
+	}
+	loadedMu.Lock()
+	loaded[path] = names
+	loadedMu.Unlock()
+	return nil
 }
 
 // WriteFileAtomic writes data to a temp file in the same directory, fsyncs it, renames it over
 // path and fsyncs the directory, so a crash leaves either the old or the new file, never an empty one.
 func WriteFileAtomic(path string, data []byte) error {
+	if path == "" {
+		return errors.New("WriteFileAtomic: empty path")
+	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
+	defer tmp.Close() // error paths must not leak the handle; the explicit Close below makes this a no-op
 	if err := tmp.Chmod(0o600); err != nil {
 		return err
 	}
@@ -296,8 +363,8 @@ func WriteFileAtomic(path string, data []byte) error {
 
 var urlSchemes = map[string]string{
 	"postgres": Postgres, "postgresql": Postgres, "mysql": MySQL, "mariadb": MariaDB,
-	"cockroachdb": Cockroach, "cockroach": Cockroach, "sqlite": SQLite, "sqlite3": SQLite, "duckdb": DuckDB,
-	"clickhouse": ClickHouse, "cassandra": Cassandra, "dynamodb": DynamoDB, "d1": D1,
+	"redshift": Redshift, "greenplum": Greenplum, "vertica": Vertica, "singlestore": SingleStore,
+	"clickhouse": ClickHouse, "cassandra": Cassandra, "dynamodb": DynamoDB,
 	"redis": Redis, "rediss": Redis, "mongodb": Mongo,
 }
 
@@ -321,6 +388,9 @@ func sslFromQuery(driver string, q url.Values) (string, []string, error) {
 	}
 	if v := q.Get("sslmode"); v != "" {
 		return strings.ToLower(v), []string{"sslmode"}, nil
+	}
+	if v := q.Get("tLSMode"); v != "" { // TablePlus's spelling
+		return strings.ToLower(v), []string{"tLSMode"}, nil
 	}
 	switch driver {
 	case MySQL, MariaDB:
@@ -365,6 +435,10 @@ func ParseURL(raw string) (Connection, error) {
 		// url.Parse errors quote the whole URL, password included, so do not wrap err.
 		return Connection{}, fmt.Errorf("bad URL (not shown: it may contain a password; percent-encode special characters such as %% @ in it)")
 	}
+	viaSSH := false
+	if base, ok := strings.CutSuffix(strings.ToLower(u.Scheme), "+ssh"); ok { // postgresql+ssh://: tunnel in the query
+		u.Scheme, viaSSH = base, true
+	}
 	if strings.EqualFold(u.Scheme, "mongodb+srv") {
 		return Connection{}, fmt.Errorf("mongodb+srv:// is not supported (DNS seed lists); use mongodb://host:port")
 	}
@@ -408,11 +482,38 @@ func ParseURL(raw string) (Connection, error) {
 		}
 		c.SSLMode = mode
 	}
+	if q.Get("password") == PasswordAsk {
+		c.Password = PasswordAsk
+	}
+	if viaSSH {
+		if FileBased(driver) || q.Get("ssh_host") == "" {
+			return c, fmt.Errorf("a +ssh URL needs ssh_host (and a network driver)")
+		}
+		c.SSH = &SSH{Host: q.Get("ssh_host"), User: q.Get("ssh_user"), Key: q.Get("ssh_key")}
+		if p := q.Get("ssh_port"); p != "" {
+			if c.SSH.Port, err = strconv.Atoi(p); err != nil {
+				return c, fmt.Errorf("bad ssh_port %q", p)
+			}
+		}
+		if v := strings.ToLower(q.Get("usePrivateKey")); v == "false" || v == "0" { // password auth: the key is not used
+			c.SSH.Key = ""
+		}
+		consumed = append(consumed, "ssh_host", "ssh_user", "ssh_key", "ssh_port", "usePrivateKey")
+	}
+	c.DriverVersion = q.Get("driverVersion")
+	c.LazyLoad = q.Get("lazyload") == "true" || q.Get("lazyload") == "1"
+	if t := (OpenTarget{q.Get("schema"), q.Get("table"), q.Get("column"), q.Get("operation"), q.Get("value"), q.Get("condition")}); t.Table != "" {
+		c.Open = &t
+	}
 	for k, v := range q {
 		switch k {
-		case "name", "env", "statusColor":
+		case "name", "env", "statusColor", "driverVersion", "lazyload", "schema", "table", "column", "operation", "value", "condition":
 		default:
-			if contains(consumed, k) {
+			// a ?password= other than "ask" is never used, so it is not kept; ssh settings that were not consumed (ssh_password,
+			// sshPassword...) are dropped, never stored in Options.
+			// shortcut: ssh_key from a pasted URL is kept as given (a server path the user chose); upgrade: confine it to the home dir.
+			if contains(consumed, k) || k == "password" || strings.HasPrefix(strings.ToLower(k), "ssh") {
+
 				continue
 			}
 			if c.Options == nil {
@@ -444,9 +545,16 @@ func (c Connection) FormatURL() string {
 	if scheme == Postgres {
 		scheme = "postgresql"
 	}
-	u := url.URL{Scheme: scheme, Host: c.Host, Path: "/" + c.Database}
+	host := c.Host
+	if strings.Contains(host, ":") { // IPv6 literal
+		host = "[" + host + "]"
+	}
+	if c.SSH != nil && c.SSH.Host != "" {
+		scheme += "+ssh"
+	}
+	u := url.URL{Scheme: scheme, Host: host, Path: "/" + c.Database}
 	if c.Port != 0 {
-		u.Host = fmt.Sprintf("%s:%d", c.Host, c.Port)
+		u.Host = fmt.Sprintf("%s:%d", host, c.Port)
 	}
 	if c.User != "" {
 		u.User = url.UserPassword(c.User, c.Password)
@@ -461,7 +569,24 @@ func (c Connection) FormatURL() string {
 	if c.SSLMode != "" {
 		q.Set("sslmode", c.SSLMode) // webtuidb's own spelling; ParseURL also reads the native ones
 	}
+	if c.SSH != nil && c.SSH.Host != "" {
+		q.Set("ssh_host", c.SSH.Host)
+		q.Set("ssh_user", c.SSH.User)
+		if c.SSH.Port != 0 {
+			q.Set("ssh_port", strconv.Itoa(c.SSH.Port))
+		}
+		if c.SSH.Key != "" {
+			q.Set("ssh_key", c.SSH.Key)
+			q.Set("usePrivateKey", "true")
+		}
+	}
 	q.Set("name", c.Name)
+	if c.DriverVersion != "" {
+		q.Set("driverVersion", c.DriverVersion)
+	}
+	if c.LazyLoad {
+		q.Set("lazyload", "true")
+	}
 	if c.Tag != "" {
 		q.Set("env", c.Tag)
 	}
@@ -470,7 +595,7 @@ func (c Connection) FormatURL() string {
 	}
 	u.RawQuery = q.Encode()
 	if FileBased(c.Driver) { // no host: the path follows // as typed
-		return scheme + "://" + c.Database + "?" + u.RawQuery
+		return scheme + "://" + (&url.URL{Path: c.Database}).EscapedPath() + "?" + u.RawQuery
 	}
 	return u.String()
 }
