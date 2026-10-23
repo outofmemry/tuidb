@@ -1,0 +1,29 @@
+version: 2
+project_name: webtuidb
+
+before:
+  hooks:
+    - make web # the web app is embedded into the binary
+
+builds:
+  - id: webtuidb
+    main: .
+    binary: webtuidb
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags: ["-s -w -X main.Version={{.Version}}"]
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [README.md, docs/webtuidb.1]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
