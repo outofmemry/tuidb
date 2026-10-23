@@ -32,6 +32,10 @@ const (
 // readOnlyBegin starts a server-enforced read-only transaction, for the dialects that have one.
 var readOnlyBegin = map[string]string{"postgres": "BEGIN READ ONLY", "mysql": "START TRANSACTION READ ONLY", "mariadb": "START TRANSACTION READ ONLY"}
 
+// serverReadOnly are the dialects whose driver refuses writes on a read_only connection at the server. Others
+// (ClickHouse, ...) only have a keyword filter, which cannot stop file()/url() table functions.
+var serverReadOnly = map[string]bool{"postgres": true, "mysql": true, "mariadb": true}
+
 type Entry struct {
 	Time       time.Time
 	Token      string
@@ -333,7 +337,7 @@ func (s *Server) build(tok *config.MCPToken) *sdk.Server {
 						return nil, fmt.Errorf("not a read-only statement; use execute_query")
 					}
 					if !write {
-						if fn := sideEffectFunc(st.Text); fn != "" {
+						if fn := sideEffectFunc(dialect, st.Text); fn != "" {
 							return nil, fmt.Errorf("%s is not allowed in a read-only query; use execute_query", fn)
 						}
 					}
