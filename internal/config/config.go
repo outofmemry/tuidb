@@ -132,6 +132,16 @@ type Web struct {
 	FontSize      int    `toml:"font_size"`     // px, 0 = default (M4)
 	LineHeight    string `toml:"line_height"`   // css value, "" = default (M4)
 	Notifications bool   `toml:"notifications"` // desktop notifications when a backup / import finishes (M4)
+	// AutoHideScrollbars shows scrollbars only while scrolling (M13).
+	AutoHideScrollbars bool `toml:"auto_hide_scrollbars"`
+	// Toolbar lists the action names of the web toolbar, in order; empty = the built-in set (M13).
+	Toolbar []string `toml:"toolbar"`
+}
+
+// Security guards the app with a passcode (M13). Passcode is a bcrypt hash made by `webtuidb -set-passcode`.
+type Security struct {
+	Passcode      string `toml:"passcode"`
+	LockAfterMins int    `toml:"lock_after_mins"` // idle minutes before the lock screen; 0 = never
 }
 
 type Tag struct {
