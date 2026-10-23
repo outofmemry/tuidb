@@ -602,7 +602,33 @@ func firstWord(dialect, sql string) string {
 	for i < len(sql) && (sql[i] >= 'a' && sql[i] <= 'z' || sql[i] >= 'A' && sql[i] <= 'Z') {
 		i++
 	}
-	return strings.ToUpper(sql[:i])
+	w := strings.ToUpper(sql[:i])
+	if w == "EXPLAIN" { // EXPLAIN ANALYZE runs the statement it explains, so judge that one
+		rest := sql[i:]
+		for {
+			rest = strings.TrimLeft(rest, " \t\r\n")
+			j := 0
+			for j < len(rest) && (rest[j] >= 'a' && rest[j] <= 'z' || rest[j] >= 'A' && rest[j] <= 'Z') {
+				j++
+			}
+			if opt := strings.ToUpper(rest[:j]); opt == "ANALYZE" || opt == "ANALYSE" || opt == "VERBOSE" {
+				rest = rest[j:]
+				continue
+			}
+			if strings.HasPrefix(rest, "(") { // EXPLAIN (ANALYZE, ...) stmt
+				if k := strings.IndexByte(rest, ')'); k > 0 {
+					rest = rest[k+1:]
+					continue
+				}
+				return ""
+			}
+			if j == 0 {
+				return ""
+			}
+			return strings.ToUpper(rest[:j])
+		}
+	}
+	return w
 }
 
 var strLit = regexp.MustCompile(`'(?:[^']|'')*'`)
