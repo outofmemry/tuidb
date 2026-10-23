@@ -285,9 +285,10 @@ type ProcessLister interface {
 // User is a database role (PostgreSQL) or account (MySQL).
 type User struct {
 	Name   string
-	Host   string   // MySQL only ("%", "localhost"); "" for PostgreSQL
-	Attrs  []string // PG: SUPERUSER, CREATEDB, CREATEROLE, LOGIN, REPLICATION...; MySQL: global privileges (SELECT, INSERT, ..., ALL)
-	Grants []Grant  // table/database privileges
+	Host   string         // MySQL only ("%", "localhost"); "" for PostgreSQL
+	Attrs  []string       // PG: SUPERUSER, CREATEDB, CREATEROLE, LOGIN, REPLICATION...; MySQL: global privileges (SELECT, INSERT, ..., ALL)
+	Grants []Grant        // table/database privileges
+	Limits map[string]int // MySQL: MAX_QUERIES_PER_HOUR, MAX_UPDATES_PER_HOUR, MAX_CONNECTIONS_PER_HOUR, MAX_USER_CONNECTIONS; PG: CONNECTION_LIMIT
 }
 
 // Grant is a set of privileges on one object: "schema.table" (PG) or "db.*" / "db.table" (MySQL).
