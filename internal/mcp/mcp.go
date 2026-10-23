@@ -519,8 +519,22 @@ func (s *Server) addStoreTools(srv *sdk.Server, tok *config.MCPToken, run func(t
 				if o.closed {
 					return nil, fmt.Errorf("%q is disconnected", conn)
 				}
+				dialect := o.sess.Caps().Dialect
+				for _, p := range bs[i].Panels {
+					if p.Kind == "button" || p.Kind == "import" {
+						continue
+					}
+					if fn := sideEffectFunc(dialect, p.Query); fn != "" {
+						return nil, fmt.Errorf("panel %q: %s is not allowed in a read-only query", p.Title, fn)
+					}
+				}
+				runner, done, err := s.readOnlyRunner(ctx, o, conn, dialect)
+				if err != nil {
+					return nil, err
+				}
+				defer done()
 				out := []map[string]any{}
-				for _, r := range board.Run(ctx, o.sess, bs[i], in.Vars, s.cfg.General.RowLimit) {
+				for _, r := range board.Run(ctx, runner, bs[i], in.Vars, s.cfg.General.RowLimit) {
 					m := map[string]any{"title": r.Panel.Title, "kind": r.Panel.Kind}
 					switch {
 					case r.Err != nil:
