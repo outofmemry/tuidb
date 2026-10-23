@@ -289,22 +289,53 @@ func Preview(r io.Reader, o Options, n int) (cols []string, rows [][]string, err
 		}
 		row := make([]string, len(rec))
 		for i, v := range rec {
-			row[i] = text(v)
+			// the same transform as the import, so the preview shows what the table will get
+			if c := cell(v, o); db.IsNull(c) {
+				row[i] = "NULL"
+			} else {
+				row[i] = text(c)
+			}
 		}
 		rows = append(rows, row)
 	}
 	return cols, rows, nil
 }
 
+// unquoteFormula undoes the export's formula guard: one leading ' before = + - @ tab or CR. A number after the
+// apostrophe is kept as is, because the export never guards numbers, so that ' belonged to the data.
+func unquoteFormula(s string) string {
+	if len(s) > 1 && s[0] == '\'' && strings.ContainsRune("=+-@\t\r", rune(s[1])) {
+		if _, err := strconv.ParseFloat(s[1:], 64); err != nil {
+			return s[1:]
+		}
+	}
+	return s
+}
+
+// defaults fills the options both Preview and Run derive from the config.
+func defaults(o Options) Options {
+	if o.NullAs == "" && o.Source == "csv" {
+		o.NullAs = o.CSV.NullAs
+	}
+	return o
+}
+
 // cell is the value handed to Plan.
-func cell(v any, emptyIsNull bool) any {
+func cell(v any, o Options) any {
 	switch x := v.(type) {
 	case nil:
 		return db.Null
 	case string:
-		if emptyIsNull && x == "" {
+		if o.NullAs != "" && x == o.NullAs {
 			return db.Null
 		}
+		if o.EmptyIsNull && x == "" {
+			return db.Null
+		}
+		if o.Source == "csv" && !o.KeepFormulaQuote {
+			return unquoteFormula(x)
+		}
+		return x
 	case bool:
 		return x
 	}
