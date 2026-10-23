@@ -1,16 +1,51 @@
 # webtuidb
 
-A terminal TablePlus: connect to **PostgreSQL, MySQL, ClickHouse, Redis and MongoDB**, browse and edit
+A terminal TablePlus: connect to **PostgreSQL, MySQL, MariaDB, ClickHouse, Cassandra, DynamoDB, Redis and MongoDB**
+(plus Redshift, Greenplum and Vertica on the PostgreSQL driver, and SingleStore on MySQL's), browse and edit
 data with pending changes, run queries, and drive everything with tmux-style key bindings:
 **prefix, then a key**. The default prefix is `Ctrl+d`; every prefixed action can be rebound in
 `~/.config/webtuidb/config.toml`. The plain keys inside a pane (`j`/`k`, `/`, `s`, `p` …) are fixed.
 
 ```
-make build          # go build -o webtuidb .
 ./webtuidb             # connection list
 ./webtuidb pg-local    # connect to a saved connection
 ./webtuidb postgresql://user:pw@host/db?name=Prod&env=production
 ./webtuidb -keys       # print every binding as it applies with your config
+./webtuidb -version
+```
+
+## Install
+
+```sh
+# a release binary (linux, macOS, Windows; amd64, arm64): download it from the Releases page, or
+brew install --HEAD outofmemry/tap/webtuidb
+
+# Docker: the web UI on port 7788 (mount your config so it sees your connections)
+docker build -t webtuidb . && docker run -p 7788:7788 -v ~/.config/webtuidb:/home/nonroot/.config/webtuidb webtuidb
+
+# from source (needs Go, and Node 20+ for the web app)
+make web build      # web app + go build -o webtuidb .
+go install webtuidb@latest   # terminal UI and API only: the web app is built by `make web`, not by go install
+```
+
+`make release` builds all the archives into `dist/` with goreleaser (`--snapshot`, nothing is published).
+
+### Completions and man page
+
+```sh
+source <(webtuidb -completion bash)                       # or zsh; fish: webtuidb -completion fish | source
+webtuidb -man | sudo tee /usr/local/share/man/man1/webtuidb.1   # man webtuidb
+```
+
+Completions cover the flags and your saved connection names.
+
+### MCP server
+
+`webtuidb --mcp` serves the MCP tools over stdio. Print the entry for your client, with the path of this binary filled in:
+
+```sh
+webtuidb -mcp-config claude-code   # or codex | cursor | vscode; the file it goes in is printed on stderr
+# {"mcpServers":{"webtuidb":{"command":"/usr/local/bin/webtuidb","args":["--mcp"]}}}
 ```
 
 ## Keys
@@ -55,7 +90,7 @@ arguments, but pipes and variables do not work:
 ```toml
 [[connection]]
 name = "Acme prod"
-driver = "postgres"            # postgres | mysql | clickhouse | redis | mongodb
+driver = "postgres"            # postgres | mysql | mariadb | redshift | greenplum | vertica | singlestore | clickhouse | cassandra | dynamodb | redis | mongodb
 host = "db.internal"
 user = "app"
 password_cmd = "op read op://Private/acme-prod/password"
@@ -102,9 +137,9 @@ directory already exists it wins, and the old one is left untouched.
 ## Development
 
 ```
-make up        # five test databases in docker compose on 127.0.0.1 (ports 55432 53306 59000 56379 57017), user/password webtuidb, seeded
+make up        # test databases in docker compose on 127.0.0.1 (see docker-compose.yml for the ports), user/password webtuidb, seeded
 make test      # unit tests
-make smoke     # + driver integration tests for all five engines and end-to-end UI tests on PostgreSQL and MySQL
+make smoke     # + driver integration tests for every engine and end-to-end UI tests on PostgreSQL and MySQL
 make down
 ```
 
