@@ -1,12 +1,20 @@
 package db
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+)
 
 type SearchOptions struct {
 	Value  string
-	Op     string   // "Contains" | "Not contains" | "=" | "Has prefix" | "Has suffix"
-	Schema string   // "" = current
-	Tables []string // table names to search; empty = every KindTable object in the schema
+	Op     string // "Contains" | "Not contains" | "=" | "Has prefix" | "Has suffix"
+	Schema string // "" = current
+	// AllSchemas walks every schema from Session.Schemas (Schema is ignored); each hit's Ref.Schema says where it is.
+	// shortcut: system schemas are skipped by name (pg_catalog, information_schema); a session without schemas searches the current one.
+	AllSchemas bool
+	Tables     []string // table names to search; empty = every KindTable object in the schema
 }
 
 type SearchHit struct {
