@@ -220,17 +220,31 @@ type csvEnc struct {
 	w    io.Writer
 	c    config.CSV
 	safe bool // prefix formula-looking text with '
+
+	noHead bool
+	null   string
 }
 
 // Neutralize defuses a spreadsheet formula for callers outside this package (the clipboard CSV).
 func Neutralize(s string) string { return neutralize(s) }
 
 // neutralize defuses a spreadsheet formula: Excel/LibreOffice evaluate a cell starting with = + - @ tab or CR.
+// A value that parses as a number is left alone whatever its Go type: a numeric/decimal column arrives as a
+// string, and "'-12.34" would stop being a number.
 func neutralize(v string) string {
 	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+		if _, err := strconv.ParseFloat(v, 64); err == nil {
+			return v
+		}
 		return "'" + v
 	}
 	return v
+}
+
+// NeutralizeValue formats one cell value the way the CSV export does and defuses a formula in it. Numbers,
+// whatever their Go type (including numeric text), stay numbers. A []byte is a binary column and is hexed.
+func NeutralizeValue(v any) string {
+	return neutralize(db.FormatValue(v))
 }
 
 // CSVField quotes v for c: QuoteMode "always" quotes every non-empty field (an empty one stays empty, which
