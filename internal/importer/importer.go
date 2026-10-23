@@ -486,7 +486,37 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 		if err := step(stmts, 0); err != nil {
 			return err
 		}
+		created = true
 		p.Batches = 0 // creating the table is not a data batch
+	}
+
+	var pk, setCols []string
+	for _, c := range target {
+		if c != "" {
+			setCols = append(setCols, c)
+		}
+	}
+	if o.OnConflict == "update" || o.OnConflict == "replace" {
+		if dialect == "postgres" { // ON CONFLICT needs the key columns as its target
+			cols, err := sess.Columns(ctx, o.Table)
+			if err != nil {
+				return err
+			}
+			for _, c := range cols {
+				if c.PK {
+					pk = append(pk, c.Name)
+				}
+			}
+			if len(pk) == 0 {
+				return fmt.Errorf("on conflict %q: %s has no primary key", o.OnConflict, o.Table.Name)
+			}
+			// the conflict only fires for a row that carries the whole key; otherwise every row just inserts
+			for _, k := range pk {
+				if !slices.Contains(setCols, k) {
+					return fmt.Errorf("on conflict %q: primary key column %q is not among the imported columns, so no row could ever conflict", o.OnConflict, k)
+				}
+			}
+		}
 	}
 
 	var changes []db.Change
