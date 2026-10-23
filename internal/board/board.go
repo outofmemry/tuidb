@@ -117,7 +117,7 @@ func Run(ctx context.Context, sess db.Session, b Board, vals map[string]string, 
 	dialect := sess.Caps().Dialect
 	out := make([]PanelResult, 0, len(b.Panels))
 	for _, p := range b.Panels {
-		if p.Kind == "button" || p.Kind == "import" { // the UIs handle these
+		if skipKind(p.Kind) { // the UIs handle these
 			continue
 		}
 		out = append(out, runPanel(ctx, sess, p, known, dialect, limit))
