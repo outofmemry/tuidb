@@ -22,6 +22,7 @@ func TestPlanUser(t *testing.T) {
 			`GRANT SELECT, INSERT ON TABLE "s"."t" TO "a"`, ""},
 		{db.UserChange{Kind: "revoke", User: db.User{Name: "a"}, Grant: db.Grant{Object: "t", Privs: []string{"SELECT"}}},
 			`REVOKE SELECT ON TABLE "public"."t" FROM "a"`, ""},
+		{db.UserChange{Kind: "limits", User: db.User{Name: "a", Limits: map[string]int{"CONNECTION_LIMIT": 5}}}, `ALTER ROLE "a" CONNECTION LIMIT 5`, ""},
 	}
 	for _, c := range cases {
 		st, err := s.PlanUser(c.c)
