@@ -75,6 +75,16 @@ func Parse(spec string) (string, error) {
 	return strings.Join(append(mods, base), "+"), nil
 }
 
+// dashForm rewrites the canonical "alt+P" / "ctrl+shift+x" spelling (as plugin files and the web client write it) to "M-P" / "C-S-x".
+func dashForm(spec string) string {
+	for _, m := range [][2]string{{"ctrl+", "C-"}, {"alt+", "M-"}, {"shift+", "S-"}} {
+		if rest, ok := strings.CutPrefix(spec, m[0]); ok && rest != "" {
+			return m[1] + dashForm(rest)
+		}
+	}
+	return spec
+}
+
 func isFunctionKey(s string) bool {
 	var n int
 	if _, err := fmt.Sscanf(strings.ToLower(s), "f%d", &n); err != nil || fmt.Sprintf("f%d", n) != strings.ToLower(s) {
