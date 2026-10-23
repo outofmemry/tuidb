@@ -186,6 +186,7 @@ make up        # test databases in docker compose on 127.0.0.1 (see docker-compo
 make test      # unit tests
 make smoke     # + driver integration tests for every engine and end-to-end UI tests on PostgreSQL and MySQL
 make down
+make parity    # both UIs expose the same menus, actions and config keys (also runs in CI)
 ```
 
 The plan and what is built so far: [PLAN.md](PLAN.md).
