@@ -138,8 +138,8 @@ func TestTools(t *testing.T) {
 	if _, bad := call(t, s, ro, "execute_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); !bad {
 		t.Error("read-only token ran execute_query")
 	}
-	if len(fs.ran) != 1 {
-		t.Errorf("ran %v", fs.ran)
+	if got := strings.Join(fs.log(), "|"); got != "BEGIN READ ONLY|SELECT 1|ROLLBACK" {
+		t.Errorf("ran %v, want the SELECT inside a read-only transaction", got)
 	}
 	if l := s.Log(); len(l) != 5 || l[1].Tool != "execute_read_query" || l[1].SQL != "SELECT 1" || l[2].Err == "" {
 		t.Errorf("log %+v", l)
