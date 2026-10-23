@@ -528,6 +528,7 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 		if err != nil {
 			return err
 		}
+		stmts = upsert(stmts, o.OnConflict, dialect, pk, setCols)
 		n := len(changes)
 		changes = nil
 		return step(stmts, n)
@@ -543,7 +544,7 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 		c := db.Change{Kind: db.Insert, ObjRef: o.Table}
 		for i, v := range rec {
 			if target[i] != "" {
-				c.Set = append(c.Set, db.KeyVal{Col: target[i], Val: cell(v, o.EmptyIsNull)})
+				c.Set = append(c.Set, db.KeyVal{Col: target[i], Val: cell(v, o)})
 			}
 		}
 		changes = append(changes, c)
