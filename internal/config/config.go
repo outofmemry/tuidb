@@ -20,20 +20,21 @@ import (
 )
 
 type Config struct {
-	General General                   `toml:"general"`
-	Editor  Editor                    `toml:"editor"`
-	Table   Table                     `toml:"table"`
-	CSV     CSV                       `toml:"csv"`
-	Sidebar Sidebar                   `toml:"sidebar"`
-	Theme   Theme                     `toml:"theme"`
-	AI      AI                        `toml:"ai"`
-	MCP     MCP                       `toml:"mcp"`
-	Queries Queries                   `toml:"queries"`
-	Export  Export                    `toml:"export"`
-	Web     Web                       `toml:"web"`
-	Tags    []Tag                     `toml:"tag"`    // [[tag]] custom tags with colours (M4)
-	Sources []Source                  `toml:"source"` // [[source]] folders of extra connection files (M4)
-	Keys    map[string]toml.Primitive `toml:"keys"`
+	General  General                   `toml:"general"`
+	Editor   Editor                    `toml:"editor"`
+	Table    Table                     `toml:"table"`
+	CSV      CSV                       `toml:"csv"`
+	Sidebar  Sidebar                   `toml:"sidebar"`
+	Theme    Theme                     `toml:"theme"`
+	AI       AI                        `toml:"ai"`
+	MCP      MCP                       `toml:"mcp"`
+	Queries  Queries                   `toml:"queries"`
+	Export   Export                    `toml:"export"`
+	Web      Web                       `toml:"web"`
+	Security Security                  `toml:"security"`
+	Tags     []Tag                     `toml:"tag"`    // [[tag]] custom tags with colours (M4)
+	Sources  []Source                  `toml:"source"` // [[source]] folders of extra connection files (M4)
+	Keys     map[string]toml.Primitive `toml:"keys"`
 
 	KeyOverrides map[string][]string `toml:"-"` // decoded from Keys
 }
