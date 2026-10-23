@@ -73,3 +73,49 @@ func searchSchema(ctx context.Context, sess Session, objs []Object, only map[str
 	}
 	return nil
 }
+
+// SearchSchemas is the schemas Search walks: just o.Schema, or with AllSchemas every non-system one.
+func SearchSchemas(ctx context.Context, sess Session, o SearchOptions) ([]string, error) {
+	if !o.AllSchemas {
+		return []string{o.Schema}, nil
+	}
+	var all []string
+	var err error
+	if d := sess.Caps().Dialect; !sess.Caps().Schemas && d != "mysql" && d != "mariadb" && d != "clickhouse" {
+		// Objects ignores its schema argument here (Redis, Mongo, ...): walking every "database" would scan the current one N times.
+		return []string{""}, nil
+	}
+	if sess.Caps().Schemas {
+		all, err = sess.Schemas(ctx)
+	} else if all, err = sess.Databases(ctx); err == nil && len(all) == 0 {
+		return nil, fmt.Errorf("searching all schemas is not supported on this connection")
+	}
+	if err != nil {
+		return nil, err
+	}
+	var schemas []string
+	for _, sc := range all {
+		if !systemSchema(sess.Caps().Dialect, sc) {
+			schemas = append(schemas, sc)
+		}
+	}
+	if len(schemas) == 0 {
+		schemas = []string{""}
+	}
+	return schemas, nil
+}
+
+// systemSchema reports whether sc is an engine-internal schema/database that "all schemas" search skips.
+func systemSchema(dialect, sc string) bool {
+	switch dialect {
+	case "mysql", "mariadb":
+		switch strings.ToLower(sc) {
+		case "mysql", "sys", "performance_schema", "information_schema":
+			return true
+		}
+		return false
+	case "clickhouse":
+		return sc == "system" || strings.EqualFold(sc, "information_schema")
+	}
+	return sc == "information_schema" || sc == "pg_catalog" || strings.HasPrefix(sc, "pg_toast") || strings.HasPrefix(sc, "pg_temp")
+}
