@@ -180,6 +180,20 @@ func (s *session) PlanUser(c db.UserChange) ([]db.Statement, error) {
 		return one(func(pw string) string { return "ALTER USER " + who + " IDENTIFIED BY " + pw }), nil
 	case "drop":
 		return []db.Statement{{Text: "DROP USER " + who}}, nil
+	case "limits":
+		var parts []string
+		for _, k := range mysqlLimits { // fixed order and a whitelist: the key is spliced into SQL
+			if n, ok := c.User.Limits[k]; ok {
+				if n < 0 {
+					return nil, fmt.Errorf("%s must be 0 or more", k)
+				}
+				parts = append(parts, fmt.Sprintf("%s %d", k, n))
+			}
+		}
+		if len(parts) == 0 {
+			return nil, fmt.Errorf("limits needs at least one of %s", strings.Join(mysqlLimits, ", "))
+		}
+		return []db.Statement{{Text: "ALTER USER " + who + " WITH " + strings.Join(parts, " ")}}, nil
 	case "attrs":
 		privs, err := keywords(c.User.Attrs)
 		if err != nil || privs == "" {
