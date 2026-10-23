@@ -18,6 +18,7 @@ var namedKeys = map[string]string{
 // string Bubble Tea's KeyPressMsg.String() produces ("ctrl+d", "alt+enter", ...).
 func Parse(spec string) (string, error) {
 	orig := spec
+	spec = dashForm(spec)
 	var ctrl, alt, shift bool
 	for len(spec) > 2 && spec[1] == '-' {
 		switch spec[0] {
@@ -53,6 +54,13 @@ func Parse(spec string) (string, error) {
 	}
 	if ctrl && utf8.RuneCountInString(base) == 1 {
 		base = strings.ToLower(base)
+	}
+	if shift && (ctrl || alt) && utf8.RuneCountInString(base) == 1 {
+		// Canonical folds ctrl/alt+shift+<punct> to the shifted character; fold the same way here so a
+		// [keys] override written "C-S-1" equals what the terminal reports.
+		if r, ok := shiftPunct[strings.ToLower(base)]; ok {
+			base, shift = r, false
+		}
 	}
 	var mods []string
 	if ctrl {
