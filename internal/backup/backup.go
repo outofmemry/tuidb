@@ -228,6 +228,7 @@ func (o Options) db() string {
 type job struct {
 	prep func(*exec.Cmd) (func(error) error, error) // opens files before Start; the returned func runs after Wait
 	show string                                     // appended to Display
+	note string                                     // first line of the job output (what Plan left out)
 }
 
 var (
@@ -258,6 +259,14 @@ func dump(cmd *exec.Cmd, file string, viaStdout, gz bool) *exec.Cmd {
 				zw = gzip.NewWriter(f)
 				c.Stdout = zw
 			}
+		} else {
+			// The tool writes the .part itself (pg_dump -f, mongodump --archive, redis-cli --rdb) and would create
+			// it with the umask (0644): create it 0600 first, the tool truncates and keeps the mode.
+			pf, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+			if err != nil {
+				return nil, err
+			}
+			pf.Close()
 		}
 		return func(err error) error {
 			if zw != nil {
@@ -269,6 +278,9 @@ func dump(cmd *exec.Cmd, file string, viaStdout, gz bool) *exec.Cmd {
 				if e := f.Close(); err == nil {
 					err = e
 				}
+			}
+			if err == nil {
+				err = os.Chmod(part, 0o600) // a dump is as sensitive as the data, whichever way it was written
 			}
 			if err == nil {
 				err = os.Rename(part, file)
