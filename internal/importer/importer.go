@@ -398,12 +398,15 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 	}
 
 	if o.Source == "sql" {
-		b, err := io.ReadAll(r)
+		b, err := readAll(ctx, r)
 		if err != nil {
 			return err
 		}
 		var stmts []db.Statement
 		for _, s := range db.Split(sess.Caps().Dialect, string(b)) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			stmts = append(stmts, db.Statement{Text: s.Text})
 			if len(stmts) == batch {
 				if err := step(stmts, len(stmts)); err != nil {
