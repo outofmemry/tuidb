@@ -31,3 +31,39 @@ func TestPinKeepsTransactionAndTempTable(t *testing.T) {
 		t.Error("Exec after Close should fail")
 	}
 }
+
+type recExec struct {
+	ran    []string
+	failOn string
+}
+
+func (r *recExec) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	r.ran = append(r.ran, sql)
+	if sql == r.failOn {
+		return pgconn.CommandTag{}, errors.New("boom")
+	}
+	return pgconn.CommandTag{}, nil
+}
+
+func TestPinnedApplyOwnsTransaction(t *testing.T) {
+	stmts := []db.Statement{{Text: "UPDATE a"}, {Text: "UPDATE b"}, {Text: "UPDATE c"}}
+	r := &recExec{}
+	if err := applyOn(context.Background(), r, true, stmts); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.ran, "|"); got != "BEGIN|UPDATE a|UPDATE b|UPDATE c|COMMIT" {
+		t.Errorf("order: %s", got)
+	}
+	r = &recExec{failOn: "UPDATE b"}
+	if err := applyOn(context.Background(), r, true, stmts); err == nil {
+		t.Fatal("no error")
+	}
+	if got := strings.Join(r.ran, "|"); got != "BEGIN|UPDATE a|UPDATE b|ROLLBACK" {
+		t.Errorf("failure order: %s", got)
+	}
+	r = &recExec{} // the pin already holds a transaction: join it
+	applyOn(context.Background(), r, false, stmts)
+	if got := strings.Join(r.ran, "|"); got != "UPDATE a|UPDATE b|UPDATE c" {
+		t.Errorf("joined: %s", got)
+	}
+}
