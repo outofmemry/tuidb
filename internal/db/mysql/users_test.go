@@ -83,3 +83,31 @@ func TestSchemaOpRefused(t *testing.T) {
 		t.Error("mysql schema = database")
 	}
 }
+
+type fakeLimitRows struct {
+	n       int
+	scanErr bool
+}
+
+func (f *fakeLimitRows) Next() bool { f.n++; return f.n <= 2 }
+func (f *fakeLimitRows) Err() error { return nil }
+func (f *fakeLimitRows) Scan(d ...any) error {
+	if f.scanErr && f.n == 2 {
+		return errors.New("boom")
+	}
+	*d[0].(*string), *d[1].(*string) = "a", "%"
+	return nil
+}
+
+func TestScanLimitsNeverHalfFilled(t *testing.T) {
+	us := []db.User{{Name: "a", Host: "%"}, {Name: "b", Host: "%"}}
+	scanLimits(&fakeLimitRows{scanErr: true}, us)
+	if us[0].Limits != nil || us[1].Limits != nil {
+		t.Errorf("a failed read left limits: %+v", us)
+	}
+	us = []db.User{{Name: "a", Host: "%"}, {Name: "b", Host: "%"}}
+	scanLimits(&fakeLimitRows{}, us)
+	if us[0].Limits == nil || us[1].Limits != nil {
+		t.Errorf("a clean read: %+v", us)
+	}
+}
