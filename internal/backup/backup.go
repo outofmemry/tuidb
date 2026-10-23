@@ -35,6 +35,127 @@ type Options struct {
 	// NewDatabase, when set, is the restore target instead of Database. Plan does not create it: the UIs
 	// run PlanAdmin create_database first. Ignored for backups.
 	NewDatabase string
+	// Extra are free-form tool arguments, inserted after Plan's own flags (before any "--" / trailing file).
+	// Only AllowedExtra entries are accepted (an entry like "-j 4" is split on spaces).
+	Extra []string
+	// Filename, when set, replaces the base name of File. With a "{" it is a pattern for export.Filename
+	// ({connection} {database} {table}=database {tag} {date} {time}); otherwise it is used as is.
+	Filename string
+	Tag      string // value of {tag} in a Filename pattern
+}
+
+// Option is one common tool flag the UIs offer as a checkbox.
+type Option struct{ Flag, Desc string }
+
+// CommonOptions lists the usual extra flags for driver's dump (restore=false) or restore tool. A restore list
+// holds only flags the restore tool accepts (mysql client, mongorestore; for Postgres pg_restore, since the
+// archive format is not known here: Plan drops what a plain-SQL restore's psql does not take).
+func CommonOptions(driver string, restore bool) []Option {
+	switch driver {
+	case config.Postgres:
+		if restore {
+			return []Option{{"--clean", "drop objects before recreating them"}, {"--if-exists", "with --clean, ignore missing objects"},
+				{"--no-owner", "skip ownership changes"},
+				{"-j 4", "restore with 4 parallel jobs"}}
+		}
+		return []Option{
+			{"--no-owner", "skip ownership commands"}, {"--no-privileges", "skip GRANT/REVOKE"}, {"--clean", "add DROP statements"},
+			{"--if-exists", "with --clean, use IF EXISTS"}, {"--inserts", "INSERT statements instead of COPY"}}
+	case config.MySQL, config.MariaDB:
+		if restore {
+			return []Option{{"--force", "continue after SQL errors"}}
+		}
+		return []Option{{"--no-data", "schema only"}, {"--no-create-info", "data only"}, {"--single-transaction", "consistent snapshot (InnoDB)"},
+			{"--routines", "include stored routines"}, {"--triggers", "include triggers"}, {"--events", "include events"},
+			{"--skip-add-drop-table", "no DROP TABLE before CREATE"}}
+	case config.Mongo:
+		if restore {
+			return []Option{{"--gzip", "archive is gzip-compressed"}, {"--drop", "drop collections before restoring"}, {"--oplogReplay", "replay the oplog"}}
+		}
+		return []Option{{"--gzip", "compress the archive"}, {"--oplog", "include the oplog for a point-in-time dump"}}
+	}
+	return nil
+}
+
+// safeExtra are value-less flags accepted beyond CommonOptions (matched exactly, never by prefix), per tool:
+// the key is driver, with "/restore" appended for the restore tool.
+var safeExtra = map[string][]string{
+	config.Postgres:              {"--no-comments", "--no-tablespaces", "--no-acl", "--column-inserts", "--quote-all-identifiers", "--no-privileges"},
+	config.Postgres + "/restore": {"--no-comments", "--no-tablespaces", "--no-acl", "--single-transaction", "--exit-on-error", "--no-privileges"},
+	config.MySQL:                 {"--no-tablespaces", "--skip-lock-tables", "--skip-triggers", "--compact", "--hex-blob"},
+	config.MariaDB:               {"--no-tablespaces", "--skip-lock-tables", "--skip-triggers", "--compact", "--hex-blob"},
+	config.MySQL + "/restore":    {"--binary-mode"},
+	config.MariaDB + "/restore":  {"--binary-mode"},
+	config.Mongo:                 {},
+}
+
+// psqlExtra are the allowed flags a plain-SQL Postgres restore (psql) really takes; the rest are dropped.
+var psqlExtra = map[string]bool{"--single-transaction": true}
+
+// AllowedExtra is the exact allow-list of Options.Extra tokens for driver's dump or restore tool: the
+// CommonOptions flags plus a few vetted ones, and "-j N" / "--jobs=N" (numeric N) for pg_restore.
+// Anything else is refused by Plan, so no entry can redirect output (-f, -r, -L, --result-file), change the
+// host or database (-d, --dbname, -h), run a command (-c) or read another config (--defaults-*).
+func AllowedExtra(driver string, restore bool) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(f string) {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	for _, o := range CommonOptions(driver, restore) {
+		if f, _, spaced := strings.Cut(o.Flag, " "); !spaced {
+			add(f)
+		}
+	}
+	if driver == config.Postgres && restore {
+		add("-j N")
+		add("--jobs=N")
+	}
+	key := driver
+	if restore {
+		key += "/restore"
+	}
+	for _, f := range safeExtra[key] {
+		add(f)
+	}
+	return out
+}
+
+func checkExtra(driver string, restore bool, extra []string) ([]string, error) {
+	allowed := map[string]bool{}
+	for _, f := range AllowedExtra(driver, restore) {
+		allowed[f] = !strings.ContainsAny(f, " =") && f != "-j N"
+	}
+	jobsOK := driver == config.Postgres && restore
+	numeric := func(s string) bool {
+		n, err := strconv.Atoi(s)
+		return err == nil && n >= 1 && n <= 64 && strconv.Itoa(n) == s
+	}
+	var toks []string
+	for _, e := range extra {
+		toks = append(toks, strings.Fields(e)...)
+	}
+	var out []string
+	for i := 0; i < len(toks); i++ {
+		a := toks[i]
+		switch {
+		case !strings.HasPrefix(a, "-"):
+			return nil, fmt.Errorf("extra option %q must start with -", a)
+		case jobsOK && a == "-j" && i+1 < len(toks) && numeric(toks[i+1]):
+			out = append(out, a, toks[i+1])
+			i++
+		case jobsOK && strings.HasPrefix(a, "--jobs=") && numeric(a[len("--jobs="):]):
+			out = append(out, a)
+		case allowed[a]:
+			out = append(out, a)
+		default:
+			return nil, fmt.Errorf("extra option %q is not allowed", a)
+		}
+	}
+	return out, nil
 }
 
 type Tool struct {
