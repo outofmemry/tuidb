@@ -3,13 +3,18 @@ package importer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
+
+	"golang.org/x/text/encoding/ianaindex"
+	"golang.org/x/text/transform"
 
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
