@@ -198,6 +198,53 @@ func TestCloseAllTabsNotBrowserReserved(t *testing.T) {
 	}
 }
 
+func TestBindingsKeepTableOrder(t *testing.T) {
+	m, err := Build("C-d", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, b := range defaults {
+		if b.ctx == Global {
+			want = append(want, b.action)
+		}
+	}
+	var got []string
+	for _, b := range m.Bindings(Global) {
+		got = append(got, b.Action)
+	}
+	if len(got) == 0 || got[0] != want[0] {
+		t.Errorf("Bindings(Global) must start with the first table row %q, got %q", want[0], got)
+	}
+}
+
+func TestFilterBarAndGridFindDefaults(t *testing.T) {
+	m, err := Build("C-d", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ ctx, key, action string }{
+		{Grid, "alt+/", "find"}, {Grid, "alt+g", "find_next"}, {Grid, "alt+G", "find_prev"},
+	} {
+		if a, ok := m.Lookup(c.ctx, c.key); !ok || a != c.action {
+			t.Errorf("%s %s = %q, %v; want %s", c.ctx, c.key, a, ok, c.action)
+		}
+	}
+	// the filter-bar keys are no-prefix bindings (both UIs answer the raw key)
+	for _, c := range []struct{ key, action string }{{"alt+c", "filter_clear_all"}, {"alt+e", "filter_export"}, {"alt+n", "filter_add_copy"}} {
+		s := &Machine{Map: m}
+		if r := s.Feed(FilterBar, c.key); r.Action != c.action {
+			t.Errorf("raw filterbar %s = %+v; want %s", c.key, r, c.action)
+		}
+	}
+	// the grid find keys must not shadow Global bindings (search_in_database, new_session)
+	for key, want := range map[string]string{"/": "search_in_database", "n": "new_session"} {
+		if a, _ := m.Lookup(Grid, key); a != want {
+			t.Errorf("Grid %s = %q, want the Global %s", key, a, want)
+		}
+	}
+}
+
 func TestCanonicalShiftPunct(t *testing.T) {
 	for in, want := range map[string]string{
 		"alt+shift+'":      `alt+"`,
