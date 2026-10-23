@@ -122,7 +122,7 @@ var defaults = []def{
 	{"add_to_queries", "a", Editor, "add to saved queries"},
 	{"find", "f", Editor, "find"},
 	{"find_replace", "alt+f", Editor, "find and replace"},
-	{"select_next_occurrence", "D", Editor, "select next occurrence"},
+	{"select_next_occurrence", "D", Editor, "select next occurrence (terminal: one cursor, jumps; web: adds a caret)"},
 	{"select_all_occurrences", "ctrl+g", Editor, "select all occurrences"},
 	{"variables", "alt+v", Editor, "query parameters (variables)"},
 	{"vim_mode", "v", Editor, "toggle Vim keys"},
@@ -181,6 +181,10 @@ var defaults = []def{
 	{"bulk_update", "alt+b", Grid, "bulk update rows matching the filter"},
 
 	{"apply_filters", "enter", FilterBar, "apply checked filters"},
+
+	{"find", "alt+/", Grid, "find in the grid"},
+	{"find_next", "alt+g", Grid, "find next"},
+	{"find_prev", "alt+G", Grid, "find previous"},
 
 	{"add_row", "i", Structure, "add column / index"},
 	{"delete_rows", "delete", Structure, "delete column / index"},
