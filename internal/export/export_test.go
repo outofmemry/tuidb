@@ -243,3 +243,43 @@ func TestCSVFieldQuoteMode(t *testing.T) {
 		t.Error("CheckCSV")
 	}
 }
+
+func TestCSVNoHeaderAndNullAs(t *testing.T) {
+	got := write(t, Options{Format: "csv", NoHeader: true, NullAs: "NULL", Columns: []string{"id", "name"}})
+	if strings.Contains(got, "id,name") || !strings.Contains(got, "2,NULL\n") {
+		t.Errorf("got %q", got)
+	}
+	if got := write(t, Options{Format: "csv", CSV: config.CSV{NullAs: `\N`}, Columns: []string{"id", "name"}}); !strings.Contains(got, `2,\N`) {
+		t.Errorf("[csv] null_as fallback: %q", got)
+	}
+}
+
+func TestFilename(t *testing.T) {
+	v := map[string]string{"table": "a/b", "connection": "prod", "date": "2026-10-28", "time": "010203"}
+	for in, want := range map[string]string{
+		"{table}-{date}":      "a_b-2026-10-28",
+		"{connection}_{time}": "prod_010203",
+		"{tag}-{nope}":        "{nope}",
+		"{tag}-{table}":       "a_b",
+		"{database}.csv":      "export.csv",
+		"{table}-{tag}.csv":   "a_b.csv",
+		"{tag}":               "export",
+		"../{table}":          "_a_b",
+		"":                    "export",
+	} {
+		if got := Filename(in, v); got != want {
+			t.Errorf("Filename(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for _, name := range []string{"CON", "nul", "COM1", "lpt9"} {
+		if got := Filename("{table}.csv", map[string]string{"table": name}); got != "_"+name+".csv" {
+			t.Errorf("reserved %s: %q", name, got)
+		}
+	}
+	if got := Filename("{table}", map[string]string{"table": "console"}); got != "console" {
+		t.Errorf("console: %q", got)
+	}
+	if got := Filename("{date}", nil); len(got) != 10 {
+		t.Errorf("default date: %q", got)
+	}
+}
