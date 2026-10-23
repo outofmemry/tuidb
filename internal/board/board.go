@@ -125,10 +125,57 @@ func Run(ctx context.Context, sess db.Session, b Board, vals map[string]string, 
 	return out
 }
 
+func skipKind(k string) bool {
+	switch k {
+	case "button", "import", "input", "dropdown", "exporter":
+		return true
+	}
+	return false
+}
+
+// ExportPanel runs p's query with vals bound like Run does, without the chart step, so the exporter gets raw rows.
+func ExportPanel(ctx context.Context, sess db.Session, b Board, p Panel, vals map[string]string, limit int) (*db.Result, error) {
+	r := PanelResult{Panel: p}
+	r.Panel.Kind = "table"
+	r.run(ctx, sess, bindVars(b, vals), sess.Caps().Dialect, limit)
+	return r.Result, r.Err
+}
+
+// DropdownLimit caps the options a query-backed dropdown loads. Exactly this many options means the list was
+// cut short, and the UIs should say so.
+const DropdownLimit = 5000
+
+// DropdownOptions returns the fixed Options, or the first column of the (read-only) Query.
+// truncated is true when the query returned DropdownLimit rows (counted before NULLs are skipped).
+func DropdownOptions(ctx context.Context, sess db.Session, b Board, p Panel, vals map[string]string) (opts []string, truncated bool, err error) {
+	if len(p.Options) > 0 || strings.TrimSpace(p.Query) == "" {
+		return p.Options, false, nil
+	}
+	res, err := ExportPanel(ctx, sess, b, p, vals, DropdownLimit)
+	if err != nil {
+		return nil, false, err
+	}
+	var out []string
+	for _, row := range res.Rows {
+		if len(row) == 0 || db.IsNull(row[0]) { // NULL is not an option: it would bind the text "<nil>"
+			continue
+		}
+		out = append(out, db.FormatValue(row[0]))
+	}
+	return out, len(res.Rows) >= DropdownLimit, nil
+}
+
 func bindVars(b Board, vals map[string]string) map[string]string {
 	known := map[string]string{}
 	for _, v := range b.Vars {
 		known[v.Name] = v.Default
+	}
+	for _, p := range b.Panels { // input/dropdown panels declare their own var
+		if p.Var != "" {
+			if _, dup := known[p.Var]; !dup {
+				known[p.Var] = p.Default
+			}
+		}
 	}
 	for k, v := range vals {
 		if _, ok := known[k]; ok { // only declared vars bind, so a stray key cannot rewrite a query
