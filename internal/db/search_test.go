@@ -68,11 +68,70 @@ func TestSearchCancel(t *testing.T) {
 	}
 }
 
-func TestSearchEqualsIsLikeText(t *testing.T) {
+func TestSearchEqualsStaysEquals(t *testing.T) {
 	f := &searchFake{counts: map[string]int64{}}
 	var got SearchHit
 	Search(context.Background(), f, SearchOptions{Value: "50%_", Op: "=", Tables: []string{"a"}}, func(h SearchHit) { got = h })
-	if x := got.Filters.Filters[0]; x.Op != "LIKE" || x.Value != `50\%\_` {
+	if x := got.Filters.Filters[0]; x.Op != "=" || x.Value != "50%_" {
 		t.Errorf("%+v", x)
+	}
+}
+
+type searchDB struct {
+	searchFake
+	caps Capabilities
+	dbs  []string
+	seen []string
+}
+
+func (f *searchDB) Caps() Capabilities                          { return f.caps }
+func (f *searchDB) Databases(context.Context) ([]string, error) { return f.dbs, nil }
+func (f *searchDB) Objects(_ context.Context, schema string) ([]Object, error) {
+	f.seen = append(f.seen, schema)
+	return []Object{{ObjRef: ObjRef{Schema: schema, Name: "t", Kind: KindTable}}}, nil
+}
+
+func TestSearchAllSchemasUsesDatabases(t *testing.T) {
+	f := &searchDB{caps: Capabilities{Dialect: "mysql"}, dbs: []string{"a", "mysql", "b"}}
+	var n int
+	err := Search(context.Background(), f, SearchOptions{Value: "x", Op: "Contains", AllSchemas: true}, func(SearchHit) { n++ })
+	if err != nil || n != 2 || len(f.seen) != 2 || f.seen[0] != "a" || f.seen[1] != "b" {
+		t.Fatalf("err=%v n=%d seen=%v", err, n, f.seen)
+	}
+	f = &searchDB{caps: Capabilities{Dialect: "mysql"}}
+	if err := Search(context.Background(), f, SearchOptions{Value: "x", Op: "Contains", AllSchemas: true}, func(SearchHit) {}); err == nil {
+		t.Error("no databases and no schemas must be refused")
+	}
+}
+
+func TestSearchValidatesOp(t *testing.T) {
+	f := &searchDB{caps: Capabilities{Dialect: "partiql"}, dbs: []string{"a"}}
+	if err := Search(context.Background(), f, SearchOptions{Value: "x", Op: "Has suffix"}, func(SearchHit) {}); err == nil {
+		t.Error("Has suffix is not a PartiQL operator")
+	}
+	if len(f.seen) != 0 {
+		t.Error("nothing may be searched after a bad op")
+	}
+}
+
+func TestSearchEqualsRendering(t *testing.T) {
+	fs := FilterSet{Filters: []Filter{{Column: AnyColumn, Op: "=", Value: "x", Enabled: true}}}
+	w, _, _ := fs.Where(PG, []string{"a"}, 1)
+	if w != "(CAST(\"a\" AS TEXT) = $1)" {
+		t.Errorf("pg: %s", w)
+	}
+	w, _, _ = fs.Where(MySQL, []string{"a"}, 1)
+	if w != "(CAST(`a` AS CHAR) = ?)" { // a native compare would coerce 'bob' to 0
+		t.Errorf("mysql: %s", w)
+	}
+}
+
+func TestSearchAllSchemasOnlyWhereObjectsHonourIt(t *testing.T) {
+	for _, d := range []string{"redis", "mongo"} {
+		f := &searchDB{caps: Capabilities{Dialect: d}, dbs: []string{"0", "1", "2"}}
+		var n int
+		if err := Search(context.Background(), f, SearchOptions{Value: "x", Op: "Contains", AllSchemas: true}, func(SearchHit) { n++ }); err != nil || n != 1 {
+			t.Errorf("%s: err=%v n=%d seen=%v", d, err, n, f.seen)
+		}
 	}
 }
