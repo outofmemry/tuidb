@@ -433,12 +433,51 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 			target[i] = m
 		}
 		if target[i] != "" {
-			def = append(def, db.Column{Name: target[i], Type: "TEXT", Nullable: true})
+			typ := "TEXT"
+			if t := o.ColumnTypes[target[i]]; t != "" {
+				typ = t
+			} else if t := o.ColumnTypes[c]; t != "" {
+				typ = t
+			}
+			def = append(def, db.Column{Name: target[i], Type: typ, Nullable: true})
 		}
 	}
 	if len(def) == 0 {
 		return fmt.Errorf("no columns to import")
 	}
+	if err := uniqueTargets(cols, target, def, dialect, o.CreateTable); err != nil {
+		return err
+	}
+	created := false
+	// the transaction opens before the CREATE, so a failure in the data takes the new table with it
+	if o.Source != "sql" && sess.Caps().Transactions {
+		if pn, ok := sess.(db.Pinner); ok {
+			pin, perr := pn.Pin(ctx)
+			if perr != nil {
+				return perr
+			}
+			if _, berr := pin.Exec(ctx, "BEGIN", 0); berr != nil {
+				pin.Close()
+				return fmt.Errorf("begin: %w", berr)
+			}
+			ap, inTx = pin, true
+			defer func() { // one transaction for the whole file: all rows or none
+				defer pin.Close()
+				if err != nil {
+					pin.Exec(context.Background(), "ROLLBACK", 0)
+					if created && (o.Driver == config.MySQL || o.Driver == config.MariaDB) {
+						// MySQL commits CREATE TABLE implicitly, so the rollback does not take the table with it
+						err = fmt.Errorf("%w (rolled back; the new table stays, MySQL commits CREATE TABLE)", err)
+					} else {
+						err = fmt.Errorf("%w (rolled back, no rows were imported)", err)
+					}
+				} else if _, cerr := pin.Exec(context.Background(), "COMMIT", 0); cerr != nil {
+					err = fmt.Errorf("commit: %w", cerr)
+				}
+			}()
+		}
+	}
+
 	if o.CreateTable {
 		stmts, err := sess.PlanTable(nil, &db.TableDef{Schema: o.Table.Schema, Name: o.Table.Name, Columns: def})
 		if err != nil {
