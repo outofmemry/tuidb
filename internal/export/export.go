@@ -515,3 +515,84 @@ func (e *xlsxEnc) row(vals []any) error {
 }
 
 func (e *xlsxEnc) close() error { return e.f.Write(e.w) }
+
+var fileTokens = regexp.MustCompile(`\{[a-z]+\}`)
+
+var reservedName = regexp.MustCompile(`(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$`)
+
+// Filename expands pattern ({connection} {database} {table} {tag} {date}=YYYY-MM-DD {time}=HHMMSS) with vars
+// (date and time default to now) and makes the result safe as a file name. Unknown tokens stay literal.
+func Filename(pattern string, vars map[string]string) string {
+	now := time.Now()
+	get := func(k string) (string, bool) {
+		if v, ok := vars[k]; ok {
+			return v, true
+		}
+		switch k {
+		case "connection", "database", "table", "tag": // known, just not set: empty
+			return "", true
+		case "date":
+			return now.Format("2006-01-02"), true
+		case "time":
+			return now.Format("150405"), true
+		}
+		return "", false
+	}
+	clean := func(v string) string { // no path separators or control chars, in values and in the pattern's own text
+		return strings.Map(func(r rune) rune {
+			if r < 32 || strings.ContainsRune(`/\:*?"<>|`, r) {
+				return '_'
+			}
+			return r
+		}, v)
+	}
+	// An empty token goes with one adjacent separator, so "{tag}-{table}" is "t", not "-t". A "." is kept: it is
+	// the extension's, and a leading one gets the "export" stem below.
+	const seps = "-_ "
+	var sb strings.Builder
+	last, dropSep := 0, false
+	lit := func(t string) {
+		if dropSep && t != "" && strings.ContainsRune(seps, rune(t[0])) {
+			t = t[1:]
+		}
+		if t != "" {
+			dropSep = false
+		}
+		sb.WriteString(clean(t))
+	}
+	for _, loc := range fileTokens.FindAllStringIndex(pattern, -1) {
+		lit(pattern[last:loc[0]])
+		last = loc[1]
+		tok := pattern[loc[0]:loc[1]]
+		v, ok := get(tok[1 : len(tok)-1])
+		switch {
+		case !ok:
+			sb.WriteString(clean(tok))
+			dropSep = false
+		case v == "":
+			if cur := sb.String(); cur != "" && strings.ContainsRune(seps, rune(cur[len(cur)-1])) {
+				sb.Reset()
+				sb.WriteString(cur[:len(cur)-1])
+			} else {
+				dropSep = true
+			}
+		default:
+			sb.WriteString(clean(v))
+			dropSep = false
+		}
+	}
+	lit(pattern[last:])
+	out := strings.TrimRight(sb.String(), " .")
+	if out == "" || strings.Trim(out, ".") == "" {
+		return "export"
+	}
+	if strings.HasPrefix(out, "..") { // path-like leftovers of the pattern
+		out = strings.TrimLeft(out, ".")
+	} else if out[0] == '.' { // an empty stem before the extension: ".csv" would be a hidden file
+		out = "export" + out
+	}
+	if reservedName.MatchString(strings.SplitN(out, ".", 2)[0]) { // Windows cannot create CON, NUL, COM1, ...
+		out = "_" + out
+	}
+	return out
+}
