@@ -420,9 +420,98 @@ func (c Config) validate() error {
 	if err := ValidateTags(c.Tags); err != nil {
 		return err
 	}
-	_, err := c.Keymap()
+	if (c.Web.TLSCert == "") != (c.Web.TLSKey == "") {
+		return errors.New("web.tls_cert and web.tls_key must be set together")
+	}
+	if (c.MCP.TLSCert == "") != (c.MCP.TLSKey == "") {
+		return errors.New("mcp.tls_cert and mcp.tls_key must be set together")
+	}
+	_, err := c.keymapWith(nil, true)
 	return err
 }
 
+// enums are the allowed values of the enum settings (also what config.Schema offers).
+var enums = map[string][]string{
+	"general.new_tab_opens":         {"query", "empty"},
+	"editor.complete_key":           {"enter_or_tab", "enter", "tab"},
+	"editor.indent":                 {"spaces", "tabs"},
+	"editor.result_mode":            {"tabs", "append"},
+	"editor.param_format":           {"colon", "dollar", "at", "brace", "mustache", "question"},
+	"editor.auto_save_tabs":         {"none", "first", "all"},
+	"editor.indent_type":            {"standard", "tabular_left", "tabular_right"},
+	"editor.run_default":            {"current", "all"},
+	"table.filter_column_sort":      {"name", "ordinal"},
+	"general.connection_sort":       {"name", "tag", "driver", "recent"},
+	"csv.quote_mode":                {"always", "needed"},
+	"table.filter_default_column":   {"pk", "any", "raw"},
+	"table.filter_default_operator": {"=", "contains"},
+	"table.filter_state":            {"remember", "show", "hide"},
+	"table.default_sort":            {"none", "pk_asc", "pk_desc"},
+	"sidebar.matching":              {"fuzzy", "contains"},
+	"ai.provider":                   {"anthropic", "openai"},
+}
+
+// knownAction reports whether a hints/toolbar entry names a default action, a plugin shortcut, or (toolbar
+// only) one of the web's own buttons.
+func knownAction(name string, toolbar bool) bool {
+	if strings.HasPrefix(name, "plugin:") || (toolbar && (name == "history" || name == "saved_queries")) {
+		return true
+	}
+	for _, b := range keymap.DefaultBindings() {
+		if b.Action == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Keymap builds the prefix key map from the prefix and [keys] overrides.
-func (c Config) Keymap() (*keymap.Map, error) { return keymap.Build(c.General.Prefix, c.KeyOverrides) }
+func (c Config) Keymap() (*keymap.Map, error) { return c.KeymapWith(nil) }
+
+// KeymapWith is Keymap plus extra bindings (plugin shortcuts: Action "plugin:<name>", Context keymap.Global).
+// A [keys] override for a plugin that is not installed is ignored, so removing a plugin never breaks startup.
+func (c Config) KeymapWith(extra []keymap.Binding) (*keymap.Map, error) {
+	return c.keymapWith(extra, false)
+}
+
+// KeymapChecked is KeymapWith that skips the extra bindings that cannot be added (a clash with a default, a
+// [keys] entry or another plugin; an unparsable key) and returns what it skipped, so one bad plugin never
+// stops the keymap. Both UIs use it.
+func (c Config) KeymapChecked(extra []keymap.Binding) (*keymap.Map, []string, error) {
+	over := map[string][]string{}
+	for action, specs := range c.KeyOverrides {
+		if strings.HasPrefix(action, "plugin:") && !slices.ContainsFunc(extra, func(b keymap.Binding) bool { return b.Action == action }) {
+			continue
+		}
+		over[action] = specs
+	}
+	return keymap.BuildChecked(c.General.Prefix, over, extra...)
+}
+
+// keymapWith builds the map. lenient (validation, which does not know the plugins) stands in a placeholder
+// binding for every plugin named in [keys], so its key still takes part in conflict detection; otherwise
+// overrides of plugins that are not in extra are dropped.
+func (c Config) keymapWith(extra []keymap.Binding, lenient bool) (*keymap.Map, error) {
+	have := map[string]bool{}
+	for _, b := range extra {
+		have[b.Action] = true
+	}
+	over := map[string][]string{}
+	extra = slices.Clone(extra)
+	for action, specs := range c.KeyOverrides {
+		if strings.HasPrefix(action, "plugin:") && !have[action] {
+			if !lenient || len(specs) == 0 {
+				continue
+			}
+			// The placeholder's key is never bound (the override replaces it) but must parse: drop the "-n " flag,
+			// and fall back to a fixed key when the spec is bad so Build reports that override by name.
+			key := strings.TrimPrefix(specs[0], "-n ")
+			if _, err := keymap.Parse(key); err != nil {
+				key = "f12"
+			}
+			extra = append(extra, keymap.Binding{Action: action, Key: key, Context: keymap.Global, Desc: "plugin: " + strings.TrimPrefix(action, "plugin:")})
+		}
+		over[action] = specs
+	}
+	return keymap.Build(c.General.Prefix, over, extra...)
+}
