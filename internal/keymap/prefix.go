@@ -15,7 +15,10 @@ type Map struct {
 // Build merges user overrides onto the defaults. prefix and overrides use the
 // TOML spellings ("C-d"); an override replaces every default key of that action.
 // Override values: a key string, or a list of them; a "-n " prefix means no prefix needed.
-func Build(prefix string, overrides map[string][]string) (*Map, error) {
+// extra are bindings that are not in the defaults (plugin shortcuts, action "plugin:<name>"); they take part in
+// validation, and a [keys] override of their action replaces their key.
+func Build(prefix string, overrides map[string][]string, extra ...Binding) (*Map, error) {
+	extra = append([]Binding(nil), extra...)
 	p, err := Parse(prefix)
 	if err != nil {
 		return nil, fmt.Errorf("prefix: %w", err)
@@ -23,6 +26,14 @@ func Build(prefix string, overrides map[string][]string) (*Map, error) {
 	m := &Map{Prefix: p}
 	known := map[string][]string{} // action -> contexts
 	for _, b := range DefaultBindings() {
+		known[b.Action] = append(known[b.Action], b.Context)
+	}
+	for i, b := range extra {
+		k, err := Parse(b.Key)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", b.Action, err)
+		}
+		extra[i].Key = k
 		known[b.Action] = append(known[b.Action], b.Context)
 	}
 	for action, specs := range overrides {
