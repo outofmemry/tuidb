@@ -12,7 +12,9 @@ type searchFake struct {
 	cancel  func()
 }
 
-func (f *searchFake) CurrentSchema() string { return "public" }
+func (f *searchFake) Caps() Capabilities                        { return Capabilities{Dialect: "postgres", Schemas: true} }
+func (f *searchFake) Schemas(context.Context) ([]string, error) { return []string{"public"}, nil }
+func (f *searchFake) CurrentSchema() string                     { return "public" }
 func (f *searchFake) Objects(context.Context, string) ([]Object, error) {
 	r := func(n string, k Kind) Object { return Object{ObjRef: ObjRef{Schema: "public", Name: n, Kind: k}} }
 	return []Object{r("a", KindTable), r("v", KindView), r("b", KindTable), r("c", KindTable)}, nil
