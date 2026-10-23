@@ -31,10 +31,29 @@ type Options struct {
 	Table       db.ObjRef
 	Batch       int    // rows per Apply, default 500
 	EmptyIsNull bool   // an empty cell (or JSON "") becomes NULL, the way the CSV export writes it
-	OnConflict  string // "" (plain insert); "ignore" and "replace" are not implemented yet
+	OnConflict  string // "" or "stop" (plain insert, first error stops); "update" and "replace" upsert (PostgreSQL, MySQL)
+	// Driver is the connection's driver name. Redshift, Greenplum and Vertica share the postgres dialect but have
+	// no ON CONFLICT, so an upsert is only offered for config.Postgres (and MySQL-family dialects); "" = unknown,
+	// judged by the dialect alone.
+	Driver string
+	// NullAs is the cell text that becomes NULL, checked before EmptyIsNull; "" falls back to CSV.NullAs for csv.
+	NullAs string
+	// KeepFormulaQuote keeps the apostrophe the CSV export puts before a cell that starts with = + - @ tab or CR.
+	// By default one leading ' is stripped when the rest starts with one of those (and is not a number), so an
+	// export read back is lossless.
+	KeepFormulaQuote bool
+	// Encoding of the input file: "" or utf-8 = as is; latin1, windows-1252, utf-16le, utf-16be, ... (IANA names).
+	Encoding string
+	// Quote is the CSV quote character, default CSV.Quote, else '"'.
+	// shortcut: ASCII only, done by swapping it with '"' around encoding/csv; add a hand parser for more.
+	Quote rune
+	// ColumnTypes sets the type of a created column by table column name (file column name also works); default TEXT.
+	ColumnTypes map[string]string
 }
 
 type Progress struct {
+	// Rows is the number of rows sent to the database. Apply reports no affected count, so with ON CONFLICT DO
+	// NOTHING it can exceed the rows really inserted: callers say "processed", not "inserted".
 	Rows, Batches int64
 	Err           error
 }
