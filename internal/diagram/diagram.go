@@ -46,6 +46,36 @@ func Load(ctx context.Context, sess db.Session, schema string) ([]Table, error) 
 	return out, nil
 }
 
+// Schemas lists the schemas the diagram can be loaded for; nil when the engine has none.
+func Schemas(ctx context.Context, sess db.Session) ([]string, error) {
+	if !sess.Caps().Schemas {
+		return nil, nil
+	}
+	return sess.Schemas(ctx)
+}
+
+// WithFK returns a copy of def with fk appended (for the structure planner); def is not modified. An FK the table
+// already has, by name or by the same columns and referenced columns, is not added again.
+func WithFK(def db.TableDef, fk db.ForeignKey) db.TableDef {
+	for _, o := range def.ForeignKeys {
+		if fk.Name != "" && o.Name == fk.Name ||
+			len(fk.Columns) > 0 && slices.Equal(o.Columns, fk.Columns) && o.RefSchema == fk.RefSchema && o.RefTable == fk.RefTable && slices.Equal(o.RefColumns, fk.RefColumns) {
+			return def
+		}
+	}
+	def.ForeignKeys = append(append([]db.ForeignKey(nil), def.ForeignKeys...), fk)
+	return def
+}
+
+// ColumnNames lists t's column names in order.
+func ColumnNames(t Table) []string {
+	out := make([]string, len(t.Columns))
+	for i, c := range t.Columns {
+		out[i] = c.Name
+	}
+	return out
+}
+
 // Cluster numbers tables by FK connectivity (union-find); ids are 0.. in table order.
 func Cluster(tables []Table) map[string]int {
 	parent := map[string]string{}
