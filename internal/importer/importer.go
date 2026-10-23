@@ -146,18 +146,17 @@ func openCSV(r io.Reader, o Options) ([]string, func() ([]any, error), error) {
 		rec := pending
 		pending = nil
 		if rec == nil {
-			if rec, err = cr.Read(); err != nil {
+			if rec, err = read(); err != nil {
 				return nil, err
 			}
 		}
-		if len(rec) > len(cols) {
-			return nil, fmt.Errorf("record has %d fields, expected %d", len(rec), len(cols))
+		if len(rec) != len(cols) {
+			line, _ := cr.FieldPos(0)
+			return nil, fmt.Errorf("line %d has %d fields, expected %d", line, len(rec), len(cols))
 		}
 		out := make([]any, len(cols))
 		for i := range out {
-			if i < len(rec) {
-				out[i] = rec[i]
-			}
+			out[i] = rec[i]
 		}
 		return out, nil
 	}, nil
@@ -258,6 +257,10 @@ func text(v any) string {
 
 // Preview parses up to n rows without touching the database. For sql the rows are the statements.
 func Preview(r io.Reader, o Options, n int) (cols []string, rows [][]string, err error) {
+	if r, err = decode(r, o.Encoding); err != nil {
+		return nil, nil, err
+	}
+	o = defaults(o)
 	if o.Source == "sql" {
 		b, err := io.ReadAll(r)
 		if err != nil {
