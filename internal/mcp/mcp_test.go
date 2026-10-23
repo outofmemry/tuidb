@@ -19,20 +19,60 @@ import (
 
 type fakeSess struct {
 	db.Session // nil: only the methods below are used
+	mu         sync.Mutex
 	ran        []string
 	dialect    string // "" = postgres
 }
 
+func (f *fakeSess) record(stmt string) {
+	f.mu.Lock()
+	f.ran = append(f.ran, stmt)
+	f.mu.Unlock()
+}
+
+func (f *fakeSess) log() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.ran...)
+}
+
+// pinned is what fakeSess.Pin lends: it records into the parent so a test sees BEGIN, the statement and ROLLBACK.
+type pinned struct {
+	db.Session
+	f *fakeSess
+}
+
+func (p pinned) Caps() db.Capabilities { return p.f.Caps() }
+func (p pinned) ServerInfo() string    { return "fake" }
+func (p pinned) Close() error          { return nil }
+func (p pinned) Exec(ctx context.Context, stmt string, n int) (*db.Result, error) {
+	return p.f.Exec(ctx, stmt, n)
+}
+func (f *fakeSess) Pin(context.Context) (db.Session, error) { return pinned{f: f}, nil }
+
+// plainSess is a Session that cannot pin.
+type plainSess struct {
+	db.Session
+	f *fakeSess
+}
+
+func (p plainSess) Caps() db.Capabilities { return p.f.Caps() }
+func (p plainSess) ServerInfo() string    { return "fake" }
+func (p plainSess) Close() error          { return nil }
+func (p plainSess) Exec(ctx context.Context, stmt string, n int) (*db.Result, error) {
+	return p.f.Exec(ctx, stmt, n)
+}
+
 func (f *fakeSess) Caps() db.Capabilities {
 	if f.dialect != "" {
-		return db.Capabilities{Dialect: f.dialect}
+		return db.Capabilities{Dialect: f.dialect, Transactions: f.dialect != "clickhouse"}
 	}
-	return db.Capabilities{Dialect: "postgres"}
+	return db.Capabilities{Dialect: "postgres", Transactions: true}
 }
 func (f *fakeSess) ServerInfo() string { return "fake" }
 func (f *fakeSess) Close() error       { return nil }
 func (f *fakeSess) Exec(_ context.Context, stmt string, _ int) (*db.Result, error) {
-	f.ran = append(f.ran, stmt)
+	f.record(stmt)
 	return &db.Result{Columns: []db.ResultColumn{{Name: "a"}}, Rows: [][]any{{1}}, HasRows: true}, nil
 }
 
