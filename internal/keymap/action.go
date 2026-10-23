@@ -200,6 +200,25 @@ var defaults = []def{
 	{"sidebar_search", "F", Sidebar, "search sidebar"},
 	{"truncate", "alt+delete", Sidebar, "truncate table"},
 	{"delete_item", "delete", Sidebar, "delete item"},
+
+	// M13 / M15 (alt+w is taken by close_other_tabs, so close_pane is alt+q)
+	{"close_pane", "alt+q", Global, "close this split pane"},
+	{"toggle_panels", "alt+0", Global, "zen: hide sidebar, console, row detail and status"},
+	{"move_tab_left", "alt+{", Global, "move tab left"},
+	{"move_tab_right", "alt+}", Global, "move tab right"},
+	{"jobs", "alt+J", Global, "background jobs (import, export, backup, restore, search)"},
+	{"lock", "alt+L", Global, "lock with the passcode"},
+	{"assistant_new", "alt+N", Global, "assistant: new chat"},
+	{"assistant_clear", "alt+X", Global, "assistant: clear chat"},
+	{"assistant_history", "alt+Y", Global, "assistant: chat history"},
+	{"copy_cells_as", "alt+C", Grid, "copy selected cells as..."},
+	{"copy_cells_as", "alt+C", Results, "copy selected cells as..."},
+	{"copy_column", "alt+y", Grid, "copy all column values"},
+	{"copy_column", "alt+y", Results, "copy all column values"},
+	{"column_menu", "alt+H", Grid, "column header menu (sort, filter, hide)"},
+	{"column_menu", "alt+H", Results, "column header menu (sort, filter, hide)"},
+	{"select_word", "alt+D", Editor, "select word"},
+	{"select_all", "alt+a", Editor, "select all"},
 }
 
 func init() {
