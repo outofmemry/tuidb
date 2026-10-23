@@ -11,6 +11,7 @@ const (
 	Results   = "results"
 	Structure = "structure"
 	FilterBar = "filterbar"
+	Console   = "console"
 )
 
 // Binding is one default (or user) binding. NoPrefix mirrors tmux `bind -n`.
@@ -32,6 +33,17 @@ var noPrefixDefaults = []def{
 	{"focus_down", "ctrl+j", Global, "focus pane down"},
 	{"focus_up", "ctrl+k", Global, "focus pane up"},
 	{"focus_right", "ctrl+l", Global, "focus pane right"},
+	// filter-bar keys work without the prefix in both UIs, as the bar's own widget keys always did
+	{"filter_clear_all", "alt+c", FilterBar, "clear all filters"},
+	{"filter_export", "alt+e", FilterBar, "export the filtered rows"},
+	{"filter_add_copy", "alt+n", FilterBar, "add a filter as a copy of this one"},
+	// console pane (P2-72): bare keys, like the sidebar's, answered while the console has focus
+	{"console_find", "/", Console, "console: find"},
+	{"console_next", "n", Console, "console: next match"},
+	{"console_prev", "N", Console, "console: previous match"},
+	{"console_copy", "y", Console, "console: copy line"},
+	{"console_errors", "e", Console, "console: errors only"},
+	{"console_menu", "m", Console, "console: menu"},
 }
 
 // defaults: TablePlus ⌘X -> prefix x, ⌘⇧X -> prefix X, ⌥⌘X -> prefix M-x.
