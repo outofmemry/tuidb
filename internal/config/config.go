@@ -347,31 +347,60 @@ func (c Config) validate() error {
 	if c.General.RowLimit <= 0 {
 		return errors.New("general.row_limit must be > 0")
 	}
-	for _, e := range []struct {
-		key, val string
-		ok       []string
-	}{
-		{"general.new_tab_opens", c.General.NewTabOpens, []string{"query", "empty"}},
-		{"editor.complete_key", c.Editor.CompleteKey, []string{"enter_or_tab", "enter", "tab"}},
-		{"editor.indent", c.Editor.Indent, []string{"spaces", "tabs"}},
-		{"editor.result_mode", c.Editor.ResultMode, []string{"tabs", "append"}},
-		{"editor.param_format", c.Editor.ParamFormat, []string{"colon", "dollar", "at", "brace", "mustache", "question"}},
-		{"editor.auto_save_tabs", c.Editor.AutoSaveTabs, []string{"none", "first", "all"}},
-		{"editor.indent_type", c.Editor.IndentType, []string{"standard", "tabular_left", "tabular_right"}},
-		{"editor.run_default", c.Editor.RunDefault, []string{"current", "all"}},
-		{"table.filter_column_sort", c.Table.FilterColumnSort, []string{"name", "ordinal"}},
-		{"general.connection_sort", c.General.ConnectionSort, []string{"name", "tag", "driver"}},
-		{"csv.quote_mode", c.CSV.QuoteMode, []string{"always", "needed"}},
-		{"theme.name", c.Theme.Name, ThemeNames},
-		{"table.filter_default_column", c.Table.FilterDefaultColumn, []string{"pk", "any", "raw"}},
-		{"table.filter_state", c.Table.FilterState, []string{"remember", "show", "hide"}},
-		{"table.default_sort", c.Table.DefaultSort, []string{"none", "pk_asc", "pk_desc"}},
-		{"sidebar.matching", c.Sidebar.Matching, []string{"fuzzy", "contains"}},
-		{"ai.provider", c.AI.Provider, []string{"anthropic", "openai"}},
+	if err := c.CSV.validate(); err != nil {
+		return err
+	}
+	for _, e := range []struct{ key, val string }{
+		{"general.new_tab_opens", c.General.NewTabOpens},
+		{"editor.complete_key", c.Editor.CompleteKey},
+		{"editor.indent", c.Editor.Indent},
+		{"editor.result_mode", c.Editor.ResultMode},
+		{"editor.param_format", c.Editor.ParamFormat},
+		{"editor.auto_save_tabs", c.Editor.AutoSaveTabs},
+		{"editor.indent_type", c.Editor.IndentType},
+		{"editor.run_default", c.Editor.RunDefault},
+		{"table.filter_column_sort", c.Table.FilterColumnSort},
+		{"general.connection_sort", c.General.ConnectionSort},
+		{"csv.quote_mode", c.CSV.QuoteMode},
+		{"theme.name", c.Theme.Name},
+		{"table.filter_default_column", c.Table.FilterDefaultColumn},
+		{"table.filter_default_operator", c.Table.FilterDefaultOperator},
+		{"table.filter_state", c.Table.FilterState},
+		{"table.default_sort", c.Table.DefaultSort},
+		{"sidebar.matching", c.Sidebar.Matching},
+		{"ai.provider", c.AI.Provider},
 	} {
-		if !slices.Contains(e.ok, e.val) {
-			return fmt.Errorf("%s: %q is not one of %s", e.key, e.val, strings.Join(e.ok, "|"))
+		ok := enums[e.key]
+		if e.key == "theme.name" {
+			ok = append(slices.Clone(ThemeNames), InstalledThemes()...)
 		}
+		if !slices.Contains(ok, e.val) {
+			return fmt.Errorf("%s: %q is not one of %s", e.key, e.val, strings.Join(ok, "|"))
+		}
+	}
+	for _, l := range []struct {
+		key  string
+		list []string
+	}{{"general.hints", c.General.Hints}, {"web.toolbar", c.Web.Toolbar}} {
+		seen := map[string]bool{}
+		for _, a := range l.list {
+			if strings.TrimSpace(a) == "" {
+				return fmt.Errorf("%s: an action name must not be empty", l.key)
+			}
+			if !knownAction(a, l.key == "web.toolbar") {
+				return fmt.Errorf("%s: %q is not an action name (see the help screen for the names)", l.key, a)
+			}
+			if seen[a] {
+				return fmt.Errorf("%s: %q is listed twice", l.key, a)
+			}
+			seen[a] = true
+		}
+	}
+	if c.Security.LockAfterMins < 0 {
+		return errors.New("security.lock_after_mins must be >= 0 (0 = never)")
+	}
+	if p := c.Security.Passcode; p != "" && !strings.HasPrefix(p, "$2") {
+		return errors.New("security.passcode must be a bcrypt hash; make one with `webtuidb -set-passcode`")
 	}
 	for name, p := range c.AI.Providers {
 		if p.Provider != "" && !validAIProvider(p.Provider) {
