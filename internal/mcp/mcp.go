@@ -360,24 +360,13 @@ func (s *Server) build(tok *config.MCPToken) *sdk.Server {
 					defer cancel()
 				}
 				runner := o.sess
-				if !write && !s.connReadOnly(in.Connection) {
-					if readOnlyBegin[dialect] == "" {
-						return nil, fmt.Errorf("execute_read_query cannot be enforced read-only on this %s connection; mark the connection read_only in its settings or use execute_query", dialect)
+				if !write {
+					r, done, err := s.readOnlyRunner(ctx, o, in.Connection, dialect)
+					if err != nil {
+						return nil, err
 					}
-				}
-				if begin := readOnlyBegin[dialect]; !write && begin != "" && !s.connReadOnly(in.Connection) { // a read_only connection is already server-enforced
-					if pn, ok := o.sess.(db.Pinner); ok {
-						p, err := pn.Pin(ctx)
-						if err != nil {
-							return nil, err
-						}
-						defer p.Close()
-						if _, err := p.Exec(ctx, begin, 0); err != nil {
-							return nil, err
-						}
-						defer p.Exec(context.Background(), "ROLLBACK", 0)
-						runner = p
-					}
+					defer done()
+					runner = r
 				}
 				var last *db.Result
 				for _, st := range stmts {
