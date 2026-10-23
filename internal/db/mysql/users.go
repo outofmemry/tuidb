@@ -222,3 +222,51 @@ func (s *session) PlanUser(c db.UserChange) ([]db.Statement, error) {
 }
 
 var _ db.UserAdmin = (*session)(nil)
+
+// fillLimits reads the per-account resource limits. When they cannot be read (no privilege on the max_* columns,
+// an old server) Limits stays nil, never zeros: a form built from zeros would clear the account's quotas on save.
+func (s *session) fillLimits(ctx context.Context, us []db.User) {
+	rows, err := s.db().QueryContext(ctx, "SELECT User, Host, max_questions, max_updates, max_connections, max_user_connections FROM mysql.user")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	scanLimits(rows, us)
+}
+
+type limitRows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}
+
+// scanLimits fills us from rows; a scan or iteration error discards what was read so far, so no user is left
+// with a half-known set.
+func scanLimits(rows limitRows, us []db.User) {
+	idx := map[string]int{}
+	for i, u := range us {
+		idx[u.Name+"@"+u.Host] = i
+	}
+	drop := func() {
+		for i := range us {
+			us[i].Limits = nil
+		}
+	}
+	for rows.Next() {
+		var name, host string
+		var n [4]int
+		if rows.Scan(&name, &host, &n[0], &n[1], &n[2], &n[3]) != nil {
+			drop()
+			return
+		}
+		if i, ok := idx[name+"@"+host]; ok {
+			us[i].Limits = map[string]int{}
+			for j, k := range mysqlLimits {
+				us[i].Limits[k] = n[j]
+			}
+		}
+	}
+	if rows.Err() != nil {
+		drop()
+	}
+}
