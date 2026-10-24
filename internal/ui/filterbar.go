@@ -264,7 +264,7 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 	if t.filters.Or {
 		join = "OR"
 	}
-	head := " " + th.Section.Render("Filters ("+join+")") + "   " + th.chips("↵", "apply", "Tab", "field", "M-n", "add", "M-d", "remove", "M-o", "and/or", "M-c", "clear", "M-s", "sql", "Esc", "hide")
+	head := " " + th.Section.Render("Filters ("+join+")") + "   " + th.chips("↵", "apply", "Tab", "field", "M-n", "add", "M-d", "remove", "M-o", "and/or", "M-c", "clear", "M-e", "export", "M-s", "sql", "Esc", "hide")
 	lines := []string{fit(head, W)}
 	fs := t.filters.Filters
 	start := 0
