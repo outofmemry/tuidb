@@ -97,6 +97,8 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		return stmts(t), nil
 	case db.OpDropDatabase:
 		return stmts("DROP DATABASE " + q(ref.Name)), nil
+	case db.OpCreateSchema, db.OpDropSchema:
+		return nil, fmt.Errorf("%s has no schemas: a schema is a database, use create / drop database", s.engine())
 	case db.OpRenameDatabase:
 		return nil, fmt.Errorf("%s cannot rename a database: create a new one and move the tables with RENAME TABLE", s.engine())
 	}
