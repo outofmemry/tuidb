@@ -804,8 +804,10 @@ func (w *Workspace) pluginsAction(name string) tea.Cmd {
 			continue
 		case name != "" && p.Name != name, name == "" && !fits:
 			continue
+		case name != "" && !fits: // a shortcut honours the plugin's contexts too
+			return w.a.say("plugin %s does not apply in this pane (%s)", p.Name, strings.Join(p.Contexts, ", "))
 		}
-		items = append(items, pickItem{Label: p.Name, Detail: p.Output + " · " + p.Command, Value: p})
+		items = append(items, pickItem{Label: p.Name, Detail: pluginDetail(p), Value: p})
 	}
 	if name != "" && len(items) == 1 {
 		return w.runPlugin(items[0].Value.(plugin.Plugin), ctxName)
