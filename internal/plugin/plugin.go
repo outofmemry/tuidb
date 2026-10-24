@@ -41,6 +41,27 @@ type Context struct {
 	Cell       string     `json:"cell,omitempty"`
 }
 
+// Effect is something the UI does after a plugin ran. Kind: copy | open | notify | sql.
+// MaxEffects caps the effects one script run may produce; the next one throws.
+const MaxEffects = 100
+
+type Effect struct {
+	Kind string    `json:"kind"`
+	Text string    `json:"text,omitempty"`
+	Ref  db.ObjRef `json:"ref,omitempty"` // open: the table to open
+}
+
+// Output is a plugin's result: Text (stdout of a command, or the script's final string) plus Effects.
+type Output struct {
+	Text    string   `json:"text"`
+	Effects []Effect `json:"effects"`
+}
+
+// Host lets a JS plugin query the connection it runs on. A nil Host means query() throws.
+type Host interface {
+	Query(ctx context.Context, sql string) (cols []string, rows [][]string, err error)
+}
+
 func Dir() string { return filepath.Join(config.ConfigDir(), "plugins") }
 
 // List parses every *.toml in Dir; a bad file becomes a Plugin with Err set.
