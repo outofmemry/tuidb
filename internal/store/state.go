@@ -377,3 +377,49 @@ func (s *State) SetGroups(conn string, groups []ItemGroup) error {
 		d.Groups[conn] = groups
 	})
 }
+
+// TouchConnected records now as conn's last successful connect. (Touch is taken by the recent-items list.)
+func (s *State) TouchConnected(conn string) error {
+	return s.do(func(d *stateFile) {
+		if d.LastConnected == nil {
+			d.LastConnected = map[string]time.Time{}
+		}
+		d.LastConnected[conn] = time.Now()
+	})
+}
+
+// LastConnected returns a copy of the conn -> last connect time map.
+func (s *State) LastConnected() map[string]time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]time.Time, len(s.d.LastConnected))
+	for k, v := range s.d.LastConnected {
+		out[k] = v
+	}
+	return out
+}
+
+// DiagramColors returns a copy of conn's "schema.table" -> colour overrides.
+func (s *State) DiagramColors(conn string) map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string]string, len(s.d.DiagramColors[conn]))
+	for k, v := range s.d.DiagramColors[conn] {
+		out[k] = v
+	}
+	return out
+}
+
+// SetDiagramColors replaces conn's colour overrides; an empty map forgets them.
+func (s *State) SetDiagramColors(conn string, colors map[string]string) error {
+	return s.do(func(d *stateFile) {
+		if len(colors) == 0 {
+			delete(d.DiagramColors, conn)
+			return
+		}
+		if d.DiagramColors == nil {
+			d.DiagramColors = map[string]map[string]string{}
+		}
+		d.DiagramColors[conn] = colors
+	})
+}
