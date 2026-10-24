@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
@@ -22,6 +23,7 @@ type TableState struct {
 	Filters   db.FilterSet   `json:"filters,omitempty"`
 	ShowBar   bool           `json:"show_filters,omitempty"`
 	Sort      []db.Sort      `json:"sort,omitempty"`
+	SortNone  bool           `json:"sort_none,omitempty"` // the user removed the sort: [table] default_sort must not come back
 }
 
 type Workspace struct {
@@ -41,6 +43,10 @@ type stateFile struct {
 	Files    []string                     `json:"recent_files,omitempty"`
 	Sort     string                       `json:"connection_sort,omitempty"`
 	Groups   map[string][]ItemGroup       `json:"groups,omitempty"` // conn -> custom sidebar groups
+	// LastConnected is conn -> time of the last successful connect (sort "recent").
+	LastConnected map[string]time.Time `json:"last_connected,omitempty"`
+	// DiagramColors is conn -> "schema.table" -> colour override in the terminal ER diagram.
+	DiagramColors map[string]map[string]string `json:"diagram_colors,omitempty"`
 }
 
 // OpenTab is one tab to restore: Kind "sql" (Text is the editor content) or "table" (Name is the object).
