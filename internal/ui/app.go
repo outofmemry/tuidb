@@ -854,6 +854,13 @@ func (a *App) topBar() string {
 	} else {
 		l += bar.Render(fmt.Sprintf("%d connections", len(a.d.Conns)))
 	}
+	if a.zen() && a.toast != "" { // zen has no status line: the toast takes the top bar's right side
+		st := bar.Foreground(lipgloss.Color(th.pal["ok"]))
+		if a.toastErr {
+			st = bar.Foreground(lipgloss.Color(th.pal["error"])).Bold(true)
+		}
+		right = st.Render(" " + a.toast + " ")
+	}
 	if right != "" {
 		right += bar.Render(" ")
 	}
@@ -880,7 +887,7 @@ func (a *App) statusLine() string {
 	var right string
 	switch {
 	case a.toast != "":
-		st := a.th.StatusBar
+		st := a.th.Notice.Foreground(lipgloss.Color(a.th.pal["status_fg"]))
 		icon := "✓ "
 		if a.toastErr {
 			st, icon = st.Foreground(lipgloss.Color(a.th.pal["error"])).Bold(true), "✗ "
