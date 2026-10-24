@@ -423,6 +423,14 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		return a, a.say("%s: connection works (%s)", m.name, m.info)
+	case tea.FocusMsg:
+		a.m15.blurred = false
+		return a, nil
+	case tea.BlurMsg:
+		a.m15.blurred = true
+		return a, nil
+	case idleTickMsg:
+		return a, tea.Batch(a.idleCheck(time.Now()), a.idleTick())
 	case settingsDoneMsg:
 		if m.err != nil {
 			return a, a.fail(m.err)
@@ -453,6 +461,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.o.Close()
 			return a, nil
 		}
+		a.d.State.TouchConnected(c.Name) // "last connected" on the welcome screen
 		a.nextID++
 		w := newWorkspace(a, a.nextID, c, m.o)
 		w.resize(a.w, a.h-2)
