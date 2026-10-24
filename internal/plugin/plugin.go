@@ -1,4 +1,4 @@
-// Package plugin runs external commands configured in <ConfigDir>/plugins/*.toml.
+// Package plugin runs plugins from <ConfigDir>/plugins: *.toml (an external command) and *.js (a goja script).
 package plugin
 
 import (
@@ -15,6 +15,7 @@ import (
 
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
+	"webtuidb/internal/keymap"
 )
 
 type Plugin struct {
@@ -23,8 +24,11 @@ type Plugin struct {
 	Args     []string
 	Contexts []string
 	Output   string // "text" | "sql"
+	Key      string // keymap spelling, e.g. "alt+P"; bound as the action "plugin:<Name>"
+	JS       bool   `toml:"-"` // a .js plugin: Path is the script, Command is unused
 	Path     string `toml:"-"`
 	Err      error  `toml:"-"`
+	src      []byte // the script as loadJS vetted it (size and all); runJS runs these bytes, not a fresh read of the file
 }
 
 type Context struct {
