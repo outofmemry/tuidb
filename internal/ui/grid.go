@@ -635,9 +635,9 @@ func (g *Grid) FormatRect(r0, c0, r1, c1 int, f CopyFormat, table string) string
 		for r := r0; r <= r1; r++ {
 			rec := make([]string, 0, len(names))
 			for c := c0; c <= c1; c++ {
-				rec = append(rec, plain(cell(r, c)))
+				rec = append(rec, clipCell(cell(r, c)))
 			}
-			b.WriteString(csvLine(rec))
+			b.WriteString(csvJoin(rec))
 		}
 	case FmtJSON:
 		var docs []map[string]any
@@ -697,7 +697,7 @@ func (g *Grid) FormatRect(r0, c0, r1, c1 int, f CopyFormat, table string) string
 				if c > c0 {
 					b.WriteByte('\t')
 				}
-				b.WriteString(plain(cell(r, c)))
+				b.WriteString(clipCell(cell(r, c)))
 			}
 			b.WriteByte('\n')
 		}
@@ -725,7 +725,7 @@ func (g *Grid) CopyCells(f CopyFormat, table string) string {
 func (g *Grid) CopyColumn() string {
 	var vals []string
 	for _, r := range g.Rows {
-		vals = append(vals, plain(r.Cur[g.col]))
+		vals = append(vals, clipCell(r.Cur[g.col]))
 	}
 	return strings.Join(vals, "\n")
 }
