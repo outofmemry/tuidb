@@ -71,13 +71,14 @@ func (t *tableTab) syncEdit() {
 	}
 }
 
-func (t *tableTab) applyFilters() tea.Cmd {
-	return t.guard(func() tea.Cmd {
-		t.markApplied()
-		t.offset, t.toTop = 0, true
-		t.saveState()
-		return t.load()
-	})
+func (t *tableTab) applyFilters() tea.Cmd { return t.guard(t.applyFiltersNow) }
+
+// applyFiltersNow is applyFilters once the unsaved-changes prompt is out of the way.
+func (t *tableTab) applyFiltersNow() tea.Cmd {
+	t.markApplied()
+	t.offset, t.toTop = 0, true
+	t.saveState()
+	return t.load()
 }
 
 func (t *tableTab) columnPicker(onPick func(col string)) {
@@ -150,13 +151,6 @@ func (t *tableTab) filterInput(msg tea.Msg) tea.Cmd {
 	case "up":
 		fb.sel = max(fb.sel-1, 0)
 		t.syncEdit()
-	case "alt+n": // add a filter as a copy of the current one
-		nf := *f
-		nf.Value = ""
-		*fs = append((*fs)[:fb.sel+1], append([]db.Filter{nf}, (*fs)[fb.sel+1:]...)...)
-		fb.sel++
-		fb.field = ffValue
-		t.syncEdit()
 	case "alt+d", "alt+x":
 		*fs = append((*fs)[:fb.sel], (*fs)[fb.sel+1:]...)
 		if len(*fs) == 0 {
@@ -167,10 +161,6 @@ func (t *tableTab) filterInput(msg tea.Msg) tea.Cmd {
 		t.syncEdit()
 	case "alt+o":
 		t.filters.Or = !t.filters.Or
-	case "alt+c":
-		t.filters.Filters = nil
-		fb.focus, t.showFilters = false, false
-		return t.applyFilters()
 	case "alt+s":
 		return t.showFilterSQL()
 	default:
