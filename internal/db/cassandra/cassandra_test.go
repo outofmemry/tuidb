@@ -293,7 +293,7 @@ func TestAlterTable(t *testing.T) {
 		n.Columns = append(n.Columns, db.Column{Name: "zs", Type: "int", Extra: "static"})                                         // add static zs
 		n.Indexes = []db.Index{{Name: "a_idx", Columns: []string{"a"}, Algorithm: "SAI"}, {Name: "z_idx", Columns: []string{"z"}}} // a_idx changes, b_idx goes, z_idx new
 	})
-	want := []string{`DROP INDEX "ks"."a_idx"`, `DROP INDEX "ks"."b_idx"`, `ALTER TABLE "ks"."t" RENAME "id" TO "pk"`, `ALTER TABLE "ks"."t" ADD "z" list<int>`, `ALTER TABLE "ks"."t" ADD "zs" int STATIC`, `ALTER TABLE "ks"."t" DROP "b"`,
+	want := []string{`DROP INDEX "ks"."a_idx"`, `DROP INDEX "ks"."b_idx"`, `ALTER TABLE "ks"."t" DROP "b"`, `ALTER TABLE "ks"."t" RENAME "id" TO "pk"`, `ALTER TABLE "ks"."t" ADD "z" list<int>`, `ALTER TABLE "ks"."t" ADD "zs" int STATIC`,
 		`CREATE CUSTOM INDEX "a_idx" ON "ks"."t" ("a") USING 'StorageAttachedIndex'`, `CREATE INDEX "z_idx" ON "ks"."t" ("z")`}
 	if err != nil || strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("diff: %v\n%s\nwant\n%s", err, strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -305,14 +305,15 @@ func TestAlterTable(t *testing.T) {
 		t.Errorf("same type, other case: %v %v", got, err)
 	}
 	for name, f := range map[string]func(n *db.TableDef){
-		"retype":          func(n *db.TableDef) { n.Columns[3].Type = "bigint" },
-		"rename regular":  func(n *db.TableDef) { n.Columns[2].Name = "renamed" },
-		"nullability":     func(n *db.TableDef) { n.Columns[2].Nullable = false },
-		"default":         func(n *db.TableDef) { n.Columns[2].Default, n.Columns[2].HasDef = "'x'", true },
-		"static toggle":   func(n *db.TableDef) { n.Columns[2].Extra = "static" },
-		"key membership":  func(n *db.TableDef) { n.Columns[2].PK = true },
-		"drop key column": func(n *db.TableDef) { n.Columns = n.Columns[:1] },
-		"add key column":  func(n *db.TableDef) { n.Columns = append(n.Columns, db.Column{Name: "k2", Type: "int", PK: true}) },
+		"retype":           func(n *db.TableDef) { n.Columns[3].Type = "bigint" },
+		"rename regular":   func(n *db.TableDef) { n.Columns[2].Name = "renamed" },
+		"nullability":      func(n *db.TableDef) { n.Columns[2].Nullable = false },
+		"default":          func(n *db.TableDef) { n.Columns[2].Default, n.Columns[2].HasDef = "'x'", true },
+		"clustering order": func(n *db.TableDef) { n.Columns[1].Extra = "clustering desc" },
+		"static toggle":    func(n *db.TableDef) { n.Columns[2].Extra = "static" },
+		"key membership":   func(n *db.TableDef) { n.Columns[2].PK = true },
+		"drop key column":  func(n *db.TableDef) { n.Columns = n.Columns[:1] },
+		"add key column":   func(n *db.TableDef) { n.Columns = append(n.Columns, db.Column{Name: "k2", Type: "int", PK: true}) },
 		"new column default": func(n *db.TableDef) {
 			n.Columns = append(n.Columns, db.Column{Name: "z", Type: "int", HasDef: true, Default: "1"})
 		},
@@ -534,5 +535,34 @@ func TestFilterChecks(t *testing.T) {
 	text, args2, err := db.BuildSelect(db.CQL, db.RowQuery{ObjRef: db.ObjRef{Schema: "ks", Name: "t"}, Filters: db.FilterSet{Filters: []db.Filter{{Column: db.RawColumn, Value: "a = 1 AND b = 2", Enabled: true}, {Column: "n", Op: ">", Value: "3", Enabled: true}}}, Limit: 5}, nil)
 	if err != nil || text != `SELECT * FROM "ks"."t" WHERE a = 1 AND b = 2 AND "n" > ? LIMIT 5` || len(args2) != 1 {
 		t.Errorf("select: %s %v %v", text, args2, err)
+	}
+}
+
+func TestReviewFixes(t *testing.T) {
+	// CAS-01: a delete and an insert on one table must not share a batch timestamp
+	del := db.Statement{Text: `DELETE FROM "ks"."t" WHERE "id" = ?`}
+	ins := db.Statement{Text: `INSERT INTO "ks"."t" ("id") VALUES (?)`}
+	other := db.Statement{Text: `INSERT INTO "ks"."u" ("id") VALUES (?)`}
+	if batchable([]db.Statement{del, ins}) || !batchable([]db.Statement{del, other}) || !batchable([]db.Statement{ins, other}) {
+		t.Error("delete+insert on one table must not batch")
+	}
+	// CAS-02: an overflowing counter delta is rejected, not clamped
+	s := unitSession()
+	s.types["ks.t"] = map[string]gocql.TypeInfo{"n": gocql.NewNativeType(4, gocql.TypeCounter, ""), "id": gocql.NewNativeType(4, gocql.TypeInt, "")}
+	_, err := s.Plan([]db.Change{{Kind: db.Update, ObjRef: db.ObjRef{Name: "t", Kind: db.KindTable}, Key: []db.KeyVal{{Col: "id", Val: int64(1)}}, Set: []db.KeyVal{{Col: "n", Val: "+99999999999999999999"}}}})
+	if err == nil {
+		t.Error("overflowing counter delta accepted")
+	}
+	// CM-01: a USE behind comments is still a USE
+	for _, in := range []string{"-- c\nUSE ks", "/* c */ use ks;", "// c\n  USE ks"} {
+		if !useRe.MatchString(in) {
+			t.Errorf("%q not recognised as USE", in)
+		}
+	}
+	// CC-01: typed nils from a UDT map are NULL, not a panic
+	udt := gocql.UDTTypeInfo{Elements: []gocql.UDTField{{Name: "v", Type: gocql.NewNativeType(4, gocql.TypeVarint, "")}, {Name: "d", Type: gocql.NewNativeType(4, gocql.TypeDecimal, "")}}}
+	got := jsonValue(udt, map[string]any{"v": (*big.Int)(nil), "d": (*inf.Dec)(nil)}).(map[string]any)
+	if got["v"] != nil || got["d"] != nil {
+		t.Errorf("udt typed nils: %v", got)
 	}
 }

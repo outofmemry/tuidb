@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	gocql "github.com/apache/cassandra-gocql-driver/v2"
+
 	"tuidb/internal/db"
 )
 
@@ -224,8 +226,13 @@ func (s *session) DDL(ctx context.Context, ref db.ObjRef) (string, error) {
 		if err == nil && len(rows) > 0 {
 			return strings.TrimSpace(str(rows[0]["create_statement"])), nil
 		}
-		if ref.Kind == db.KindTable {
-			return s.rebuiltDDL(ctx, ref)
+		var se *gocql.RequestErrSyntax // servers before 4.0 do not know DESCRIBE; any other failure is real
+		if ref.Kind == db.KindTable && (err == nil || errors.As(err, &se)) {
+			ddl, err := s.rebuiltDDL(ctx, ref)
+			if err != nil {
+				return "", err
+			}
+			return ddl + "\n-- Rebuilt from system_schema because DESCRIBE is unavailable: table options and indexes are missing.", nil
 		}
 		return "", fmt.Errorf("describe %s: %v", ref.Name, err)
 	case db.KindType:

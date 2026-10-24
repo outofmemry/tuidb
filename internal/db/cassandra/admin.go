@@ -279,7 +279,7 @@ func (s *session) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
 		oldBy[c.Name] = c
 	}
 	kept := map[string]bool{}
-	var out []db.Statement
+	var out, drops []db.Statement // drops go first, so a column can be dropped and added again under the same name
 	rename := map[string]string{} // old name -> new name, for the key comparison
 	for _, c := range new.Columns {
 		if c.OrigName == "" || oldBy[c.OrigName].Name == "" {
@@ -309,6 +309,11 @@ func (s *session) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
 		case c.Default != "" || c.HasDef:
 			return nil, fmt.Errorf("column %s: Cassandra has no column defaults", c.Name)
 		}
+		if op, oc, od := keyRole(o); o.PK {
+			if np, nc, nd := keyRole(c); op != np || oc != nc || od != nd {
+				return nil, fmt.Errorf("column %s: Cassandra cannot change a key column's partition/clustering role or clustering order", o.Name)
+			}
+		}
 		if c.Name != o.Name {
 			if !o.PK {
 				return nil, fmt.Errorf("column %s: Cassandra can only rename primary key columns", o.Name)
@@ -322,7 +327,7 @@ func (s *session) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
 			if c.PK {
 				return nil, fmt.Errorf("cannot drop key column %s", c.Name)
 			}
-			out = append(out, db.Statement{Text: "ALTER TABLE " + tbl + " DROP " + q(c.Name)})
+			drops = append(drops, db.Statement{Text: "ALTER TABLE " + tbl + " DROP " + q(c.Name)})
 		}
 	}
 	if len(new.PrimaryKey) > 0 && len(old.PrimaryKey) > 0 {
@@ -365,5 +370,5 @@ func (s *session) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
 			dropIx = append(dropIx, db.Statement{Text: "DROP INDEX " + qualifiedName(ks, ix.Name)})
 		}
 	}
-	return append(append(dropIx, out...), createIx...), nil
+	return append(append(append(dropIx, drops...), out...), createIx...), nil
 }

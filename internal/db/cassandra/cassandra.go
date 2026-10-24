@@ -41,13 +41,14 @@ type session struct {
 	dial db.DialFunc
 	opts options
 
-	mu    sync.RWMutex
-	ses   *gocql.Session
-	ks    string
-	cons  gocql.Consistency
-	types map[string]map[string]gocql.TypeInfo // column types per "keyspace.table", for turning typed text into driver values
-	aggs  map[string]bool                      // function-list entries that are aggregates ("name(args)")
-	info  string
+	mu     sync.RWMutex
+	closed bool
+	ses    *gocql.Session
+	ks     string
+	cons   gocql.Consistency
+	types  map[string]map[string]gocql.TypeInfo // column types per "keyspace.table", for turning typed text into driver values
+	aggs   map[string]bool                      // function-list entries that are aggregates ("name(args)")
+	info   string
 }
 
 // options are the driver extras (Connection.Options): consistency, local_dc, keyspace, timeout, protocol_version.
@@ -142,7 +143,7 @@ func (s *session) openSession(ctx context.Context, keyspace string) (*gocql.Sess
 	cl := gocql.NewCluster(c.Host)
 	cl.Port = c.EffectivePort()
 	cl.Keyspace = keyspace
-	cl.Consistency = s.cons
+	cl.Consistency = s.consistency()
 	cl.ConnectTimeout = 10 * time.Second
 	if s.opts.timeout > 0 {
 		cl.Timeout = s.opts.timeout
@@ -222,7 +223,16 @@ func tlsConfig(c config.Connection) (*tls.Config, error) {
 
 func (s *session) Caps() db.Capabilities { return caps }
 func (s *session) ServerInfo() string    { return s.info }
-func (s *session) Close() error          { s.sess().Close(); return nil }
+func (s *session) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	ses := s.ses
+	s.mu.Unlock()
+	if ses != nil {
+		ses.Close() // idempotent in gocql
+	}
+	return nil
+}
 
 func (s *session) Ping(ctx context.Context) error {
 	return s.query("SELECT key FROM system.local").Consistency(gocql.LocalOne).ScanContext(ctx, new(string))
@@ -261,6 +271,11 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 		return err
 	}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		ses.Close()
+		return errors.New("session is closed")
+	}
 	old := s.ses
 	s.ses, s.ks, s.types, s.aggs = ses, name, map[string]map[string]gocql.TypeInfo{}, map[string]bool{}
 	s.mu.Unlock()
@@ -269,7 +284,8 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 }
 
 var (
-	useRe = regexp.MustCompile(`(?is)^\s*use\s+(?:"((?:[^"]|"")+)"|(\w+))\s*;?\s*$`)
+	// leading comments are allowed: db.Split keeps them in the statement text, and the server would still run the USE.
+	useRe = regexp.MustCompile(`(?is)^(?:\s|--[^\n]*|//[^\n]*|/\*.*?\*/)*use\s+(?:"((?:[^"]|"")+)"|(\w+))\s*;?\s*$`)
 	// cmdRe: cqlsh-style session commands the server does not know.
 	cmdRe = regexp.MustCompile(`(?is)^\s*(consistency)\s+(\w+)\s*;?\s*$`)
 )

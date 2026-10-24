@@ -319,7 +319,10 @@ func (s *session) Plan(changes []db.Change) ([]db.Statement, error) {
 					if m == nil {
 						return nil, fmt.Errorf("counter column %s can only be incremented: enter +5 or -3 (Cassandra cannot set a counter to a value)", kv.Col)
 					}
-					n, _ := strconv.ParseInt(m[1], 10, 64)
+					n, err := strconv.ParseInt(m[1], 10, 64)
+					if err != nil {
+						return nil, fmt.Errorf("counter column %s: %s does not fit in 64 bits", kv.Col, strings.TrimSpace(fmt.Sprint(kv.Val)))
+					}
 					b.raw(q(kv.Col) + " + ")
 					b.arg("?", n, strconv.FormatInt(n, 10))
 					continue
@@ -367,6 +370,10 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 			b.Query(st.Text, st.Args...)
 		}
 		if err := b.ExecContext(ctx); err != nil {
+			var wt *gocql.RequestErrWriteTimeout
+			if errors.As(err, &wt) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, gocql.ErrTimeoutNoResponse) {
+				return fmt.Errorf("batch of %d statements: %w (timed out: the batch may still be applied, verify the data before retrying)", len(stmts), err)
+			}
 			return fmt.Errorf("batch of %d statements: %w (a logged batch is all-or-nothing, nothing was applied)", len(stmts), err)
 		}
 		return nil
@@ -380,12 +387,33 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 	return nil
 }
 
+// tableRe captures the table an INSERT/UPDATE/DELETE statement targets.
+var tableRe = regexp.MustCompile(`(?i)^\s*(?:insert\s+into|update|delete\s+from)\s+(\S+)`)
+
+// batchable reports whether the statements may share one logged batch. A batch has a single timestamp, so a DELETE that
+// shares a table with any other statement (a delete-then-insert of the same key) would swallow it: those run one by one.
+// shortcut: two INSERTs of the same key in one save still tie on the timestamp; the grids do not produce them.
 func batchable(stmts []db.Statement) bool {
 	if len(stmts) < 2 || len(stmts) > maxBatch {
 		return false
 	}
+	del, other := map[string]bool{}, map[string]bool{}
 	for _, st := range stmts {
 		if !dmlRe.MatchString(st.Text) || counterRe.MatchString(st.Text) {
+			return false
+		}
+		m := tableRe.FindStringSubmatch(st.Text)
+		if m == nil {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(st.Text)), "delete") {
+			del[m[1]] = true
+		} else {
+			other[m[1]] = true
+		}
+	}
+	for t := range del {
+		if other[t] {
 			return false
 		}
 	}

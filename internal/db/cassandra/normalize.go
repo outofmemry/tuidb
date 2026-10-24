@@ -167,7 +167,7 @@ func jsonValue(ti gocql.TypeInfo, v any) any {
 		m := map[string]any{}
 		if mv, ok := v.(map[string]any); ok {
 			for _, f := range t.Elements {
-				if fv, ok := mv[f.Name]; ok && fv != nil {
+				if fv, ok := mv[f.Name]; ok && !isNull(fv) {
 					m[f.Name] = jsonValue(f.Type, fv)
 				} else {
 					m[f.Name] = nil
@@ -192,6 +192,20 @@ func jsonValue(ti gocql.TypeInfo, v any) any {
 	default:
 		return x
 	}
+}
+
+// isNull is true for nil and for the typed nils gocql stores in a UDT map for NULL fields.
+// shortcut: zero scalars (0, zero UUID) in a UDT map are indistinguishable from NULL ones and stay as values.
+func isNull(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Map:
+		return rv.IsNil()
+	}
+	return false
 }
 
 func jsonSlice(elem gocql.TypeInfo, rv reflect.Value) []any {
