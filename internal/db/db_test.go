@@ -341,7 +341,7 @@ func TestMongoPlainDocument(t *testing.T) {
 	for in, want := range map[string]bool{
 		`{status: 'paid', _id: ObjectId('507f1f77bcf86cd799439011')}`: true,
 		`{"a": {"$gt": 5}, "d": ISODate("2024-01-01")}`:               true,
-		`{a: db.webtuidb_review_c.deleteMany({}).deletedCount}`:          false,
+		`{a: db.webtuidb_review_c.deleteMany({}).deletedCount}`:       false,
 		`{a: (function(){ return 1 })()}`:                             false,
 		`{$where: "sleep(1)"}`:                                        false,
 		`{a: x["y"]()}`:                                               false,
@@ -464,5 +464,22 @@ func TestReviewFixesDB(t *testing.T) {
 	}
 	if _, err := planOne(ClickHouse, Change{Kind: Insert, ObjRef: ObjRef{Name: "t"}}); err == nil {
 		t.Error("clickhouse empty insert should error")
+	}
+}
+
+func TestSplitBetweenNoPanicOnFoldedCase(t *testing.T) {
+	if lo, hi, err := splitBetween("ɐɐɐɐɐɐ and z"); err != nil || lo != "ɐɐɐɐɐɐ" || hi != "z" {
+		t.Errorf("%q %q %v", lo, hi, err)
+	}
+	if lo, hi, err := splitBetween("1 AnD 2"); err != nil || lo != "1" || hi != "2" {
+		t.Errorf("%q %q %v", lo, hi, err)
+	}
+}
+
+func TestWhereText(t *testing.T) {
+	fs := FilterSet{Filters: []Filter{{Column: "a", Op: "=", Value: "o'x", Enabled: true}, {Column: "n", Op: "IN", Value: "1,2", Enabled: true}}}
+	got, err := WhereText(PG, fs, nil)
+	if err != nil || got != `"a" = 'o''x' AND "n" IN ('1', '2')` {
+		t.Errorf("%q %v", got, err)
 	}
 }
