@@ -259,34 +259,41 @@ func (s *sidebar) importFile() tea.Cmd {
 		}))
 	case 2:
 		s.w.a.push(newForm("Import history", []formField{{Key: "path", Label: "File (csv or json)", Kind: fText}}, func(v map[string]string) tea.Cmd {
-			f, err := os.Open(strings.TrimSpace(v["path"]))
-			if err != nil {
-				return s.w.a.fail(err)
-			}
-			defer f.Close()
-			es, err := store.ImportHistory(f)
-			if err != nil {
-				return s.w.a.fail(err)
-			}
-			// off the UI loop (each Append locks and rewrites a file); a failure says how far it got
-			w, done := s.w, 0
+			path := strings.TrimSpace(v["path"])
+			// the file is opened and parsed in the job, off the UI loop; a failure or a cancel still
+			// refreshes the list and says how far it got
+			w, total, written := s.w, 0, 0
+			refresh := func() { s.hist, _ = w.a.d.Hist.List(w.conn.Name, "", 500) }
 			return w.job("import history", func(ctx context.Context, _ db.Session, report func(func() tea.Cmd)) error {
+				defer func() { report(func() tea.Cmd { refresh(); return nil }) }()
+				f, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				es, err := store.ImportHistory(f)
+				if err != nil {
+					return err
+				}
+				total = len(es)
 				for lo := 0; lo < len(es); lo += 500 {
 					if err := ctx.Err(); err != nil {
-						return fmt.Errorf("stopped after %d of %d entries: %w", done, len(es), err)
+						return fmt.Errorf("stopped after %d of %d entries: %w", written, total, err)
 					}
-					hi := min(lo+500, len(es))
-					if err := w.a.d.Hist.AppendAll(w.conn.Name, es[lo:hi]); err != nil {
-						return fmt.Errorf("imported %d of %d entries, then: %w", done, len(es), err)
+					n, err := w.a.d.Hist.AppendAll(w.conn.Name, es[lo:min(lo+500, len(es))])
+					written += n
+					if err != nil {
+						return fmt.Errorf("imported %d of %d entries, then: %w", written, total, err)
 					}
-					done = hi
-					n := done
-					report(func() tea.Cmd { return w.a.say("importing history… %d of %d", n, len(es)) })
+					wr := written
+					report(func() tea.Cmd {
+						return w.a.say("importing history… %d of %d read, %d new", min(lo+500, total), total, wr)
+					})
 				}
 				return nil
 			}, func() (string, tea.Cmd) {
-				s.hist, _ = w.a.d.Hist.List(w.conn.Name, "", 500)
-				return "imported " + plural(len(es), "entry"), nil
+				refresh()
+				return "imported " + plural(written, "new entry") + fmt.Sprintf(" (%d in the file)", total), nil
 			})
 		}))
 	}
