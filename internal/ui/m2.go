@@ -252,9 +252,21 @@ func (w *Workspace) exportAction() tea.Cmd {
 	return nil
 }
 
+// expandPath lets the File field hold a pattern: {connection} {database} {table} {tag} {date} {time} in the
+// file name part are expanded (the folder is kept as typed).
+func (w *Workspace) expandPath(path, table string) string {
+	if !strings.Contains(path, "{") {
+		return path
+	}
+	dir, base := filepath.Split(path)
+	ext := filepath.Ext(base)
+	return dir + export.Filename(strings.TrimSuffix(base, ext), w.exportVars(table)) + ext
+}
+
 // runExport writes a whole table (ref set, streamed with the filters) or a result to path.
 func (w *Workspace) runExport(path string, o export.Options, ref *db.ObjRef, filters db.FilterSet, res *db.Result) tea.Cmd {
 	var rows int64
+	w.jobFile = path
 	return w.job("export "+filepath.Base(path), func(ctx context.Context, sess db.Session, report func(func() tea.Cmd)) error {
 		if o.Structure && ref != nil {
 			ddl, err := sess.DDL(ctx, *ref)
