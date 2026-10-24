@@ -472,7 +472,11 @@ func (s *session) run(ctx context.Context, sql string, args ...any) (uint64, err
 }
 
 // useRe matches USE <db>; it must switch the session, not one pooled connection.
-var useRe = regexp.MustCompile("(?is)^\\s*use\\s+(?:`([^`]+)`|\"([^\"]+)\"|([^\\s;`\"]+))\\s*;?\\s*$")
+var useRe = regexp.MustCompile("(?is)^" + chWS + "use" + chWS1 + "(?:`([^`]+)`|\"([^\"]+)\"|([^\\s;`\"/-][^\\s;`\"/]*))" + chWS + ";?" + chWS + "$")
+
+// chWS is whitespace or comments, so "-- note\nUSE db" still switches the session.
+const chWS = `(?:\s|--[^\n]*(?:\n|$)|/\*.*?\*/)*`
+const chWS1 = `(?:\s|--[^\n]*(?:\n|$)|/\*.*?\*/)+`
 
 func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result, error) {
 	start := time.Now()

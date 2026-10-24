@@ -355,3 +355,10 @@ func TestRenderTypes(t *testing.T) {
 		t.Errorf("%+v %+v", r.Columns, got)
 	}
 }
+
+func TestProjectColumns(t *testing.T) {
+	r := project(render([]bson.D{{{Key: "_id", Value: 1}, {Key: "a", Value: "x"}, {Key: "b", Value: "y"}}}, nil, nil), []string{"b"})
+	if len(r.Columns) != 1 || r.Columns[0].Name != "b" || len(r.Rows[0]) != 1 || r.Rows[0][0] != "y" {
+		t.Errorf("project = %+v", r)
+	}
+}

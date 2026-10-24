@@ -69,20 +69,47 @@ type readPlan struct {
 	forward bool
 }
 
+// scanOutside calls at(i) for each byte of v outside single/double quotes; a true return stops the scan at i.
+func scanOutside(v string, at func(i int) bool) int {
+	var q byte
+	for i := 0; i < len(v); i++ {
+		switch c := v[i]; {
+		case q != 0:
+			if c == q {
+				q = 0
+			}
+		case c == '\'' || c == '"':
+			q = c
+		case at(i):
+			return i
+		}
+	}
+	return -1
+}
+
 func splitList(v string) []string {
 	var out []string
-	for _, p := range strings.Split(v, ",") {
+	start := 0
+	add := func(p string) {
 		p = strings.TrimSpace(p)
 		if len(p) >= 2 && (p[0] == '\'' || p[0] == '"') && p[len(p)-1] == p[0] {
 			p = p[1 : len(p)-1]
 		}
 		out = append(out, p)
 	}
+	scanOutside(v, func(i int) bool {
+		if v[i] == ',' {
+			add(v[start:i])
+			start = i + 1
+		}
+		return false
+	})
+	add(v[start:])
 	return out
 }
 
 func splitBetween(v string) (string, string, error) {
-	i := strings.Index(strings.ToUpper(v), " AND ")
+	i := scanOutside(v, func(i int) bool { return i+5 <= len(v) && strings.EqualFold(v[i:i+5], " AND ") })
 	if i < 0 {
 		return "", "", fmt.Errorf("BETWEEN needs two values: low AND high")
 	}
@@ -104,6 +131,8 @@ func filterValue(typ, text, op string) (types.AttributeValue, error) {
 	}
 	switch typ {
 	case "S", "N", "B", "BOOL":
+	case "SS", "NS", "BS", "L", "M": // a guessed scalar would never match a set, list or map
+		return nil, fmt.Errorf("%s columns only support Contains, Not contains, IS NULL and IS NOT NULL filters", typ)
 	default:
 		typ = ""
 	}

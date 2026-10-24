@@ -345,6 +345,11 @@ func (sh *shell) dispatch(dbn, coll, op string, a argv) (any, string, error) {
 			return nil, "", err
 		}
 		out, err := sh.s.runCmd(ctx, dbn, cmd)
+		if id, _ := lookup(out, "cursor.id"); toInt(id) != 0 { // the raw reply is shown as is: do not leave its cursor open
+			ns, _ := lookup(out, "cursor.ns")
+			cdb, coll, _ := strings.Cut(fmt.Sprint(ns), ".")
+			_ = cl.Database(cdb).RunCommand(context.WithoutCancel(ctx), bson.D{{Key: "killCursors", Value: coll}, {Key: "cursors", Value: bson.A{toInt(id)}}}).Err()
+		}
 		return out, "", err
 	case "findOne":
 		f, err := a.doc(0)

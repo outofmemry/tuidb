@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"tuidb/internal/config"
 	"tuidb/internal/db"
 )
@@ -160,12 +162,15 @@ func TestFilterAndSort(t *testing.T) {
 
 func TestPlanChanges(t *testing.T) {
 	types := map[string]string{"s": "string", "h": "hash", "l": "list", "st": "set", "z": "zset", "x": "stream", "new": "none"}
-	reads := map[string]string{"HGET h old": "val", "ZSCORE z a": "7", "LINDEX l 1": "second"}
+	reads := map[string]string{"HGET h old": "val", "HEXISTS h new": "0", "HEXISTS h taken": "1", "ZSCORE z a": "7", "ZSCORE z taken": "1", "LINDEX l 1": "second"}
 	lk := lookup{
 		typ: func(k string) (string, error) { return types[k], nil },
 		do: func(a ...string) (string, error) {
 			if v, ok := reads[strings.Join(a, " ")]; ok {
 				return v, nil
+			}
+			if a[0] == "ZSCORE" {
+				return "", goredis.Nil
 			}
 			return "", errors.New("nil")
 		},
@@ -224,6 +229,8 @@ func TestPlanChanges(t *testing.T) {
 		{Kind: db.Update, ObjRef: ref("x"), Key: kv("id", "1"), Set: kv("fields", "{}")},
 		{Kind: db.Update, ObjRef: ref("l"), Key: kv("index", "1"), Set: kv("index", "2")},
 		{Kind: db.Update, ObjRef: ref("h"), Key: kv("field", "f")},
+		{Kind: db.Update, ObjRef: ref("h"), Key: kv("field", "old"), Set: kv("field", "taken")},
+		{Kind: db.Update, ObjRef: ref("z"), Key: kv("member", "a"), Set: kv("member", "taken")},
 	} {
 		if _, err := planChanges(lk, []db.Change{c}); err == nil {
 			t.Errorf("%+v should fail", c)

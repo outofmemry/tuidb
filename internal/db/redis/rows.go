@@ -201,15 +201,40 @@ func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 		return nil, err
 	}
 	res := &db.Result{Rows: rows, HasRows: true, Truncated: capped}
+	for _, r := range rows {
+		res.Docs = append(res.Docs, rowDoc(typ, names, r))
+	}
+	if len(q.Columns) > 0 { // project after the fact: Docs stay whole for identity
+		var keep []int
+		for _, w := range q.Columns {
+			for i, n := range names {
+				if n == w {
+					keep = append(keep, i)
+				}
+			}
+		}
+		if len(keep) > 0 {
+			shown := make([]string, len(keep))
+			for j, i := range keep {
+				shown[j] = names[i]
+			}
+			for r, row := range rows {
+				out := make([]any, len(keep))
+				for j, i := range keep {
+					out[j] = row[i]
+				}
+				rows[r] = out
+			}
+			res.Rows = rows
+			names = shown
+		}
+	}
 	for _, n := range names {
 		t := colTypes[n]
 		if t == "" {
 			t = "string"
 		}
 		res.Columns = append(res.Columns, db.ResultColumn{Name: n, Type: t})
-	}
-	for _, r := range rows {
-		res.Docs = append(res.Docs, rowDoc(typ, names, r))
 	}
 	return res, nil
 }

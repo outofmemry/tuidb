@@ -539,7 +539,7 @@ func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 	if err := cur.All(ctx, &docs); err != nil {
 		return nil, fmt.Errorf("find %s: %w", q.Name, err)
 	}
-	return render(docs, ci.names, ci.types), nil
+	return project(render(docs, ci.names, ci.types), q.Columns), nil
 }
 
 func (s *session) Count(ctx context.Context, q db.RowQuery, estimate bool) (db.Count, error) {

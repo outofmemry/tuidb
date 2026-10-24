@@ -178,6 +178,11 @@ func planChanges(lk lookup, changes []db.Change) ([]db.Statement, error) {
 						add("HSET", key, nf, v)
 						return nil
 					}
+					if e, err := lk.do("HEXISTS", key, nf); err != nil {
+						return fmt.Errorf("check field %q: %w", nf, err)
+					} else if e == "1" {
+						return fmt.Errorf("field %q already exists", nf)
+					}
 					if !hasV { // renaming a field keeps its value
 						if v, err = lk.do("HGET", key, old); err != nil {
 							return fmt.Errorf("read value of field %q: %w", old, err)
@@ -291,6 +296,11 @@ func planChanges(lk lookup, changes []db.Change) ([]db.Statement, error) {
 						}
 						add("ZADD", key, score, m)
 						return nil
+					}
+					if _, err := lk.do("ZSCORE", key, m); err == nil {
+						return fmt.Errorf("member %q already exists", m)
+					} else if !errors.Is(err, goredis.Nil) {
+						return fmt.Errorf("check member %q: %w", m, err)
 					}
 					if !hasS {
 						if score, err = lk.do("ZSCORE", key, old); err != nil {

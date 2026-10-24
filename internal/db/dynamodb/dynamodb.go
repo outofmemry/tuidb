@@ -223,7 +223,7 @@ func (drv) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (db.
 		cfg.Region = "us-east-1" // a custom endpoint such as DynamoDB Local does not care
 	}
 	if _, err := cfg.Credentials.Retrieve(ctx); err != nil {
-		if endpoint == "" {
+		if !isLocalEndpoint(endpoint) {
 			return nil, fmt.Errorf("no AWS credentials: give an access key and secret, or configure the default chain (AWS_ACCESS_KEY_ID, ~/.aws, SSO): %w", err)
 		}
 		cfg.Credentials = credentials.NewStaticCredentialsProvider("local", "local", "") // DynamoDB Local accepts anything
@@ -243,6 +243,15 @@ func (drv) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (db.
 		}
 	}
 	return s, nil
+}
+
+func isLocalEndpoint(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	return h == "localhost" || h == "127.0.0.1" || h == "::1" || strings.HasSuffix(h, ".localhost")
 }
 
 func (s *session) newClient(region string) *dynamodb.Client {

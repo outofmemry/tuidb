@@ -424,9 +424,12 @@ func (s *session) createScript(ctx context.Context, key string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	rows, err := s.fetch(ctx, key, typ, 0, 0)
+	rows, capped, err := s.loadAll(ctx, key, typ)
 	if err != nil {
 		return "", err
+	}
+	if capped {
+		return "", fmt.Errorf("%q has more than %d elements: too large to script", key, maxLoad)
 	}
 	var lines []string
 	add := func(args ...string) { lines = append(lines, formatCommand(args...)) }

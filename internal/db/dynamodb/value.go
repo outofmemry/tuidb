@@ -193,7 +193,10 @@ func fromJSON(v any) (types.AttributeValue, error) {
 			for k, e := range x {
 				switch k {
 				case "$binary":
-					s, _ := e.(string)
+					s, ok := e.(string)
+					if !ok {
+						return nil, errors.New("$binary needs a base64 string")
+					}
 					b, err := base64.StdEncoding.DecodeString(s)
 					if err != nil {
 						return nil, fmt.Errorf("$binary: %w", err)

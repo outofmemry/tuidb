@@ -699,3 +699,25 @@ func TestPlanAdminErrors(t *testing.T) {
 		t.Errorf("clone does not parse back: %+v %v", a, err)
 	}
 }
+
+func TestFilterQuotingAndTypes(t *testing.T) {
+	if got := splitList(`'x,y', z, "a,b"`); len(got) != 3 || got[0] != "x,y" || got[1] != "z" || got[2] != "a,b" {
+		t.Errorf("splitList = %q", got)
+	}
+	if lo, hi, err := splitBetween(`'A AND B' and 'Z'`); err != nil || lo != "'A AND B'" || hi != "'Z'" {
+		t.Errorf("splitBetween = %q %q %v", lo, hi, err)
+	}
+	for _, op := range []string{"IN", "Has prefix", "="} {
+		if _, err := buildRead(meta(), db.FilterSet{Filters: []db.Filter{filt("tags", op, "p")}}, nil, nil); err == nil {
+			t.Errorf("%s on an SS column should be rejected", op)
+		}
+	}
+	if _, err := coerce(map[string]any{"$binary": 123.0}, "", "c"); err == nil {
+		t.Error("$binary with a number should be an error")
+	}
+	for u, want := range map[string]bool{"http://localhost:8000": true, "http://127.0.0.1:58000": true, "https://vpce-1.dynamodb.us-east-1.vpce.amazonaws.com": false, "": false} {
+		if isLocalEndpoint(u) != want {
+			t.Errorf("isLocalEndpoint(%q) != %v", u, want)
+		}
+	}
+}

@@ -307,3 +307,34 @@ func render(docs []bson.D, known []string, ktypes map[string]string) *db.Result 
 	}
 	return res
 }
+
+// project keeps only the wanted columns of res (Docs stay whole); unknown names are ignored.
+func project(res *db.Result, want []string) *db.Result {
+	if len(want) == 0 {
+		return res
+	}
+	var keep []int
+	for _, w := range want {
+		for i, c := range res.Columns {
+			if c.Name == w {
+				keep = append(keep, i)
+			}
+		}
+	}
+	if len(keep) == 0 {
+		return res
+	}
+	cols := make([]db.ResultColumn, len(keep))
+	for j, i := range keep {
+		cols[j] = res.Columns[i]
+	}
+	for r, row := range res.Rows {
+		out := make([]any, len(keep))
+		for j, i := range keep {
+			out[j] = row[i]
+		}
+		res.Rows[r] = out
+	}
+	res.Columns = cols
+	return res
+}
