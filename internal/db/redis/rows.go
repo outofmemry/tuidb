@@ -92,7 +92,8 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 			rows = append(rows, []any{cell(str(z.Member)), z.Score})
 		}
 	case "stream":
-		from, pos := s.streamFrom(key, start)
+		sig := s.streamSig(ctx, key)
+		from, pos := s.streamFrom(key, start, sig)
 		for pos < start { // skip to start in chunks without keeping them
 			ms, err := cl.XRangeN(ctx, key, from, "+", int64(min(start-pos, 1000))).Result()
 			if err != nil {
@@ -112,7 +113,7 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 			rows = append(rows, []any{m.ID, string(b)})
 		}
 		if len(ms) > 0 {
-			s.markStream(key, streamMark{start, from}, streamMark{start + len(ms), "(" + ms[len(ms)-1].ID})
+			s.markStream(key, streamMark{start, from, sig}, streamMark{start + len(ms), "(" + ms[len(ms)-1].ID, sig})
 		}
 	default:
 		return nil, fmt.Errorf("unsupported redis type %q", typ)
@@ -123,21 +124,33 @@ func (s *session) fetch(ctx context.Context, key, typ string, start, n int) ([][
 	return rows, nil
 }
 
-// streamMark says the stream entries from offset on are read by XRANGE starting at from.
+// streamMark says the stream entries from offset on are read by XRANGE starting at from. sig is
+// the stream's shape when the mark was taken: a mark whose sig differs is stale and ignored.
 type streamMark struct {
 	offset int
 	from   string
+	sig    string
 }
 
-// streamFrom returns the closest remembered XRANGE start at or before offset.
-// shortcut: marks assume entries before them are not deleted (XDEL/XTRIM shift offsets); a
-// reload from offset 0 resets them.
-func (s *session) streamFrom(key string, offset int) (string, int) {
+// streamSig changes when entries before a mark may have gone: XTRIM moves the first entry ID, XDEL
+// raises max-deleted-entry-id (Redis 7+).
+// shortcut: Redis 6 has no max-deleted-entry-id, so an XDEL in the middle goes unnoticed there;
+// a reload from offset 0 resets the marks.
+func (s *session) streamSig(ctx context.Context, key string) string {
+	i, err := s.c().XInfoStream(ctx, key).Result()
+	if err != nil {
+		return ""
+	}
+	return i.FirstEntry.ID + "|" + i.MaxDeletedEntryID
+}
+
+// streamFrom returns the closest remembered XRANGE start at or before offset that is still valid.
+func (s *session) streamFrom(key string, offset int, sig string) (string, int) {
 	from, pos := "-", 0
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, m := range s.marks[key] {
-		if m.from != "" && m.offset <= offset && m.offset > pos {
+		if m.from != "" && m.sig == sig && m.offset <= offset && m.offset > pos {
 			from, pos = m.from, m.offset
 		}
 	}
