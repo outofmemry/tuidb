@@ -143,6 +143,20 @@ func (w *Workspace) splitRight() tea.Cmd {
 	return nil
 }
 
+// closePane closes the focused split pane: its tabs join the other group (no tab is closed).
+func (w *Workspace) closePane() tea.Cmd {
+	m := &w.m3
+	if !m.split {
+		return w.a.say("there is one pane: nothing to close")
+	}
+	if o := w.indexByID(m.otherID); o >= 0 { // the other pane's active tab stays the active one
+		w.cur = o
+	}
+	m.split, m.grp, m.pane, m.otherID = false, nil, 0, -1
+	w.focusSB = false
+	return nil
+}
+
 func (w *Workspace) cyclePane() tea.Cmd {
 	m := &w.m3
 	o := w.indexByID(m.otherID)
