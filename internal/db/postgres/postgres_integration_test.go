@@ -583,3 +583,30 @@ func TestIntegrationEstimateZeroReltuples(t *testing.T) {
 		t.Errorf("count %+v", n)
 	}
 }
+
+func TestIntegrationUsers(t *testing.T) {
+	ua, ok := openTest(t).(db.UserAdmin)
+	if !ok {
+		t.Fatal("no UserAdmin")
+	}
+	us, err := ua.Users(context.Background())
+	if err != nil || len(us) == 0 {
+		t.Fatalf("users %v %v", us, err)
+	}
+}
+
+// A pooled connection the server dropped must not fail the first query after it.
+func TestIntegrationRetryAfterDroppedConnection(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if _, err := s.Exec(ctx, "SELECT 1", 10); err != nil { // leaves an idle pooled connection
+		t.Fatal(err)
+	}
+	killer := openTest(t)
+	if _, err := killer.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database()", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Exec(ctx, "SELECT 2", 10); err != nil {
+		t.Errorf("first query after the drop: %v", err)
+	}
+}
