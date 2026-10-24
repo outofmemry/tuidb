@@ -67,7 +67,14 @@ func NewApp(d *Deps) *App {
 		d.Connect = DefaultConnect
 	}
 	copyCSV, autoPrettyJSON = d.Cfg.CSV, d.Cfg.Table.AutoPrettyJSON
+	var pluginConflicts []string
+	if pb := pluginBindings(); len(pb) > 0 { // M13.6: plugin shortcuts are Global bindings "plugin:<name>"
+		if km, c, err := pluginBindingsChecked(d.Cfg); err == nil {
+			d.Keys, pluginConflicts = km, c
+		}
+	}
 	a := &App{d: d, th: NewTheme(d.Cfg.Theme), machine: keymap.Machine{Map: d.Keys}}
+	a.logPluginConflicts(pluginConflicts)
 	a.mcpUI = make(chan func() tea.Cmd) // also carries prompts from connect goroutines
 	db.AskPassphrase = func(keyPath string) (string, error) { return a.askSecret("SSH key passphrase", keyPath) }
 	askSecret = func(c config.Connection) (string, error) { return a.askSecret("Password", c.Name) }
