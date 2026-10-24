@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -13,7 +14,11 @@ import (
 	"tuidb/internal/ui"
 )
 
-const maxCachedResults = 50
+const (
+	maxCachedResults = 50
+	maxSessions      = 32
+	idleSessionTTL   = time.Hour
+)
 
 // cached is a result the browser may edit: the original driver values stay on the server so
 // bytes, times and decimals round-trip without a JSON type system.
@@ -30,8 +35,13 @@ type session struct {
 	level safemode.Level
 	srv   *Server
 	stop  chan struct{}
+	once  sync.Once      // close runs once
+	live  sync.WaitGroup // in-flight handlers; close waits for them
 
 	mu       sync.Mutex
+	lastUsed time.Time
+	gen      int               // bumped whenever colCache is cleared, so a stale fetch is not stored
+	planSrc  map[string]string // plan id -> result id it was planned from
 	results  map[string]*cached
 	order    []string
 	plans    map[string][]db.Statement
@@ -63,8 +73,14 @@ func (s *Server) newSession(ctx context.Context, c config.Connection) (*session,
 	ss := &session{
 		id: randID(8), conn: c, o: o, level: lvl, srv: s, stop: make(chan struct{}),
 		results: map[string]*cached{}, plans: map[string][]db.Statement{}, colCache: map[db.ObjRef][]db.Column{},
+		planSrc: map[string]string{}, lastUsed: time.Now(),
 	}
 	s.mu.Lock()
+	if len(s.sessions) >= maxSessions {
+		s.mu.Unlock()
+		o.Close()
+		return nil, fmt.Errorf("too many open sessions (%d); disconnect one first", maxSessions)
+	}
 	s.sessions[ss.id] = ss
 	s.mu.Unlock()
 	if s.o.Cfg.General.KeepAlive {
@@ -88,13 +104,50 @@ func (ss *session) keepAlive() {
 	}
 }
 
+// close is idempotent. It waits (bounded) for in-flight handlers so they do not lose the pool.
 func (ss *session) close() {
-	select {
-	case <-ss.stop:
-	default:
+	ss.once.Do(func() {
 		close(ss.stop)
+		done := make(chan struct{})
+		go func() { ss.live.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+		}
+		ss.o.Close()
+	})
+}
+
+// reapIdle closes sessions unused for ttl, so reloaded tabs do not leak pools forever.
+func (s *Server) reapIdle(ctx context.Context, ttl time.Duration) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.reapOnce(ttl)
+		}
 	}
-	ss.o.Close()
+}
+
+func (s *Server) reapOnce(ttl time.Duration) {
+	var old []*session
+	s.mu.Lock()
+	for id, ss := range s.sessions {
+		ss.mu.Lock()
+		idle := time.Since(ss.lastUsed) > ttl
+		ss.mu.Unlock()
+		if idle {
+			delete(s.sessions, id)
+			old = append(old, ss)
+		}
+	}
+	s.mu.Unlock()
+	for _, ss := range old {
+		go ss.close()
+	}
 }
 
 func (s *Server) closeAll() {
@@ -113,10 +166,17 @@ func (s *Server) withSession(h sessHandler) handler {
 	return func(r *http.Request) (any, error) {
 		s.mu.Lock()
 		ss := s.sessions[r.PathValue("id")]
+		if ss != nil {
+			ss.live.Add(1) // under s.mu: close removes the entry first, then waits
+		}
 		s.mu.Unlock()
 		if ss == nil {
 			return nil, &apiErr{Code: http.StatusNotFound, Msg: "no such session (it was closed or the server restarted)"}
 		}
+		defer ss.live.Done()
+		ss.mu.Lock()
+		ss.lastUsed = time.Now()
+		ss.mu.Unlock()
 		return h(ss, r)
 	}
 }
@@ -164,6 +224,7 @@ func (ss *session) result(id string) (*cached, error) {
 func (ss *session) columns(ctx context.Context, ref db.ObjRef) ([]db.Column, error) {
 	ss.mu.Lock()
 	cols, ok := ss.colCache[ref]
+	gen := ss.gen
 	ss.mu.Unlock()
 	if ok {
 		return cols, nil
@@ -187,7 +248,9 @@ func (ss *session) columns(ctx context.Context, ref db.ObjRef) ([]db.Column, err
 		}
 	}
 	ss.mu.Lock()
-	ss.colCache[ref] = cols
+	if ss.gen == gen { // a cache reset mid-fetch means these may belong to the old database
+		ss.colCache[ref] = cols
+	}
 	ss.mu.Unlock()
 	return cols, nil
 }
@@ -195,8 +258,16 @@ func (ss *session) columns(ctx context.Context, ref db.ObjRef) ([]db.Column, err
 func (ss *session) resetCaches() {
 	ss.mu.Lock()
 	ss.results, ss.order = map[string]*cached{}, nil
-	ss.plans = map[string][]db.Statement{}
+	ss.plans, ss.planSrc = map[string][]db.Statement{}, map[string]string{}
 	ss.colCache = map[db.ObjRef][]db.Column{}
+	ss.gen++
+	ss.mu.Unlock()
+}
+
+func (ss *session) clearColCache() {
+	ss.mu.Lock()
+	ss.colCache = map[db.ObjRef][]db.Column{}
+	ss.gen++
 	ss.mu.Unlock()
 }
 
@@ -217,6 +288,9 @@ func (ss *session) gate(stmts []db.Statement) gateInfo {
 		}
 	}
 	c, p := ss.level.Gate(readOnly)
+	if p && ss.o.Password == "" { // nothing to verify: fall back to confirmation, like check and the TUI
+		c, p = true, false
+	}
 	return gateInfo{Confirm: c, Password: p}
 }
 

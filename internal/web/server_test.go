@@ -152,7 +152,7 @@ func TestAuth(t *testing.T) {
 func TestRowsFormatsCells(t *testing.T) {
 	e := newEnv(t, "")
 	id := e.open()
-	out := e.ok("POST", "/api/sessions/"+id+"/rows", map[string]any{"ref": map[string]any{"name": "t"}})
+	out := e.ok("POST", "/api/sessions/"+id+"/rows", map[string]any{"ref": map[string]any{"name": "t", "kind": "table"}})
 	cells := out["cells"].([]any)
 	if cells[1].([]any)[1] != nil {
 		t.Fatalf("SQL NULL must be JSON null, got %v", cells[1])
@@ -172,7 +172,7 @@ func TestRowsFormatsCells(t *testing.T) {
 func TestPlanApplyAndGate(t *testing.T) {
 	e := newEnv(t, "safe2")
 	id := e.open()
-	rows := e.ok("POST", "/api/sessions/"+id+"/rows", map[string]any{"ref": map[string]any{"name": "t"}})
+	rows := e.ok("POST", "/api/sessions/"+id+"/rows", map[string]any{"ref": map[string]any{"name": "t", "kind": "table"}})
 	plan := e.ok("POST", "/api/sessions/"+id+"/plan", map[string]any{
 		"resultId": rows["resultId"],
 		"updates":  []any{map[string]any{"row": 0, "set": map[string]any{"name": map[string]any{"$": "default"}}}},
@@ -208,17 +208,75 @@ func TestPlanApplyAndGate(t *testing.T) {
 	}
 }
 
-func TestNoPKKeysOnEveryColumn(t *testing.T) {
+func TestNoPKRejectsUpdateDeleteButAllowsInsert(t *testing.T) {
 	c := &cached{
 		ref: db.ObjRef{Name: "t"}, cols: []db.Column{{Name: "a"}, {Name: "b"}},
 		res: &db.Result{Columns: []db.ResultColumn{{Name: "a"}, {Name: "b"}}, Rows: [][]any{{"x", nil}}},
 	}
-	ch, err := buildChanges(c, editReq{Deletes: []int{0}})
-	if err != nil || len(ch[0].Key) != 2 || ch[0].Key[1].Val != nil {
-		t.Fatalf("no-PK delete should key on all original values: %+v %v", ch, err)
+	if _, err := buildChanges(c, editReq{Deletes: []int{0}}); err == nil {
+		t.Fatal("delete without a PK accepted")
 	}
-	if _, err := buildChanges(c, editReq{Deletes: []int{5}}); err == nil {
-		t.Fatal("out-of-range row accepted")
+	if _, err := buildChanges(c, editReq{Inserts: []map[string]Val{{"a": {V: "1"}}}}); err != nil {
+		t.Fatalf("insert needs no key: %v", err)
+	}
+}
+
+func TestHiddenPKOnlyBlocksKeyedChanges(t *testing.T) {
+	c := &cached{
+		ref: db.ObjRef{Name: "t"}, cols: []db.Column{{Name: "id", PK: true}, {Name: "n"}},
+		res: &db.Result{Columns: []db.ResultColumn{{Name: "n"}}, Rows: [][]any{{"x"}}},
+	}
+	if _, err := buildChanges(c, editReq{Inserts: []map[string]Val{{"n": {V: "1"}}}}); err != nil {
+		t.Fatalf("insert-only plan with hidden PK rejected: %v", err)
+	}
+	if _, err := buildChanges(c, editReq{Deletes: []int{0}}); err == nil {
+		t.Fatal("delete with hidden PK accepted")
+	}
+}
+
+func TestUpdateRowRequiredAndKeyVerified(t *testing.T) {
+	e := newEnv(t, "")
+	id := e.open()
+	rows := e.ok("POST", "/api/sessions/"+id+"/rows", map[string]any{"ref": map[string]any{"name": "t", "kind": "table"}})
+	plan := func(body map[string]any) int {
+		body["resultId"] = rows["resultId"]
+		code, _ := e.call("POST", "/api/sessions/"+id+"/plan", body, "tok")
+		return code
+	}
+	set := map[string]any{"name": "z"}
+	if code := plan(map[string]any{"updates": []any{map[string]any{"set": set}}}); code != 400 {
+		t.Fatalf("update without row accepted: %d", code)
+	}
+	// the client saw id=2 at row 0, but the snapshot now has id=1 there
+	if code := plan(map[string]any{"updates": []any{map[string]any{"row": 0, "key": map[string]any{"id": "2"}, "set": set}}}); code != 400 {
+		t.Fatalf("mismatched key accepted: %d", code)
+	}
+	if code := plan(map[string]any{"deletes": []any{0}, "deleteKeys": []any{map[string]any{"id": "2"}}}); code != 400 {
+		t.Fatalf("mismatched delete key accepted: %d", code)
+	}
+	if code := plan(map[string]any{"updates": []any{map[string]any{"row": 0, "key": map[string]any{"id": "1"}, "set": set}}}); code != 200 {
+		t.Fatalf("matching key rejected: %d", code)
+	}
+	if code := plan(map[string]any{"inserts": []any{map[string]any{"name": map[string]any{"$expr": "1); DROP TABLE t; --"}}}}); code != 400 {
+		t.Fatalf("arbitrary $expr accepted: %d", code)
+	}
+}
+
+func TestDeleteQueriesRootAndEmptyConnections(t *testing.T) {
+	e := newEnv(t, "")
+	for _, p := range []string{"/api/queries/", "/api/queries/a/..", "/api/queries/."} {
+		if code, _ := e.call("DELETE", p, nil, "tok"); code != 400 {
+			t.Fatalf("DELETE %s: got %d, want 400", p, code)
+		}
+	}
+	if code, _ := e.call("PUT", "/api/connections", nil, "tok"); code != 400 { // empty body
+		t.Fatalf("empty PUT accepted: %d", code)
+	}
+	req, _ := http.NewRequest("PUT", e.srv.URL+"/api/connections", strings.NewReader("null"))
+	req.Header.Set("Authorization", "Bearer tok")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != 400 {
+		t.Fatalf("null PUT accepted: %v %v", resp, err)
 	}
 }
 

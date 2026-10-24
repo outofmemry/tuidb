@@ -46,10 +46,14 @@ func (s *Server) getConns(r *http.Request) (any, error) {
 
 // putConns replaces the whole list, exactly like the TUI saves it.
 func (s *Server) putConns(r *http.Request) (any, error) {
-	var conns []config.Connection
-	if err := decode(r, &conns); err != nil {
+	var in *[]config.Connection
+	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
+	if in == nil { // empty body or null would otherwise wipe every saved connection
+		return nil, bad("a JSON array of connections is required (send [] to clear)")
+	}
+	conns := *in
 	names := map[string]bool{}
 	for _, c := range conns {
 		if err := c.Validate(); err != nil {
@@ -150,10 +154,15 @@ func (s *Server) openSession(r *http.Request) (any, error) {
 	return ss.info(), nil
 }
 
-func (s *Server) closeSession(ss *session, r *http.Request) (any, error) {
+// closeSession is not wrapped in withSession: close waits for in-flight handlers, which would include itself.
+func (s *Server) closeSession(r *http.Request) (any, error) {
 	s.mu.Lock()
-	delete(s.sessions, ss.id)
+	ss := s.sessions[r.PathValue("id")]
+	delete(s.sessions, r.PathValue("id"))
 	s.mu.Unlock()
+	if ss == nil {
+		return nil, &apiErr{Code: http.StatusNotFound, Msg: "no such session (it was closed or the server restarted)"}
+	}
 	ss.close()
 	return nil, nil
 }
@@ -303,8 +312,8 @@ func (s *Server) rows(ss *session, r *http.Request) (any, error) {
 	if req.Ref.Name == "" {
 		return nil, bad("ref.name is required")
 	}
-	if req.Limit <= 0 {
-		req.Limit = ss.rowLimit()
+	if rl := ss.rowLimit(); req.Limit <= 0 || (rl > 0 && req.Limit > rl) { // never above the configured limit
+		req.Limit = rl
 	}
 	ctx, cancel := ss.ctx(r)
 	defer cancel()
@@ -315,11 +324,21 @@ func (s *Server) rows(ss *session, r *http.Request) (any, error) {
 		return nil, bad("%v", err)
 	}
 	out := toJSON(res, cols)
-	if cerr == nil && res.HasRows {
+	// like the TUI: only plain tables with a primary key are editable (a key-less WHERE can hit many rows)
+	if cerr == nil && res.HasRows && req.Ref.Kind == db.KindTable && hasPK(cols) {
 		out.Editable = true
 		out.ResultID = ss.put(&cached{ref: req.Ref, cols: cols, res: res})
 	}
 	return out, nil
+}
+
+func hasPK(cols []db.Column) bool {
+	for _, c := range cols {
+		if c.PK {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) count(ss *session, r *http.Request) (any, error) {
@@ -401,9 +420,9 @@ func (s *Server) exec(ss *session, r *http.Request) (any, error) {
 			out = append(out, item)
 			break // stop at the first error, like the editor
 		}
-		item.resultJSON = toJSON(res, nil)
-		if res.HasRows {
-			item.ResultID = ss.put(&cached{res: res})
+		item.resultJSON = toJSON(res, nil) // not cached: exec results are never editable
+		if !db.IsReadOnly(dialect, st.Text) {
+			ss.clearColCache() // DDL may have changed table structure
 		}
 		out = append(out, item)
 		ss.record(st.Text, "editor", time.Since(start))
@@ -418,7 +437,11 @@ func (ss *session) record(sql, source string, dur time.Duration) {
 }
 
 func (s *Server) dropResult(ss *session, r *http.Request) (any, error) {
-	rid := r.PathValue("rid")
+	ss.dropResult(r.PathValue("rid"))
+	return nil, nil
+}
+
+func (ss *session) dropResult(rid string) {
 	ss.mu.Lock()
 	delete(ss.results, rid)
 	for i, id := range ss.order {
@@ -428,7 +451,6 @@ func (s *Server) dropResult(ss *session, r *http.Request) (any, error) {
 		}
 	}
 	ss.mu.Unlock()
-	return nil, nil
 }
 
 // ---- plan and apply -----------------------------------------------------------------
@@ -438,10 +460,13 @@ type stmtJSON struct {
 	ReadOnly bool   `json:"readOnly"`
 }
 
-func (ss *session) storePlan(stmts []db.Statement) (any, error) {
+func (ss *session) storePlan(stmts []db.Statement, resultID string) (any, error) {
 	id := randID(6)
 	ss.mu.Lock()
 	ss.plans[id] = stmts
+	if resultID != "" {
+		ss.planSrc[id] = resultID
+	}
 	ss.mu.Unlock()
 	list := make([]stmtJSON, len(stmts))
 	for i, st := range stmts {
@@ -470,7 +495,7 @@ func (s *Server) plan(ss *session, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, bad("%v", err)
 	}
-	return ss.storePlan(stmts)
+	return ss.storePlan(stmts, req.ResultID)
 }
 
 func (s *Server) planAdmin(ss *session, r *http.Request) (any, error) {
@@ -486,7 +511,7 @@ func (s *Server) planAdmin(ss *session, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, bad("%v", err)
 	}
-	return ss.storePlan(stmts)
+	return ss.storePlan(stmts, "")
 }
 
 // apply runs a stored plan after re-checking the gate. Only statements the server planned
@@ -500,28 +525,40 @@ func (s *Server) apply(ss *session, r *http.Request) (any, error) {
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	// lookup, the applying guard and consuming the plan are one critical section (a concurrent
+	// apply of the same plan must not slip in between); a failed gate puts the plan back.
 	ss.mu.Lock()
 	stmts, ok := ss.plans[req.PlanID]
-	ss.mu.Unlock()
 	if !ok {
+		ss.mu.Unlock()
 		return nil, bad("unknown or already applied plan; preview again")
 	}
-	if err := ss.check(ss.gate(stmts), req.Confirmed, req.Password); err != nil {
-		return nil, err
-	}
-	ss.mu.Lock()
 	if ss.applying {
 		ss.mu.Unlock()
 		return nil, &apiErr{Code: http.StatusConflict, Msg: "a change is still being sent; wait for it to finish"}
 	}
 	ss.applying = true
+	src := ss.planSrc[req.PlanID]
 	delete(ss.plans, req.PlanID)
+	delete(ss.planSrc, req.PlanID)
 	ss.mu.Unlock()
 	defer func() { ss.mu.Lock(); ss.applying = false; ss.mu.Unlock() }()
+	if err := ss.check(ss.gate(stmts), req.Confirmed, req.Password); err != nil {
+		ss.mu.Lock()
+		ss.plans[req.PlanID] = stmts
+		if src != "" {
+			ss.planSrc[req.PlanID] = src
+		}
+		ss.mu.Unlock()
+		return nil, err
+	}
 
 	start := time.Now()
-	// a commit must never be cut off half way: detach from the request's cancellation
-	if err := ss.o.Sess.Apply(context.WithoutCancel(r.Context()), stmts); err != nil {
+	// a commit must never be cut off half way by a client disconnect: detach from the request's
+	// cancellation, but bound it so a lock wait cannot wedge the session forever
+	actx, acancel := context.WithTimeout(context.WithoutCancel(r.Context()), applyTimeout)
+	defer acancel()
+	if err := ss.o.Sess.Apply(actx, stmts); err != nil {
 		return nil, &apiErr{Code: http.StatusBadRequest, Msg: err.Error(), Extra: map[string]any{
 			"partial": !ss.o.Sess.Caps().Transactions || hasDDL(stmts),
 		}}
@@ -530,11 +567,14 @@ func (s *Server) apply(ss *session, r *http.Request) (any, error) {
 	for _, st := range stmts {
 		ss.record(st.Shown(), "gui", dur/time.Duration(len(stmts)))
 	}
-	ss.mu.Lock()
-	ss.colCache = map[db.ObjRef][]db.Column{} // structure may have changed
-	ss.mu.Unlock()
+	ss.clearColCache() // structure may have changed
+	if src != "" {     // the snapshot is stale now; a retry must reload instead of re-planning old rows
+		ss.dropResult(src)
+	}
 	return map[string]any{"ok": true, "durationMs": dur.Milliseconds(), "statements": len(stmts)}, nil
 }
+
+const applyTimeout = 5 * time.Minute
 
 var ddlWords = []string{"CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME"}
 

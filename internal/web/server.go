@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"tuidb/internal/config"
@@ -106,15 +108,23 @@ func Run(o Options) error {
 		openBrowser(url)
 	}
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		<-ctx.Done()
 		sh, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		srv.Shutdown(sh)
+		if err := srv.Shutdown(sh); err != nil {
+			fmt.Fprintln(os.Stderr, "tuidb: shutdown:", err)
+		}
 	}()
+	go s.reapIdle(ctx, idleSessionTTL)
 	err = srv.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		<-drained // close pools only after in-flight handlers finished (or the drain expired)
+	}
 	s.closeAll()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
@@ -157,8 +167,27 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+// originOK checks Origin against the configured listen address, not the client-supplied Host
+// (DNS rebinding). On a loopback listener any localhost/127.0.0.1/[::1] port is accepted so the
+// Vite dev server, which proxies without rewriting Host, keeps working.
+func (s *Server) originOK(r *http.Request) bool {
+	o := r.Header.Get("Origin")
+	if o == "" {
+		return true
+	}
+	if s.o.Listen == "" || !loopback(s.o.Listen) {
+		return o == "http://"+r.Host // non-loopback (insecure) or unconfigured: nothing better to compare with
+	}
+	u, err := url.Parse(o)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	h := u.Hostname()
+	return u.Host == s.o.Listen || h == "localhost" || h == "127.0.0.1" || h == "::1"
+}
+
 func (s *Server) authorized(r *http.Request) bool {
-	if o := r.Header.Get("Origin"); o != "" && o != "http://"+r.Host {
+	if !s.originOK(r) || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
 		return false
 	}
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -221,7 +250,7 @@ func (s *Server) Handler() http.Handler {
 	// per session
 	sp := "/api/sessions/{id}"
 	m.HandleFunc("GET "+sp, s.api(s.withSession(func(ss *session, r *http.Request) (any, error) { return ss.info(), nil })))
-	m.HandleFunc("DELETE "+sp, s.api(s.withSession(s.closeSession)))
+	m.HandleFunc("DELETE "+sp, s.api(s.closeSession))
 	m.HandleFunc("POST "+sp+"/ping", s.api(s.withSession(s.ping)))
 	m.HandleFunc("GET "+sp+"/databases", s.api(s.withSession(s.databases)))
 	m.HandleFunc("POST "+sp+"/database", s.api(s.withSession(s.useDatabase)))
@@ -268,6 +297,10 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 			http.ServeFileFS(w, r, sub, name)
 			return
 		}
+	}
+	if strings.HasPrefix(name, "assets/") || path.Ext(name) != "" { // a stale hashed bundle must 404, not get HTML
+		http.NotFound(w, r)
+		return
 	}
 	if _, err := fs.Stat(sub, "index.html"); err != nil {
 		http.Error(w, "web app not built: run `make web` and rebuild", http.StatusServiceUnavailable)

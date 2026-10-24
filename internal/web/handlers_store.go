@@ -2,6 +2,8 @@ package web
 
 import (
 	"net/http"
+	"path"
+	"strings"
 
 	"tuidb/internal/store"
 )
@@ -57,11 +59,28 @@ func (s *Server) updateQuery(r *http.Request) (any, error) {
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
-	return nil, s.o.Queries.Update(r.PathValue("path"), req.SQL)
+	p, err := queryPath(r)
+	if err != nil {
+		return nil, err
+	}
+	return nil, s.o.Queries.Update(p, req.SQL)
 }
 
 func (s *Server) deleteQuery(r *http.Request) (any, error) {
-	return nil, s.o.Queries.Delete(r.PathValue("path"))
+	p, err := queryPath(r)
+	if err != nil {
+		return nil, err
+	}
+	return nil, s.o.Queries.Delete(p)
+}
+
+// queryPath rejects paths that clean to the store root ("", ".", "a/.."), which Delete would remove wholesale.
+func queryPath(r *http.Request) (string, error) {
+	p := r.PathValue("path")
+	if c := path.Clean(p); c == "." || c == ".." || strings.HasPrefix(c, "../") || strings.HasPrefix(c, "/") {
+		return "", bad("invalid query path %q", p)
+	}
+	return p, nil
 }
 
 func tableKey(r *http.Request) (string, error) {
