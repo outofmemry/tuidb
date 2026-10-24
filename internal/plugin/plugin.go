@@ -129,3 +129,16 @@ func (b *capBuf) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+// Bindings are the shortcuts of the installed plugins as Global keymap bindings (action "plugin:<name>"). The keys
+// are as written in the plugin file; the keymap parses them and reports the ones it cannot take.
+func Bindings() []keymap.Binding {
+	l, _ := List()
+	var out []keymap.Binding
+	for _, p := range l {
+		if p.Err == nil && p.Key != "" {
+			out = append(out, keymap.Binding{Action: "plugin:" + p.Name, Key: p.Key, Context: keymap.Global, Desc: "plugin: " + p.Name})
+		}
+	}
+	return out
+}
