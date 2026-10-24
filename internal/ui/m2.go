@@ -163,8 +163,9 @@ func (w *Workspace) exportAction() tea.Cmd {
 	optsOf := func(v map[string]string) export.Options {
 		f := export.Format(v["format"])
 		csv := cfg.CSV
+		nullAs := ""
 		if f == "csv" {
-			csv.NullAs = v["null_as"]
+			csv.NullAs, nullAs = v["null_as"], v["null_as"]
 		}
 		if v["line_break"] == "CRLF" {
 			csv.LineBreak = "\r\n"
@@ -172,6 +173,7 @@ func (w *Workspace) exportAction() tea.Cmd {
 			csv.LineBreak = "\n"
 		}
 		return export.Options{Format: f, CSV: csv, Columns: cols, Gzip: v["gzip"] == "true" && f != "xlsx", Table: name, Dialect: w.caps.Dialect,
+			NoHeader: f == "csv" && v["header"] == "false", NullAs: nullAs,
 			Structure: v["structure"] == "true" && f == "sql", Drop: v["drop"] == "true" && f == "sql"}
 	}
 	sql := func(v map[string]string) bool { return v["format"] == "sql" }
