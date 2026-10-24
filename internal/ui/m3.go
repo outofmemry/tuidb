@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -13,12 +12,12 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"webtuidb/internal/ai"
-	"webtuidb/internal/backup"
 	"webtuidb/internal/board"
 	"webtuidb/internal/db"
 	"webtuidb/internal/diagram"
 	"webtuidb/internal/keymap"
 	"webtuidb/internal/plugin"
+	"webtuidb/internal/store"
 )
 
 // m3State is the per-workspace state of the milestone-3 features.
@@ -38,9 +37,12 @@ type m3State struct {
 	chat     []ai.Message // the assistant conversation lives as long as the workspace
 	model    string       // model picked in the assistant for this session; "" = [ai] model
 	provider string       // [ai.providers.<name>] picked for the chat; "" = the default
+	curChat  *store.Chat  // the saved record of chat (nil until the first exchange)
 }
 
-func (m *m3State) reset() { *m = m3State{chat: m.chat, model: m.model, provider: m.provider} }
+func (m *m3State) reset() {
+	*m = m3State{chat: m.chat, model: m.model, provider: m.provider, curChat: m.curChat}
+}
 
 func (m *m3State) place(t tabber) {
 	if m.split {
