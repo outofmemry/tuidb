@@ -1,7 +1,9 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
