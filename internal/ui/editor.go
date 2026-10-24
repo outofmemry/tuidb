@@ -177,6 +177,22 @@ func (e *Editor) Offset() int {
 	return n + idx
 }
 
+// SelectBytes selects the byte range [a, b) of Text() (offsets as Split reports them).
+func (e *Editor) SelectBytes(a, b int) {
+	at := func(off int) pos {
+		for r, l := range e.lines {
+			if off <= len(l) {
+				return pos{row: r, col: utf8.RuneCountInString(l[:off])}
+			}
+			off -= len(l) + 1
+		}
+		last := len(e.lines) - 1
+		return pos{row: last, col: runeLen(e.lines[last])}
+	}
+	from := at(a)
+	e.anchor, e.cur = &from, at(b)
+}
+
 // Selection returns the selected text ("" when none).
 func (e *Editor) Selection() string {
 	if e.blk != nil {
@@ -202,6 +218,9 @@ func (e *Editor) HasSelection() bool {
 }
 
 func (e *Editor) selRange() (pos, pos, bool) {
+	if e.vim.on && e.vim.vmode != 0 {
+		return e.vimSel()
+	}
 	if e.anchor == nil || *e.anchor == e.cur {
 		return pos{}, pos{}, false
 	}
@@ -301,8 +320,8 @@ func (e *Editor) foldInfo() (hid map[int]bool, cnt map[int]int) {
 		return nil, nil
 	}
 	hid, cnt = map[int]bool{}, map[int]int{}
-	for i, s := range db.Split(e.Dialect, e.Text()) {
-		if !e.folds[i] {
+	for _, s := range e.stmts() {
+		if !e.folds[stmtKey(s)] {
 			continue
 		}
 		a, b := e.rowOf(s.Start), e.rowOf(max(s.Start, s.End-1))
