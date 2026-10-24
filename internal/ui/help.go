@@ -209,7 +209,7 @@ func (h *helpDlg) View(th Theme, maxW, maxH int) string {
 	// a fixed key column sized to the longest key, and a context column on the right
 	keyW, ctxW := 0, 0
 	for _, r := range h.rows {
-		keyW, ctxW = max(keyW, width(h.pre+" "+r.key)), max(ctxW, width(r.ctx))
+		keyW, ctxW = max(keyW, width(r.chord(h.pre))), max(ctxW, width(r.ctx))
 	}
 	keyW = min(keyW, 18)
 	// lay every row out, then window by lines so the blank lines between sections scroll too
@@ -231,7 +231,7 @@ func (h *helpDlg) View(th Theme, maxW, maxH int) string {
 		}
 		on := rowStyle(th, sel)
 		plain := on(lipgloss.NewStyle())
-		k := ansi.Truncate(h.pre+" "+r.key, keyW, "…")
+		k := ansi.Truncate(r.chord(h.pre), keyW, "…")
 		d := ansi.Truncate(r.desc, max(0, cw-2-(keyW+4)-ctxW-2), "…")
 		desc := plain.Render(d)
 		if _, ok := fuzzy(q, r.desc); ok && q != "" {
