@@ -566,6 +566,9 @@ func (q *quickLookDlg) View(th Theme, maxW, maxH int) string {
 			body = append(body, highlight(th, q.lines[i], q.kinds[i]))
 		}
 		hint = "↑↓: scroll   " + hint
+		if q.a != nil && q.isBytes {
+			hint = "h/b/t: hex/base64/text   " + hint
+		}
 		if q.a != nil && q.rawBytes != nil {
 			hint = "v: encoding (" + q.enc + ")   " + hint
 		}
@@ -576,8 +579,15 @@ func (q *quickLookDlg) View(th Theme, maxW, maxH int) string {
 			hint = "s: save as…   " + hint
 		}
 		if q.tree != nil {
-			hint = "r: tree   " + hint
+			hint = "r: tree   m: " + map[bool]string{true: "pretty", false: "minify"}[q.mini] + "   " + hint
 		}
+	}
+	if q.info != "" {
+		head := []string{th.Dim.Render(q.info + "  ·  showing " + q.enc)}
+		if q.note != "" {
+			head = append(head, th.Dim.Render(q.note))
+		}
+		body = append(head, body...)
 	}
 	return box(th, q.title, body, hint, w)
 }
