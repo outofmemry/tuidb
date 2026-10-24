@@ -304,3 +304,83 @@ func TestSharedQueryReadNeedsSQLSuffix(t *testing.T) {
 		t.Fatal("a non-.sql file under a shared dir was read")
 	}
 }
+
+func TestChats(t *testing.T) {
+	c := &Chats{Dir: t.TempDir()}
+	ch := c.New("my conn")
+	long := strings.Repeat("é", 80)
+	ch.Messages = []ChatMessage{{Role: "user", Content: long, At: time.Now()}, {Role: "assistant", Content: "Use an INDEX", At: time.Now()}}
+	if err := c.Save("my conn", ch); err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(ch.Title)) != 60 {
+		t.Fatalf("title %d", len([]rune(ch.Title)))
+	}
+	ch2 := c.New("my conn")
+	ch2.Messages = []ChatMessage{{Role: "user", Content: "hello"}}
+	c.Save("my conn", ch2)
+	got, err := c.Load("my conn", ch.ID)
+	if err != nil || len(got.Messages) != 2 || got.Messages[1].Content != "Use an INDEX" {
+		t.Fatalf("%v %+v", err, got)
+	}
+	if l, _ := c.List("my conn"); len(l) != 2 || l[0].ID != ch2.ID || l[0].Count != 1 {
+		t.Fatalf("list %+v", l)
+	}
+	if s := c.Search("my conn", "index"); len(s) != 1 || s[0].ID != ch.ID {
+		t.Fatalf("search %+v", s)
+	}
+	if s := c.Search("my conn", "HELLO"); len(s) != 1 || s[0].ID != ch2.ID {
+		t.Fatalf("title search %+v", s)
+	}
+	os.WriteFile(filepath.Join(c.dir("my conn"), "bad.json"), []byte("{nope"), 0o600)
+	if l, _ := c.List("my conn"); len(l) != 2 {
+		t.Fatalf("bad file not skipped: %+v", l)
+	}
+	if _, err := c.Load("my conn", "../x"); err == nil {
+		t.Error("path id accepted")
+	}
+	if err := c.Delete("my conn", ch.ID); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := c.List("my conn"); len(l) != 1 {
+		t.Fatal(l)
+	}
+	if l, _ := c.List("other"); len(l) != 0 {
+		t.Fatal(l)
+	}
+}
+
+func TestStateLastConnectedAndDiagramColors(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.json")
+	s, _ := LoadState(p)
+	if err := s.TouchConnected("a"); err != nil {
+		t.Fatal(err)
+	}
+	s.SetDiagramColors("a", map[string]string{"public.t": "red"})
+	s2, _ := LoadState(p)
+	if s2.LastConnected()["a"].IsZero() || s2.DiagramColors("a")["public.t"] != "red" {
+		t.Fatal("not persisted")
+	}
+	s2.SetDiagramColors("a", nil)
+	if len(s2.DiagramColors("a")) != 0 {
+		t.Fatal("not cleared")
+	}
+}
+
+func TestRevealArgv(t *testing.T) {
+	if a := revealCmd("darwin", "/x/y.sql"); strings.Join(a, " ") != "open -R /x/y.sql" {
+		t.Error(a)
+	}
+	if a := revealCmd("linux", "/x/y.sql"); strings.Join(a, " ") != "xdg-open /x" {
+		t.Error(a)
+	}
+	if a := revealCmd("windows", `C:\y.sql`); a[1] != `/select,C:\y.sql` {
+		t.Error(a)
+	}
+	var got []string
+	revealRun = func(a []string) error { got = a; return nil }
+	defer func() { revealRun = func(a []string) error { return exec.Command(a[0], a[1:]...).Start() } }()
+	if Reveal("/x/y") != nil || len(got) == 0 || Reveal("") == nil {
+		t.Error("reveal")
+	}
+}
