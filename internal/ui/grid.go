@@ -308,6 +308,53 @@ func (g *Grid) SetCell(v any) bool {
 	return true
 }
 
+// MapColumn stages fn's result in the cursor column of every selected row (just the cursor row when nothing
+// is selected): one pending change per row, one undo step. fn returns false to leave a row alone.
+// Returns how many rows changed.
+func (g *Grid) MapColumn(fn func(old any) (any, bool)) int {
+	if !g.Editable || g.col >= len(g.Cols) {
+		return 0
+	}
+	type hit struct {
+		r int
+		v any
+	}
+	var hits []hit
+	for _, i := range g.selectedRows() {
+		if r := g.Rows[i]; r.State != rowDeleted {
+			if v, ok := fn(r.Cur[g.col]); ok {
+				hits = append(hits, hit{i, v})
+			}
+		}
+	}
+	if len(hits) == 0 {
+		return 0
+	}
+	g.snapshot()
+	for _, h := range hits {
+		r := g.own(h.r)
+		r.Cur[g.col] = h.v
+		if r.State == rowNew || !sameValue(h.v, r.Orig[g.col]) {
+			r.Dirty[g.col] = true
+		} else {
+			delete(r.Dirty, g.col)
+		}
+	}
+	return len(hits)
+}
+
+// SetColumn is MapColumn with one value for every selected row that does not already hold it (row detail multi-row edit).
+func (g *Grid) SetColumn(v any) int {
+	return g.MapColumn(func(old any) (any, bool) { return v, !sameValue(v, old) })
+}
+
+// MoveField moves the cursor column without touching the row selection (the row detail pane walks fields
+// while the rows it edits stay selected).
+func (g *Grid) MoveField(dc int) {
+	g.col = clamp(g.col+dc, 0, len(g.Cols)-1)
+	g.scroll()
+}
+
 func (g *Grid) StartEdit() bool {
 	r := g.cur()
 	if r == nil || !g.Editable || r.State == rowDeleted {
