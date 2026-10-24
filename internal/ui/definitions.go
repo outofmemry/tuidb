@@ -130,18 +130,143 @@ func (w *Workspace) handleDefinitions(msg tea.Msg) (tea.Cmd, bool) {
 		for i, t := range m.list {
 			items = append(items, pickItem{Label: t.Name, Detail: t.Timing + " " + t.Event, Value: i})
 		}
-		w.a.push(&pickerDlg{title: "Triggers on " + m.ref.Name, filter: true, items: items, hint: "Enter: edit as SQL   Esc: cancel",
+		w.a.push(&pickerDlg{title: "Triggers on " + m.ref.Name, filter: true, items: items, hint: "Enter: edit name / timing / event / body   Esc: cancel",
 			onPick: func(it pickItem, _ bool) tea.Cmd {
-				text, name := newTriggerSQL(w.caps.Dialect, m.ref), "new trigger"
+				tr := db.Trigger{Name: "my_trigger", Timing: "AFTER", Event: "INSERT", Statement: newTriggerBody(w.caps.Dialect)}
 				if i := it.Value.(int); i >= 0 {
-					text, name = triggerSQL(w.caps.Dialect, m.ref, m.list[i]), m.list[i].Name
+					tr = m.list[i]
 				}
-				t := newQueryTab(w, w.newID())
-				t.name = name
-				t.ed.SetText(text)
-				return w.addTab(t)
+				w.a.push(w.newTriggerEdit(m.ref, tr))
+				return nil
 			}})
 		return nil, true
 	}
 	return nil, false
+}
+
+// newTriggerBody is the starting body of a new trigger.
+func newTriggerBody(dialect string) string {
+	switch dialect {
+	case "postgres":
+		return "FOR EACH ROW EXECUTE FUNCTION my_function()"
+	case "cql":
+		return "com.example.MyTrigger"
+	}
+	return "SET @last_insert = NOW()"
+}
+
+// triggerEditDlg is the trigger editor: a name / timing / event grid above the body editor. Ctrl+s opens
+// the CREATE TRIGGER script (the same one triggerSQL gives) in a query tab, where running it goes through
+// the normal safe-mode gate.
+type triggerEditDlg struct {
+	w      *Workspace
+	ref    db.ObjRef
+	name   lineEdit
+	timing []string
+	event  []string
+	ti, ei int
+	body   *Editor
+	focus  int // 0 name, 1 timing, 2 event, 3 body
+}
+
+func (w *Workspace) newTriggerEdit(ref db.ObjRef, tr db.Trigger) *triggerEditDlg {
+	pick := func(opts []string, cur string) ([]string, int) {
+		for i, o := range opts {
+			if strings.EqualFold(o, cur) {
+				return opts, i
+			}
+		}
+		return append(opts, cur), len(opts) // a value the engine reports that the list lacks (e.g. INSERT OR UPDATE)
+	}
+	d := &triggerEditDlg{w: w, ref: ref, name: newLine(tr.Name)}
+	d.timing, d.ti = pick([]string{"BEFORE", "AFTER", "INSTEAD OF"}, tr.Timing)
+	d.event, d.ei = pick([]string{"INSERT", "UPDATE", "DELETE"}, tr.Event)
+	d.body = NewEditor(w.caps.Dialect, EditorOpts{TabWidth: 2, CloseBraces: true})
+	d.body.SetText(tr.Statement)
+	return d
+}
+
+// trigger is the dialog's fields as a db.Trigger.
+func (d *triggerEditDlg) trigger() db.Trigger {
+	return db.Trigger{Name: strings.TrimSpace(d.name.Value()), Timing: d.timing[d.ti], Event: d.event[d.ei], Statement: strings.TrimSpace(d.body.Text())}
+}
+
+func (d *triggerEditDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
+	if p, ok := msg.(tea.PasteMsg); ok {
+		switch d.focus {
+		case 0:
+			d.name.Handle(p)
+		case 3:
+			d.body.Handle(p)
+		}
+		return d, nil
+	}
+	k, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return d, nil
+	}
+	switch k.Keystroke() {
+	case "esc":
+		return nil, nil
+	case "tab":
+		d.focus = (d.focus + 1) % 4
+		return d, nil
+	case "shift+tab":
+		d.focus = (d.focus + 3) % 4
+		return d, nil
+	case "ctrl+s":
+		tr := d.trigger()
+		if tr.Name == "" || tr.Statement == "" {
+			return d, d.w.a.say("a trigger needs a name and a body")
+		}
+		t := newQueryTab(d.w, d.w.newID())
+		t.name = tr.Name
+		t.ed.SetText(triggerSQL(d.w.caps.Dialect, d.ref, tr))
+		return nil, d.w.addTab(t)
+	}
+	switch d.focus {
+	case 0:
+		d.name.Handle(k)
+	case 1, 2:
+		opts, i := d.timing, &d.ti
+		if d.focus == 2 {
+			opts, i = d.event, &d.ei
+		}
+		switch k.Keystroke() {
+		case "space", "right", "enter":
+			*i = (*i + 1) % len(opts)
+		case "left":
+			*i = (*i + len(opts) - 1) % len(opts)
+		}
+	default:
+		d.body.Handle(k)
+	}
+	return d, nil
+}
+
+func (d *triggerEditDlg) View(th Theme, maxW, maxH int) string {
+	w := min(maxW-4, 100)
+	row := func(i int, label, val string) string {
+		mark := "  "
+		if d.focus == i {
+			mark = th.Accent.Render("▸ ")
+		}
+		return mark + th.Dim.Render(fit(label, 8)) + val
+	}
+	choice := func(i int, opts []string, cur int) string {
+		v := opts[cur]
+		if d.focus == i {
+			return th.Accent.Render("◂ " + v + " ▸")
+		}
+		return v
+	}
+	lines := []string{
+		row(0, "Name", d.name.View(w-14, th, d.focus == 0)),
+		row(1, "Timing", choice(1, d.timing, d.ti)),
+		row(2, "Event", choice(2, d.event, d.ei)),
+		th.Border.Render(strings.Repeat("─", w-4)),
+	}
+	d.body.W, d.body.H = w-4, max(4, maxH-14)
+	lines = append(lines, strings.Split(d.body.View(th, d.focus == 3), "\n")...)
+	return box(th, "Trigger on "+d.ref.Name, lines, "Tab: next field   ←/→: change   C-s: script it into a query tab   Esc: cancel", w)
 }
