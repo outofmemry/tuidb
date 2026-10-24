@@ -65,6 +65,22 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		return []db.Statement{stmt(t)}, nil
 	case db.OpDropDatabase:
 		return []db.Statement{stmt("DROP DATABASE " + ident(ref.Name))}, nil
+	case db.OpCreateSchema, db.OpDropSchema:
+		name := ref.Schema
+		if name == "" {
+			name = ref.Name
+		}
+		if name == "" {
+			return nil, errors.New("schema name is required")
+		}
+		if op == db.OpCreateSchema {
+			return []db.Statement{stmt("CREATE SCHEMA " + ident(name))}, nil
+		}
+		t := "DROP SCHEMA " + ident(name)
+		if opt(opts, "cascade") {
+			t += " CASCADE"
+		}
+		return []db.Statement{stmt(t)}, nil
 	case db.OpRenameDatabase:
 		if newName == "" {
 			return nil, errors.New("rename database: new_name is required")
