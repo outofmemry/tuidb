@@ -310,6 +310,10 @@ func (t *assistantTab) View(th Theme, W, H int) string {
 	end := len(lines) - t.back
 	body := lines[max(0, end-room):end]
 	out := padLines(body, W, room)
-	out = append(out, th.Border.Render(strings.Repeat("─", W)), th.Accent.Render("› ")+t.in.View(W-3, th, true))
+	rule := th.Border.Render(strings.Repeat("─", W))
+	if stop := th.Hints("Esc", "Stop"); t.running && W >= 2+width(stop) { // a pane narrower than the label keeps the plain rule
+		rule = th.Border.Render("──") + stop + th.Border.Render(strings.Repeat("─", max(0, W-2-width(stop))))
+	}
+	out = append(out, rule, th.Accent.Render("› ")+t.in.View(W-3, th, true))
 	return strings.Join(out, "\n")
 }
