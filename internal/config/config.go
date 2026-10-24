@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 
@@ -129,6 +131,30 @@ func (c Config) validate() error {
 	}
 	if c.General.RowLimit <= 0 {
 		return errors.New("general.row_limit must be > 0")
+	}
+	for _, e := range []struct {
+		key, val string
+		ok       []string
+	}{
+		{"general.new_tab_opens", c.General.NewTabOpens, []string{"query", "empty"}},
+		{"editor.complete_key", c.Editor.CompleteKey, []string{"enter_or_tab", "enter", "tab"}},
+		{"editor.indent", c.Editor.Indent, []string{"spaces", "tabs"}},
+		{"editor.result_mode", c.Editor.ResultMode, []string{"tabs", "append"}},
+		{"table.filter_default_column", c.Table.FilterDefaultColumn, []string{"pk", "any", "raw"}},
+		{"table.filter_state", c.Table.FilterState, []string{"remember", "show", "hide"}},
+		{"table.default_sort", c.Table.DefaultSort, []string{"none", "pk_asc", "pk_desc"}},
+		{"sidebar.matching", c.Sidebar.Matching, []string{"fuzzy", "contains"}},
+	} {
+		if !slices.Contains(e.ok, e.val) {
+			return fmt.Errorf("%s: %q is not one of %s", e.key, e.val, strings.Join(e.ok, "|"))
+		}
+	}
+	// Accepted by the file format but not implemented yet: fail loudly instead of doing nothing.
+	if c.General.LogOriginalValues {
+		return errors.New("general.log_original_values is not implemented yet")
+	}
+	if c.CSV != Defaults().CSV {
+		return errors.New("the [csv] settings are not implemented yet; exports use the defaults")
 	}
 	_, err := c.Keymap()
 	return err

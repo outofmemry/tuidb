@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -175,6 +176,9 @@ func LoadConnections(path string) ([]Connection, error) {
 	var f connectionsFile
 	md, err := toml.DecodeFile(path, &f)
 	if errors.Is(err, os.ErrNotExist) {
+		loadedMu.Lock()
+		loaded[path] = map[string]bool{}
+		loadedMu.Unlock()
 		return nil, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
@@ -201,14 +205,57 @@ func LoadConnections(path string) ([]Connection, error) {
 		}
 		seen[c.Name] = true
 	}
+	names := map[string]bool{}
+	for _, c := range f.Connection {
+		names[c.Name] = true
+	}
+	loadedMu.Lock()
+	loaded[path] = names
+	loadedMu.Unlock()
 	return f.Connection, nil
 }
+
+var (
+	loadedMu sync.Mutex
+	loaded   = map[string]map[string]bool{} // path -> connection names this process last loaded/saved
+)
 
 // SaveConnections writes atomically with 0600 perms (passwords are stored in plain text).
 func SaveConnections(path string, conns []Connection) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
+	unlock, err := LockFile(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	// Keep connections another process added since this one loaded/saved (names we never saw);
+	// names we knew and no longer have are deliberate deletions.
+	loadedMu.Lock()
+	known, hadSnapshot := loaded[path]
+	loadedMu.Unlock()
+	if hadSnapshot {
+		var disk connectionsFile
+		if _, err := toml.DecodeFile(path, &disk); err == nil {
+			have := map[string]bool{}
+			for _, c := range conns {
+				have[c.Name] = true
+			}
+			for _, c := range disk.Connection {
+				if !have[c.Name] && !known[c.Name] {
+					conns = append(conns[:len(conns):len(conns)], c)
+				}
+			}
+		}
+	}
+	names := map[string]bool{}
+	for _, c := range conns {
+		names[c.Name] = true
+	}
+	loadedMu.Lock()
+	loaded[path] = names
+	loadedMu.Unlock()
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(connectionsFile{Connection: conns}); err != nil {
 		return err
@@ -260,40 +307,54 @@ var SSLModes = []string{"disable", "prefer", "require", "verify-ca", "verify-ful
 // sslFromQuery reads TLS settings from a URL query in tuidb's own spelling (sslmode=) and the
 // engines' native ones, so a URL pasted from another tool does not silently connect in plaintext.
 // It returns the mode and the query keys it consumed.
-func sslFromQuery(driver string, q url.Values) (string, []string) {
-	truthy := func(v string) bool { return v == "true" || v == "1" || v == "yes" }
+func sslFromQuery(driver string, q url.Values) (string, []string, error) {
+	norm := func(v string) string { return strings.ReplaceAll(strings.ToLower(v), "_", "-") }
+	// flag: true/false spellings; anything else is an error rather than a silent downgrade to plaintext.
+	flag := func(k string) (string, error) {
+		switch norm(q.Get(k)) {
+		case "true", "1", "yes":
+			return "require", nil
+		case "false", "0", "no":
+			return "disable", nil
+		}
+		return "", fmt.Errorf("unknown %s value %q (want true|false)", k, q.Get(k))
+	}
 	if v := q.Get("sslmode"); v != "" {
-		return strings.ToLower(v), []string{"sslmode"}
+		return strings.ToLower(v), []string{"sslmode"}, nil
 	}
 	switch driver {
 	case MySQL, MariaDB:
 		if v := q.Get("ssl-mode"); v != "" {
-			return map[string]string{"DISABLED": "disable", "PREFERRED": "prefer", "REQUIRED": "require", "VERIFY_CA": "verify-ca", "VERIFY_IDENTITY": "verify-identity"}[strings.ToUpper(v)], []string{"ssl-mode"}
+			m, ok := map[string]string{"disabled": "disable", "preferred": "prefer", "required": "require", "verify-ca": "verify-ca", "verify-identity": "verify-identity"}[norm(v)]
+			if !ok {
+				return "", nil, fmt.Errorf("unknown ssl-mode %q (want %s)", v, strings.Join(SSLModes, "|"))
+			}
+			return m, []string{"ssl-mode"}, nil
 		}
 		if v := q.Get("tls"); v != "" {
-			if truthy(v) || v == "skip-verify" || v == "preferred" {
-				return map[bool]string{true: "prefer", false: "require"}[v == "preferred"], []string{"tls"}
+			switch norm(v) {
+			case "skip-verify":
+				return "require", []string{"tls"}, nil
+			case "preferred":
+				return "prefer", []string{"tls"}, nil
 			}
-			return "disable", []string{"tls"}
+			m, err := flag("tls")
+			return m, []string{"tls"}, err
 		}
 	case ClickHouse:
-		if v := q.Get("secure"); v != "" {
-			if truthy(v) {
-				return "require", []string{"secure"}
-			}
-			return "disable", []string{"secure"}
+		if q.Get("secure") != "" {
+			m, err := flag("secure")
+			return m, []string{"secure"}, err
 		}
 	case Mongo:
 		for _, k := range []string{"tls", "ssl"} {
-			if v := q.Get(k); v != "" {
-				if truthy(v) {
-					return "require", []string{k}
-				}
-				return "disable", []string{k}
+			if q.Get(k) != "" {
+				m, err := flag(k)
+				return m, []string{k}, err
 			}
 		}
 	}
-	return "", nil
+	return "", nil, nil
 }
 
 // ParseURL imports driver://user:pass@host:port/db?name=..&env=..&safeModeLevel=..; the ssh and
@@ -301,7 +362,8 @@ func sslFromQuery(driver string, q url.Values) (string, []string) {
 func ParseURL(raw string) (Connection, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return Connection{}, fmt.Errorf("bad URL: %w", err)
+		// url.Parse errors quote the whole URL, password included, so do not wrap err.
+		return Connection{}, fmt.Errorf("bad URL (not shown: it may contain a password; percent-encode special characters such as %% @ in it)")
 	}
 	if strings.EqualFold(u.Scheme, "mongodb+srv") {
 		return Connection{}, fmt.Errorf("mongodb+srv:// is not supported (DNS seed lists); use mongodb://host:port")
@@ -332,7 +394,10 @@ func ParseURL(raw string) (Connection, error) {
 	}
 	c.Name = q.Get("name")
 	c.Tag = q.Get("env")
-	mode, consumed := sslFromQuery(driver, q)
+	mode, consumed, err := sslFromQuery(driver, q)
+	if err != nil {
+		return c, err
+	}
 	if mode != "" {
 		ok := false
 		for _, m := range SSLModes {

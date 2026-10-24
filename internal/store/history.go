@@ -55,11 +55,23 @@ func (h *History) Append(conn string, e HistoryEntry) error {
 	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(h.path(conn), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	unlock, err := config.LockFile(h.path(conn)) // trim/clear in another process must not orphan this write
 	if err != nil {
 		return err
 	}
-	n, werr := f.Write(append(line, '\n'))
+	defer unlock()
+	f, err := os.OpenFile(h.path(conn), os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	line = append(line, '\n')
+	if st, err := f.Stat(); err == nil && st.Size() > 0 { // a torn last line must not absorb this entry
+		var last [1]byte
+		if _, err := f.ReadAt(last[:], st.Size()-1); err == nil && last[0] != '\n' {
+			line = append([]byte{'\n'}, line...)
+		}
+	}
+	n, werr := f.Write(line)
 	f.Close()
 	if werr != nil {
 		return werr
@@ -137,13 +149,29 @@ func (h *History) rewrite(conn string, keep func(HistoryEntry) bool) error {
 func (h *History) Delete(conn, id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := config.LockFile(h.path(conn))
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return h.rewrite(conn, func(e HistoryEntry) bool { return e.ID != id })
 }
 
 func (h *History) Clear(conn string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	err := os.Remove(h.path(conn))
+	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := config.LockFile(h.path(conn))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	err = os.Remove(h.path(conn))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}

@@ -184,3 +184,44 @@ func TestHistoryIsBounded(t *testing.T) {
 		t.Errorf("the newest entry survives: %q", all[0].SQL[:10])
 	}
 }
+
+func TestStateMergesWritesFromAnotherProcess(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.json")
+	a, _ := LoadState(p)
+	b, _ := LoadState(p)
+	if _, err := a.TogglePin("c", "public.users"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Touch("c", "public.orders"); err != nil { // b's snapshot predates a's pin
+		t.Fatal(err)
+	}
+	r, _ := LoadState(p)
+	if len(r.Pinned("c")) != 1 || len(r.Recent("c")) != 1 {
+		t.Errorf("pin %v recent %v: a write from one process must not drop the other's", r.Pinned("c"), r.Recent("c"))
+	}
+}
+
+func TestHistoryAppendAfterTornLineKeepsNewEntry(t *testing.T) {
+	h := &History{Dir: t.TempDir()}
+	h.Append("c", HistoryEntry{SQL: "select 1"})
+	f, _ := os.OpenFile(h.path("c"), os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"id":"x","sql":"tor`)
+	f.Close()
+	h.Append("c", HistoryEntry{SQL: "select AFTER"})
+	if got, _ := h.List("c", "AFTER", 0); len(got) != 1 {
+		t.Errorf("the entry appended after a torn line was lost: %+v", got)
+	}
+}
+
+func TestQueriesSaveRefusesNameCollision(t *testing.T) {
+	s := &Queries{Root: t.TempDir()}
+	if _, err := s.Save("", "a b", nil, "select 1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Save("", "a?b", nil, "select 2"); err == nil {
+		t.Error("a different query with the same file name must not overwrite")
+	}
+	if _, err := s.Save("", "a b", nil, "select 3"); err != nil {
+		t.Errorf("re-saving the same query overwrites: %v", err)
+	}
+}

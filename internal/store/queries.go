@@ -90,6 +90,11 @@ func (s *Queries) Save(folder, name string, keywords []string, sql string) (Quer
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return Query{}, err
 	}
+	if b, err := os.ReadFile(p); err == nil { // same file name, different query: refuse instead of clobbering
+		if old := parse(rel, string(b)); old.Name != strings.TrimSpace(name) && old.Name != name {
+			return Query{}, fmt.Errorf("a different saved query %q already uses the file name %s", old.Name, filepath.Base(p))
+		}
+	}
 	if err := config.WriteFileAtomic(p, []byte(header(name, keywords)+sql)); err != nil {
 		return Query{}, err
 	}

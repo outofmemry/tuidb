@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -235,5 +236,63 @@ func TestUnimplementedSettingsAreRejected(t *testing.T) {
 		if _, err := Load(write(t, body)); err == nil {
 			t.Errorf("%q is not implemented and must be reported, not ignored", body)
 		}
+	}
+}
+
+func TestSaveConnectionsKeepsOtherProcessAdditions(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "connections.toml")
+	mk := func(n string) Connection { return Connection{Name: n, Driver: SQLite, Database: n + ".db"} }
+	if err := SaveConnections(p, []Connection{mk("a"), mk("b")}); err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := LoadConnections(p)
+	b, _ := os.ReadFile(p) // the other process adds c behind our back
+	os.WriteFile(p, append(b, "\n[[connection]]\nname = \"c\"\ndriver = \"sqlite\"\ndatabase = \"c.db\"\n"...), 0o600)
+	if err := SaveConnections(p, mine[1:]); err != nil { // we delete a, never having seen c
+		t.Fatal(err)
+	}
+	got, _ := LoadConnections(p)
+	if len(got) != 2 || got[0].Name != "b" || got[1].Name != "c" {
+		t.Errorf("want b,c (a deleted, c kept): %+v", got)
+	}
+}
+
+func TestParseURLErrorDoesNotLeakPassword(t *testing.T) {
+	_, err := ParseURL("postgresql://bob:p@ss%word@db/x")
+	if err == nil || strings.Contains(err.Error(), "ss%wo") || strings.Contains(err.Error(), "bob") {
+		t.Errorf("error must not echo the URL: %v", err)
+	}
+}
+
+func TestURLTLSVariantsAndUnknownValues(t *testing.T) {
+	if c, err := ParseURL("mysql://u@h/d?ssl-mode=verify-identity"); err != nil || c.SSLMode != "verify-identity" {
+		t.Errorf("%+v %v", c, err)
+	}
+	if c, err := ParseURL("mongodb://u@h/d?tls=TRUE"); err != nil || c.SSLMode != "require" {
+		t.Errorf("%+v %v", c, err)
+	}
+	for _, u := range []string{"mysql://u@h/d?ssl-mode=VERIFY-FULL", "clickhouse://u@h/d?secure=maybe"} {
+		if _, err := ParseURL(u); err == nil {
+			t.Errorf("%s must be rejected, not downgraded", u)
+		}
+	}
+}
+
+func TestEnumAndUnimplementedSettingsRejected(t *testing.T) {
+	for _, body := range []string{"[editor]\nindent = \"tab\"\n", "[editor]\ncomplete_key = \"ente\"\n", "[sidebar]\nmatching = \"fuzzyy\"\n",
+		"[general]\nlog_original_values = true\n", "[csv]\ndelimiter = \";\"\n"} {
+		if _, err := Load(write(t, body)); err == nil {
+			t.Errorf("%q must be rejected", body)
+		}
+	}
+}
+
+func TestRelativeXDGIsIgnored(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "rel")
+	if !filepath.IsAbs(ConfigDir()) {
+		t.Skip("no home directory in this environment")
+	}
+	if strings.HasPrefix(ConfigDir(), "rel") {
+		t.Error("relative XDG_CONFIG_HOME must be ignored")
 	}
 }

@@ -65,6 +65,9 @@ func run() error {
 		}
 	}
 
+	if !filepath.IsAbs(config.ConfigDir()) || !filepath.IsAbs(config.DataDir()) {
+		return fmt.Errorf("cannot find your home directory (HOME is unset); set HOME or XDG_CONFIG_HOME/XDG_DATA_HOME to absolute paths")
+	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		return err

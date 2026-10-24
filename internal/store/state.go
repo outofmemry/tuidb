@@ -67,12 +67,23 @@ func LoadState(path string) (*State, error) {
 func (s *State) do(f func(*stateFile)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f(&s.d)
-	b, err := json.MarshalIndent(s.d, "", " ")
+	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
+		return err
+	}
+	unlock, err := config.LockFile(s.Path) // another process (TUI/web) may have written since we loaded
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
+	defer unlock()
+	if b, err := os.ReadFile(s.Path); err == nil {
+		var cur stateFile
+		if json.Unmarshal(b, &cur) == nil {
+			s.d = cur
+		}
+	}
+	f(&s.d)
+	b, err := json.MarshalIndent(s.d, "", " ")
+	if err != nil {
 		return err
 	}
 	return config.WriteFileAtomic(s.Path, b)
