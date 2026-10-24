@@ -528,6 +528,17 @@ func (q *quickLookDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	return q, nil
 }
 
+// shown is the raw text as displayed: pretty-printed JSON, or minified after m.
+func (q *quickLookDlg) shown() string {
+	if q.tree != nil && q.mini {
+		var b bytes.Buffer
+		if json.Compact(&b, []byte(strings.TrimSpace(q.text))) == nil {
+			return b.String()
+		}
+	}
+	return prettyValue(q.text)
+}
+
 func (q *quickLookDlg) View(th Theme, maxW, maxH int) string {
 	w := min(maxW-4, 100)
 	vis := max(4, maxH-8)
@@ -535,11 +546,11 @@ func (q *quickLookDlg) View(th Theme, maxW, maxH int) string {
 	hint := "c: copy   Esc: close"
 	if !q.raw {
 		body = strings.Split(q.tree.view(th, w-4, min(vis, len(q.tree.rows()))), "\n") // the box hugs the tree
-		hint = "↑↓: move   ↵: fold   E/C: expand/collapse all   r: raw text   " + hint
+		hint = "↑↓: move   ↵: fold   E/C: expand/collapse all   r: raw text   m: minify   " + hint
 	} else {
 		if q.lines == nil || q.wrapW != w-4 {
 			q.lines, q.kinds, q.wrapW = nil, nil, w-4
-			for _, l := range strings.Split(prettyValue(q.text), "\n") {
+			for _, l := range strings.Split(q.shown(), "\n") {
 				k := make([]tokKind, runeLen(l)) // plain text stays uncolored
 				if q.tree != nil {
 					k = jsonKinds(l) // classified before wrapping, so a wrapped string keeps its color
