@@ -585,13 +585,38 @@ func plain(v any) string {
 // copyCSV is [csv] from the config (set by NewApp), so copied CSV matches exported CSV.
 var copyCSV = config.CSV{Delimiter: ",", Quote: `"`, LineBreak: "\n"}
 
+// csvLine neutralises every cell as text (header names); data rows go through csvJoin with clipCell.
 func csvLine(cells []string) string {
+	out := make([]string, len(cells))
+	for i, c := range cells {
+		out[i] = export.Neutralize(c)
+	}
+	return csvJoin(out)
+}
+
+// csvJoin quotes already-neutralised cells; [csv] quote_mode applies as it does to exported CSV.
+func csvJoin(cells []string) string {
 	d, lb := orDefault(copyCSV.Delimiter, ","), orDefault(copyCSV.LineBreak, "\n")
 	out := make([]string, len(cells))
 	for i, c := range cells {
-		out[i] = export.CSVField(copyCSV, export.Neutralize(c)) // [csv] quote_mode applies to copied CSV as it does to exported CSV
+		out[i] = export.CSVField(copyCSV, c)
 	}
 	return strings.Join(out, d) + lb
+}
+
+// clipCell is the clipboard text of v with spreadsheet formulas defused. It decides on the value: numbers
+// (and text that parses as one) stay as they are, so -42 is not copied as '-42. The in-app paste
+// (clipValue) strips the one added quote again.
+func clipCell(v any) string {
+	s := plain(v)
+	switch v.(type) {
+	case nil, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+		return s
+	}
+	if _, err := strconv.ParseFloat(strings.TrimSpace(s), 64); err == nil {
+		return s
+	}
+	return export.Neutralize(s)
 }
 
 // FormatRect renders rows r0..r1, cols c0..c1 in the given format.
