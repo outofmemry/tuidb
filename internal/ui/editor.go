@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"hash/fnv"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -66,8 +68,14 @@ type Editor struct {
 	curY    int // visual row of the cursor in the last View, -1 when off screen (anchors the completion popup)
 	curFrom int // first rune shown on that row
 
-	folds   map[int]bool // folded statement indexes (db.Split order)
-	OnFolds func([]int)  // called with the folded indexes whenever they change
+	// folds is keyed by stmtKey (a hash of the trimmed statement text), not by index, so an edit above a
+	// fold keeps it. OnFolds still reports []int statement indexes (the state.json format), mapped back
+	// from the hashes with the current statement list.
+	folds    map[uint64]bool
+	OnFolds  func([]int) // called with the folded indexes whenever they change
+	lastFold []int
+
+	ex, note string // vim ":" results for the owning tab: a command it must run (:w :q ...) and a message to show
 
 	// render cache: lexing and statement splitting are redone only when the text changes, and
 	// lexing stops at the bottom of the viewport (a frame is drawn after every message, not just keys)
