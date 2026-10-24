@@ -30,6 +30,18 @@ func frame(th Theme, title, hint, content string, w, h int, focused bool) string
 	return frameEdge(th, edge, ttl, title, hint, content, w, h)
 }
 
+// frameCue is frame with the border in the colour cue ("" = the theme's); the title still shows the focus.
+func frameCue(th Theme, cue, title, hint, content string, w, h int, focused bool) string {
+	if cue == "" {
+		return frame(th, title, hint, content, w, h, focused)
+	}
+	ttl := th.Dim.Bold(true)
+	if focused {
+		ttl = th.Accent.Bold(true)
+	}
+	return frameEdge(th, lipgloss.NewStyle().Foreground(lipgloss.Color(cue)), ttl, title, hint, content, w, h)
+}
+
 // frameEdge is frame with explicit edge and title styles (dialogs use the accent or, for
 // destructive ones, the error color).
 func frameEdge(th Theme, edge, ttl lipgloss.Style, title, hint, content string, w, h int) string {
