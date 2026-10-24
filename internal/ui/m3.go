@@ -640,44 +640,35 @@ func colorHeaders(text string, byName map[string]int, override ...map[string]str
 			continue
 		}
 		lines[i] = headerRe.ReplaceAllStringFunc(l, func(m string) string {
-			c, ok := byName[strings.TrimSpace(m[1:len(m)-1])]
-			if !ok {
+			name := strings.TrimSpace(m[1 : len(m)-1])
+			col := ""
+			if c, ok := byName[name]; ok {
+				col = clusterColors[c%len(clusterColors)]
+			}
+			if c := ov[name]; c != "" {
+				col = c
+			}
+			if col == "" {
 				return m
 			}
-			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("16")).Background(lipgloss.Color(clusterColors[c%len(clusterColors)])).Render(m)
+			return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("16")).Background(lipgloss.Color(col)).Render(m)
 		})
 	}
 	return lines
 }
 
 // diagramAction opens the ER diagram; focus (a table name) presets the filter to that table and scrolls to it.
-func (w *Workspace) diagramAction(focus string) tea.Cmd {
-	sess, schema := w.sess, w.sb.schema
-	return w.liveCmd(func() func() tea.Cmd {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		tbls, err := diagram.Load(ctx, sess, schema)
-		return func() tea.Cmd {
-			switch {
-			case err != nil:
-				return w.a.fail(err)
-			case len(tbls) == 0:
-				return w.a.say("no tables to draw")
-			}
-			w.showDiagram(tbls, schema, focus)
-			return nil
-		}
-	})
-}
+func (w *Workspace) diagramAction(focus string) tea.Cmd { return w.diagramFor(w.sb.schema, focus) }
 
-func (w *Workspace) showDiagram(tbls []diagram.Table, schema, focus string) {
+func (w *Workspace) showDiagram(tbls []diagram.Table, schema, focus string, schemas []string) {
 	sortBy, filter := "name", focus
 	cl := diagram.Cluster(tbls)
 	byName := map[string]int{}
 	for _, t := range tbls {
 		byName[t.Ref.Name] = cl[t.Ref.Schema+"."+t.Ref.Name]
 	}
-	d := &paneDlg{hint: "↑↓←→: scroll   s: sort   /: filter   e: edit a table   n: new table   Esc: close"}
+	colors := w.diagramColors() // "schema.table" -> ANSI code
+	d := &paneDlg{hint: "↑↓←→: scroll  s: sort  /: filter  e: edit table  n: new table  a: add FK  x: delete table  S: schema  y: copy column  c: colour  Esc: close"}
 	retitle := func() {
 		d.title = fmt.Sprintf("ER diagram · %s · %d tables · sort: %s", orDefault(schema, w.sess.CurrentDatabase()), len(tbls), sortBy)
 		if filter != "" {
