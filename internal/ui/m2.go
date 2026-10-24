@@ -534,7 +534,17 @@ func (w *Workspace) searchInDatabase() tea.Cmd {
 						if h.Err != nil {
 							detail = "error: " + h.Err.Error()
 						}
-						p.items = append(p.items, pickItem{Label: h.Ref.Name, Detail: detail, Value: h})
+						label, at := h.Ref.Name, len(p.items)
+						if o.AllSchemas { // grouped by schema: a hit goes after the last one of its schema or an earlier schema
+							label = h.Ref.Schema + "." + h.Ref.Name
+							at = sort.Search(len(p.items), func(i int) bool { return p.items[i].Value.(db.SearchHit).Ref.Schema > h.Ref.Schema })
+							if len(p.items) > 0 && at <= p.sel {
+								p.sel++
+							}
+						}
+						p.items = append(p.items, pickItem{})
+						copy(p.items[at+1:], p.items[at:])
+						p.items[at] = pickItem{Label: label, Detail: detail, Value: h}
 					}
 					title("")
 					return nil
