@@ -481,18 +481,19 @@ func (w *Workspace) searchInDatabase() tea.Cmd {
 		{Key: "value", Label: "Value", Kind: fText},
 		{Key: "op", Label: "Operator", Kind: fChoice, Options: []string{"Contains", "Not contains", "=", "Has prefix", "Has suffix"}, Value: "Contains"},
 		{Key: "tables", Label: "Tables", Kind: fText, Hint: "empty = all tables, or a, b, c"},
+		{Key: "all", Label: "All schemas", Kind: fBool, Show: func(map[string]string) bool { return w.caps.Schemas }},
 	}, func(v map[string]string) tea.Cmd {
 		if w.jobCancel != nil {
 			return w.a.say("another export, import or search is still running (cancel it first)")
 		}
-		o := db.SearchOptions{Value: v["value"], Op: v["op"]}
+		o := db.SearchOptions{Value: v["value"], Op: v["op"], AllSchemas: v["all"] == "true" && w.caps.Schemas}
 		for _, n := range strings.Split(v["tables"], ",") {
 			if n = strings.TrimSpace(n); n != "" {
 				o.Tables = append(o.Tables, n)
 			}
 		}
 		total := len(o.Tables)
-		if total == 0 { // the sidebar lists the current schema's objects
+		if total == 0 && !o.AllSchemas { // the sidebar lists the current schema's objects
 			for _, ob := range w.sb.objs {
 				if ob.Kind == db.KindTable {
 					total++
