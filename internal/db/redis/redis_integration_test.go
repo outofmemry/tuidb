@@ -569,7 +569,7 @@ func TestStreamPaging(t *testing.T) {
 		if got := page(off, 10); !reflect.DeepEqual(got, ids[off:min(off+10, 25)]) {
 			t.Errorf("page %d = %v", off, got)
 		}
-		if off == 10 && s.marks[key][1] != (streamMark{20, "(" + ids[19]}) {
+		if off == 10 && (s.marks[key][1].offset != 20 || s.marks[key][1].from != "("+ids[19]) {
 			t.Errorf("marks %v", s.marks[key])
 		}
 	}
@@ -612,5 +612,29 @@ func TestApplyPreconditions(t *testing.T) {
 	}
 	if s.c().Get(ctx, a).Val() != "1" || s.c().Get(ctx, c).Val() != "3" {
 		t.Error("applied statements missing")
+	}
+}
+
+// XDEL / XTRIM before a remembered mark must not shift the next page.
+func TestStreamMarksAfterDelete(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	key := tmpKey(t, s, "stream")
+	var ids []string
+	for i := 0; i < 25; i++ {
+		ids = append(ids, s.c().XAdd(ctx, &goredis.XAddArgs{Stream: key, Values: []string{"n", strconv.Itoa(i)}}).Val())
+	}
+	first := func(off int) string {
+		return rowsOf(t, s, db.RowQuery{ObjRef: ref(key), Offset: off, Limit: 1})[0][0].(string)
+	}
+	first(0)
+	first(10) // remembers a mark at offset 10
+	s.c().XDel(ctx, key, ids[2])
+	if got := first(10); got != ids[11] {
+		t.Errorf("after XDEL offset 10 = %s, want %s", got, ids[11])
+	}
+	s.c().XTrimMaxLen(ctx, key, 10)
+	if got := first(5); got != ids[20] {
+		t.Errorf("after XTRIM offset 5 = %s, want %s", got, ids[20])
 	}
 }
