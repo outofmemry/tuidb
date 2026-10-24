@@ -1604,3 +1604,23 @@ func TestFlowSwitchSessionPicker(t *testing.T) {
 	h.want("shop / shop")
 	h.want("current")
 }
+
+func TestFlowGridFindAndFilterCopyKeys(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	h.press("/")
+	h.want("Find in the loaded rows")
+	h.press("esc")
+	h.prefix("alt+/") // keymap: find in the grid
+	h.want("Find in the loaded rows")
+	h.press("esc")
+
+	h.prefix("f")
+	tt := h.a.ws().tab().(*tableTab)
+	n := len(tt.filters.Filters)
+	h.press("alt+n") // keymap: filter_add_copy is a no-prefix binding
+	if len(tt.filters.Filters) != n+1 {
+		t.Fatalf("filter_add_copy: %d -> %d", n, len(tt.filters.Filters))
+	}
+}
