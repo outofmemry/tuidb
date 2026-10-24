@@ -811,7 +811,7 @@ func (g *Grid) View(th Theme, focused bool) string {
 				sb.WriteString(sep + g.edit.View(c.Width, th, true))
 				continue
 			}
-			cell := fit(gridCellText(v, c.Width), c.Width)
+			cell := fit(g.cellString(r, ci, c.Width), c.Width)
 			if isNumber(v) {
 				cell = padLeft(strings.TrimRight(cell, " "), c.Width)
 			}
@@ -823,7 +823,7 @@ func (g *Grid) View(th Theme, focused bool) string {
 				st = th.SelRow
 			case r.Dirty[ci] && r.State == rowClean:
 				st = th.Modified
-			case isSpecial(v):
+			case specialCell(v):
 				st = base.Inherit(th.Null)
 			case isNumber(v): // typed values get the editor's colors so a row reads at a glance
 				st = base.Foreground(th.Number.GetForeground())
