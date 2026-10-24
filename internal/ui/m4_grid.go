@@ -194,12 +194,19 @@ func (a *App) pickSetValue(g *Grid, v any) tea.Cmd {
 
 // ---- quick look: hex editing, encodings -----------------------------------------------------
 
-var encodings = []string{"Hex dump", "UTF-8", "Latin-1 (ISO-8859-1)", "UTF-16"}
+var encodings = []string{"Hex dump", "Base64", "UTF-8", "Latin-1 (ISO-8859-1)", "UTF-16"}
 
 // decodeAs shows raw in the named encoding.
 func decodeAs(raw []byte, enc string) string {
 	switch enc {
 	case "Hex dump":
+		return hexDump(raw)
+	case "Base64":
+		return base64Lines(raw)
+	case "WKT":
+		if w, ok := db.WKT(raw); ok {
+			return w
+		}
 		return hexDump(raw)
 	case "Latin-1 (ISO-8859-1)":
 		r := make([]rune, len(raw))
