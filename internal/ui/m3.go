@@ -677,7 +677,13 @@ func (w *Workspace) showDiagram(tbls []diagram.Table, schema, focus string, sche
 	}
 	retitle()
 	d.lines = func(th Theme, W int) []string {
-		lines := colorHeaders(diagram.Render(tbls, max(40, W), sortBy, filter), byName)
+		ov := map[string]string{}
+		for _, t := range tbls {
+			if c := colors[t.Ref.Schema+"."+t.Ref.Name]; c != "" {
+				ov[t.Ref.Name] = c
+			}
+		}
+		lines := colorHeaders(diagram.Render(tbls, max(40, W), sortBy, filter), byName, ov)
 		if focus != "" { // centre the focused table once: its box is the first one naming it
 			for i, l := range lines {
 				if strings.Contains(ansi.Strip(l), "| "+focus+" ") {
@@ -689,6 +695,13 @@ func (w *Workspace) showDiagram(tbls []diagram.Table, schema, focus string, sche
 		}
 		return lines
 	}
+	reopen := func() tea.Cmd { return w.diagramFor(schema, "") }
+	handover := func(f func() tea.Cmd) func() tea.Cmd {
+		return func() tea.Cmd { d.done = true; return f() }
+	}
+	switchSchema := handover(func() tea.Cmd {
+		return w.diagramSchemaPicker(schemas, schema, func(s string) tea.Cmd { return w.diagramFor(s, "") })
+	})
 	d.keys = map[string]func() tea.Cmd{
 		"s": func() tea.Cmd {
 			sortBy = map[string]string{"name": "columns", "columns": "name"}[sortBy]
