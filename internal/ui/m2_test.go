@@ -176,7 +176,7 @@ func TestM2ImportCSVRunsInserts(t *testing.T) {
 	h.press("enter")
 	h.want("Column mapping")
 	h.press("enter")
-	h.want("imported 1 rows")
+	h.want("processed 1 rows")
 	if len(h.fake.applied) == 0 {
 		t.Fatal("nothing was applied")
 	}
