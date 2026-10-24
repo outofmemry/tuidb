@@ -373,3 +373,181 @@ func TestDetailMove(t *testing.T) {
 		t.Fatalf("home should go to 0 and enter is not a move (col=%d)", g.col)
 	}
 }
+
+func TestCopyCellsAsAllFormats(t *testing.T) {
+	g := testGrid()
+	g.GoRow(0, false)
+	g.GoCol(0, false)
+	g.GoRow(1, true)
+	g.GoCol(1, true) // ids and names of the first two rows
+	if got := g.CopyCells(FmtCSVHeader, "t"); got != "id,name\n1,Ann\n2,Bob" {
+		t.Errorf("csv: %q", got)
+	}
+	for _, f := range CopyFormats {
+		if g.CopyCells(f, "t") == "" {
+			t.Errorf("%s copied nothing", f)
+		}
+	}
+	if got := g.CopyCells(FmtMarkdown, "t"); !strings.Contains(got, "| id | name |") || strings.Contains(got, "note") {
+		t.Errorf("markdown covers only the selected columns: %q", got)
+	}
+	if got := g.CopyColumn(); got != "2\n"+"Bob\n"+"Cy" && got != "Ann\nBob\nCy" {
+		t.Errorf("copy_column: %q", got)
+	}
+}
+
+func TestColumnMenuSortAndLocalSort(t *testing.T) {
+	g := testGrid()
+	g.GoCol(1, false)
+	var gotName string
+	var gotDir int
+	m := colMenu{g: g, sort: func(name string, dir int) tea.Cmd { gotName, gotDir = name, dir; g.SortLocal(name, dir); return nil }}
+	m.run("sort_desc", "name")
+	if gotName != "name" || gotDir != -1 || g.Rows[0].Cur[1] != "Cy" || !g.SortDesc || g.SortCol != "name" {
+		t.Fatalf("desc: %s %d %v", gotName, gotDir, g.Rows[0].Cur)
+	}
+	m.run("sort_asc", "name")
+	if g.Rows[0].Cur[1] != "Ann" || g.SortDesc {
+		t.Fatalf("asc: %v", g.Rows[0].Cur)
+	}
+	m.run("sort_none", "name")
+	if g.SortCol != "" || g.Rows[2].Cur[1] != "Cy" || g.Rows[0].Cur[1] != "Ann" {
+		t.Fatalf("none restores the loaded order: %v", g.Rows[0].Cur)
+	}
+	g.SortLocal("id", -1) // numbers sort as numbers
+	if g.Rows[0].Cur[0] != int64(3) {
+		t.Fatalf("numeric: %v", g.Rows[0].Cur)
+	}
+}
+
+func TestCellDisplayNullEmptyDefault(t *testing.T) {
+	for v, want := range map[string]string{"nil": "NULL", "empty": "''", "emptyval": "''", "default": "DEFAULT", "text": "abc"} {
+		var in any
+		switch v {
+		case "nil":
+		case "empty":
+			in = ""
+		case "emptyval":
+			in = db.Empty
+		case "default":
+			in = db.Default
+		case "text":
+			in = "abc"
+		}
+		if got := cellDisplay(in, 10); got != want {
+			t.Errorf("%s: %q, want %q", v, got, want)
+		}
+	}
+	if !specialCell("") || !specialCell(nil) || specialCell("x") {
+		t.Error("NULL, '' and DEFAULT draw dim italic, ordinary text does not")
+	}
+}
+
+func TestGridRendersWKT(t *testing.T) {
+	pt := []byte{1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0x40} // POINT(1 2), little endian
+	g := &Grid{W: 60, H: 4, DecodeSpatial: true}
+	g.SetData([]gridCol{{Name: "geom"}}, [][]any{{pt}})
+	if got := g.cellString(g.Rows[0], 0, 20); got != "POINT(1 2)" {
+		t.Fatalf("wkt: %q", got)
+	}
+	g.DecodeSpatial = false
+	if got := g.cellString(g.Rows[0], 0, 20); strings.Contains(got, "POINT") {
+		t.Fatalf("decode_spatial off must not decode: %q", got)
+	}
+}
+
+func TestGridHitTests(t *testing.T) {
+	g := testGrid() // id, name, note
+	g.W, g.H = 60, 8
+	gw := g.gutterW()
+	g.Cols[0].Width, g.Cols[1].Width = 4, 6
+	if c, edge := g.HeaderAt(gw + 2); c != 0 || edge {
+		t.Errorf("inside id: %d %v", c, edge)
+	}
+	if c, edge := g.HeaderAt(gw + 5); c != 0 || !edge { // the separator after id
+		t.Errorf("edge of id: %d %v", c, edge)
+	}
+	if c, _ := g.HeaderAt(gw + 7); c != 1 {
+		t.Errorf("inside name: %d", c)
+	}
+	if r, c, ok := g.CellAt(gw+7, 2); !ok || r != 1 || c != 1 {
+		t.Errorf("cell: %d %d %v", r, c, ok)
+	}
+	if _, _, ok := g.CellAt(gw+2, 9); ok {
+		t.Error("below the rows is not a cell")
+	}
+	g.Resize(0, 3)
+	if g.Cols[0].Width != 7 {
+		t.Errorf("resize: %d", g.Cols[0].Width)
+	}
+}
+
+func TestEscDeselectsAndTabEditsNextCell(t *testing.T) {
+	g := testGrid()
+	g.Move(1, 0, true)
+	if !g.selecting {
+		t.Fatal("shift-move selects")
+	}
+	g.ClearSelection()
+	if g.selecting {
+		t.Fatal("esc deselects")
+	}
+	g.GoRow(0, false)
+	g.GoCol(1, false)
+	g.StartEdit()
+	g.edit.Set("Annie")
+	g.EditKey(tea.KeyPressMsg{Code: tea.KeyTab})
+	if g.Rows[0].Cur[1] != "Annie" || g.col != 2 || !g.Editing() {
+		t.Fatalf("tab saves and edits the next cell: %v col %d editing %v", g.Rows[0].Cur, g.col, g.Editing())
+	}
+	g.EditKey(tea.KeyPressMsg{Code: tea.KeyTab}) // last column: wraps to the next row
+	if g.row != 1 || g.col != 0 || !g.Editing() {
+		t.Fatalf("wrap: row %d col %d", g.row, g.col)
+	}
+	g.EditKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if g.Editing() {
+		t.Fatal("esc closes the editor")
+	}
+}
+
+func TestCellEditPopoverTab(t *testing.T) {
+	var saved string
+	var moved int
+	d := newCellEdit("name", "Ann", func(s string) tea.Cmd { saved = s; return nil })
+	d.next = func(dir int) tea.Cmd { moved = dir; return nil }
+	d.ed.SetText("Annie")
+	d.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if saved != "Annie" || moved != 1 {
+		t.Fatalf("tab: saved %q moved %d", saved, moved)
+	}
+	d.ed.SetText("a\nb") // multi-line text keeps Tab as indentation
+	moved = 0
+	d.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if moved != 0 {
+		t.Fatal("tab in multi-line text must not leave the popover")
+	}
+}
+
+func TestThemeSurfaceKeys(t *testing.T) {
+	for name, p := range map[string]map[string]string{"dark": darkPalette, "light": lightPalette} {
+		for _, k := range []string{"editor_bg", "window_bg", "sidebar_bg", "tabs_bg", "tab_active_bg", "notification_bg", "grid_line", "cell_selection"} {
+			if p[k] == "" {
+				t.Errorf("%s lacks %s", name, k)
+			}
+		}
+	}
+	for name, p := range namedPalettes {
+		for _, k := range []string{"editor_bg", "window_bg", "sidebar_bg", "tabs_bg", "tab_active_bg", "notification_bg", "grid_line", "cell_selection"} {
+			if p[k] == "" {
+				t.Errorf("%s lacks %s", name, k)
+			}
+		}
+	}
+	pal := palette(config.Theme{Name: "dark", Colors: map[string]string{"sel_cell": "#123456"}})
+	if pal["cell_selection"] != "#123456" {
+		t.Errorf("overriding sel_cell must carry to cell_selection: %q", pal["cell_selection"])
+	}
+	if !strings.Contains(ThemeTOML(config.Theme{Name: "dark"}), `"editor_bg"`) {
+		t.Error("theme export lists the new keys")
+	}
+}
