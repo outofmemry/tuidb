@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -63,6 +65,9 @@ type Grid struct {
 	SortDesc             bool
 	RowOffset            int  // first row number shown in the gutter (paging)
 	NoStripes            bool // table.alternating_rows = false
+	DecodeSpatial        bool // table.decode_spatial: geometry bytes show as WKT
+	wktCache             map[wktKey]wktEntry
+	unsorted             []*gridRow // loaded order, kept while SortLocal has the rows sorted
 }
 
 // SetData replaces the contents with a fresh result (drops pending edits and undo history).
@@ -92,6 +97,7 @@ func (g *Grid) SetData(cols []gridCol, rows [][]any) {
 	g.top = clamp(g.top, 0, g.row)
 	g.edit, g.selecting = nil, false
 	g.undo, g.redo = nil, nil
+	g.wktCache, g.unsorted, g.SortCol, g.SortDesc = nil, nil, "", false
 }
 
 func sameNames(old map[string]int, cols []gridCol) bool {
