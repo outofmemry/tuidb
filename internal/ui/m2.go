@@ -80,12 +80,12 @@ func (w *Workspace) job(label string, work func(ctx context.Context, sess db.Ses
 			w.log("-- "+label, time.Since(start), err)
 			switch {
 			case stopped:
-				return w.a.say("%s: stopped", label)
+				return tea.Batch(w.a.say("%s: stopped", label), je.finish(w, nil, true))
 			case err != nil:
-				return w.a.fail(fmt.Errorf("%s: %w", label, err))
+				return tea.Batch(w.a.fail(fmt.Errorf("%s: %w", label, err)), je.finish(w, err, false))
 			}
 			msg, cmd := then()
-			return tea.Batch(w.a.say("%s", msg), cmd)
+			return tea.Batch(w.a.say("%s", msg), cmd, je.finish(w, nil, false))
 		}
 	}()
 	return tea.Batch(w.a.say("%s…", label), pump(ch))
