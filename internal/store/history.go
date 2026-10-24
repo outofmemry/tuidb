@@ -144,60 +144,89 @@ func (h *History) Append(conn string, e HistoryEntry) error {
 	return h.trimLocked(conn, n)
 }
 
-// AppendAll writes entries in one lock/open/write. IDs are derived from conn, SQL and timestamp, so
-// importing the same file twice (or retrying after a failure) skips entries already present.
-func (h *History) AppendAll(conn string, entries []HistoryEntry) error {
+// AppendAll writes entries in one lock/open/write and reports how many were new. An entry keeps its ID when
+// it has one (an exported history file does), otherwise it gets the same ID Append would give it. Entries
+// already present are skipped, matched by ID or by their content (database, SQL, original, time, duration),
+// so importing the same file twice, or a file written before IDs were unified, adds nothing. The batch is
+// stored oldest first whatever order it came in, so the trim keeps the newest entries; when it is older than
+// what the file already holds the file is rewritten in time order. Any batch size works.
+func (h *History) AppendAll(conn string, entries []HistoryEntry) (int, error) {
 	if len(entries) == 0 {
-		return nil
+		return 0, nil
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
-		return err
+		return 0, err
 	}
 	unlock, err := config.LockFile(h.path(conn))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer unlock()
-	have := map[string]bool{}
 	existing, err := h.readAll(conn)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	have := make(map[string]bool, len(existing)*2)
+	var newest time.Time
 	for _, e := range existing {
 		have[e.ID] = true
+		have[entryID(conn, e)] = true
+		if e.Time.After(newest) {
+			newest = e.Time
+		}
 	}
-	var buf bytes.Buffer
+	now := time.Now()
+	var fresh []HistoryEntry
 	for _, e := range entries {
 		if e.Time.IsZero() {
-			e.Time = time.Now()
+			e.Time = now
 		}
-		if len(e.SQL) > maxSQLBytes {
-			e.SQL = strings.ToValidUTF8(e.SQL[:maxSQLBytes], "") + "\n-- (truncated)"
+		key := entryID(conn, e)
+		if e.ID == "" {
+			e.ID = key
 		}
-		if len(e.Original) > maxSQLBytes {
-			e.Original = strings.ToValidUTF8(e.Original[:maxSQLBytes], "")
-		}
-		sum := sha256.Sum256([]byte(conn + "\x00" + e.SQL + "\x00" + e.Time.UTC().Format(time.RFC3339Nano)))
-		e.ID = hex.EncodeToString(sum[:12])
-		if have[e.ID] {
+		// Stored entries are matched by their clipped text, so also try the key of the clipped form.
+		c := e
+		clip(&c)
+		ckey := entryID(conn, c)
+		if have[e.ID] || have[key] || have[ckey] {
 			continue
 		}
-		have[e.ID] = true
-		line, err := json.Marshal(e)
-		if err != nil {
-			return err
-		}
-		buf.Write(line)
-		buf.WriteByte('\n')
+		have[e.ID], have[key] = true, true // ckey stays out: two long statements differing past the clip are distinct
+		clip(&e)
+		fresh = append(fresh, e)
 	}
-	if buf.Len() == 0 {
-		return nil
+	if len(fresh) == 0 {
+		return 0, nil
+	}
+	sort.SliceStable(fresh, func(i, j int) bool { return fresh[i].Time.Before(fresh[j].Time) })
+	if fresh[0].Time.Before(newest) { // interleaves with what is there: keep the whole file in time order
+		all := append(existing, fresh...)
+		sort.SliceStable(all, func(i, j int) bool { return all[i].Time.Before(all[j].Time) })
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		for _, e := range all {
+			if err := enc.Encode(e); err != nil {
+				return 0, err
+			}
+		}
+		if err := config.WriteFileAtomic(h.path(conn), buf.Bytes()); err != nil {
+			return 0, err
+		}
+		return len(fresh), h.trimLocked(conn, buf.Len()/len(all)+1)
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	for _, e := range fresh {
+		if err := enc.Encode(e); err != nil {
+			return 0, err
+		}
 	}
 	f, err := os.OpenFile(h.path(conn), os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	out := buf.Bytes()
 	if st, err := f.Stat(); err == nil && st.Size() > 0 {
