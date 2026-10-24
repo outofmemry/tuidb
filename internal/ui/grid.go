@@ -999,3 +999,136 @@ func (g *Grid) FindSpec(s FindSpec, dir int) bool {
 	}
 	return false
 }
+
+// replaceIn rewrites cell text for the operator: Contains replaces every occurrence, Prefix / Suffix the
+// affected end. Not contains has no match text to replace, so it never rewrites.
+func (s FindSpec) replaceIn(cell, with string) (string, bool) {
+	if s.Op == FindNotContains || !s.match(cell) {
+		return cell, false
+	}
+	switch s.Op {
+	case FindPrefix:
+		if n, ok := s.endLen(cell, true); ok {
+			return with + cell[n:], true
+		}
+		return cell, false
+	case FindSuffix:
+		if n, ok := s.endLen(cell, false); ok {
+			return cell[:len(cell)-n] + with, true
+		}
+		return cell, false
+	}
+	if s.Case {
+		return strings.ReplaceAll(cell, s.Text, with), true
+	}
+	// case-insensitive: walk the lowered copy (same byte offsets for ASCII; other scripts fall back to exact)
+	lc, lt := strings.ToLower(cell), strings.ToLower(s.Text)
+	if len(lc) != len(cell) {
+		return strings.ReplaceAll(cell, s.Text, with), strings.Contains(cell, s.Text)
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(lc, lt)
+		if i < 0 {
+			break
+		}
+		b.WriteString(cell[:i] + with)
+		cell, lc = cell[i+len(lt):], lc[i+len(lt):]
+	}
+	b.WriteString(cell)
+	return b.String(), true
+}
+
+// endLen is the byte length of the start (prefix) or end of cell that matches s.Text, compared on rune
+// boundaries of cell itself, so case folding that changes byte length cannot push an index out of range.
+func (s FindSpec) endLen(cell string, prefix bool) (int, bool) {
+	eq := func(a string) bool { return a == s.Text || !s.Case && strings.EqualFold(a, s.Text) }
+	for i := 0; i <= len(cell); i++ {
+		at := i
+		if !prefix {
+			at = len(cell) - i
+		}
+		if at < len(cell) && at > 0 && !utf8.RuneStart(cell[at]) {
+			continue
+		}
+		if prefix && eq(cell[:i]) {
+			return i, true
+		}
+		if !prefix && eq(cell[len(cell)-i:]) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// textual reports whether a column of that type holds text (an unknown type counts as text).
+func textual(typ string) bool {
+	t := strings.ToLower(typ)
+	if t == "" {
+		return true
+	}
+	for _, k := range []string{"char", "text", "string", "clob", "enum", "json", "name"} {
+		if strings.Contains(t, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// Replace rewrites matching cells through the pending-edit path: only the cursor cell (all=false) or every
+// matching cell, as one undo step. Returns how many cells changed; 0 when the grid is not editable.
+func (g *Grid) Replace(s FindSpec, with string, all bool) int {
+	n, _ := g.ReplaceSkip(s, with, all)
+	return n
+}
+
+// ReplaceSkip is Replace that also reports how many cells it left alone: with "(any column)" the primary
+// key columns and non-text columns are not rewritten (choose the column to edit one of those).
+func (g *Grid) ReplaceSkip(s FindSpec, with string, all bool) (changed, skipped int) {
+	if !g.Editable || s.Text == "" || len(g.Rows) == 0 {
+		return 0, 0
+	}
+	in := g.findCols(s)
+	type hit struct {
+		r, c int
+		v    string
+	}
+	var hits []hit
+	try := func(r, c int) {
+		row := g.Rows[r]
+		if !in[c] || row.State == rowDeleted || isSpecial(row.Cur[c]) {
+			return
+		}
+		raw := db.FormatValue(row.Cur[c]) // not cellText: that folds line breaks
+		if v, ok := s.replaceIn(raw, with); ok && v != raw {
+			if s.Col == "" && (g.Cols[c].PK || !textual(g.Cols[c].Type)) {
+				skipped++
+				return
+			}
+			hits = append(hits, hit{r, c, v})
+		}
+	}
+	if all {
+		for r := range g.Rows {
+			for c := range g.Cols {
+				try(r, c)
+			}
+		}
+	} else {
+		try(g.row, g.col)
+	}
+	if len(hits) == 0 {
+		return 0, skipped
+	}
+	g.snapshot()
+	for _, h := range hits {
+		row := g.own(h.r)
+		row.Cur[h.c] = h.v
+		if row.State == rowNew || !sameValue(h.v, row.Orig[h.c]) {
+			row.Dirty[h.c] = true
+		} else {
+			delete(row.Dirty, h.c)
+		}
+	}
+	return len(hits), skipped
+}
