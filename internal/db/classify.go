@@ -72,8 +72,14 @@ func scan(dialect, s string) []tok {
 		case c == '*' && execComment > 0 && i+1 < n && s[i+1] == '/':
 			execComment--
 			i += 2
+		case js && c == '/' && jsRegexEnd(s, i) > 0:
+			i = jsRegexEnd(s, i)
+			out = append(out, tok{s: "\""})
 		case c == '\'' || c == '"' || c == '`':
 			backslash := r.backslash
+			if c == '`' && (dialect == "mysql" || dialect == "mariadb") {
+				backslash = false
+			}
 			if pg && c == '\'' && i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') && (i < 2 || !isWord(s[i-2])) {
 				backslash = true // E'...' strings
 			}
@@ -250,6 +256,11 @@ func IsReadOnly(dialect, stmt string) bool {
 		return mongoReadOnly(stmt)
 	}
 	ts := scan(dialect, stmt)
+	for i, t := range ts {
+		if t.s == ";" && i < len(ts)-1 {
+			return false // several statements: not provably read-only
+		}
+	}
 	for len(ts) > 0 && ts[0].s == "(" {
 		ts = ts[1:]
 	}

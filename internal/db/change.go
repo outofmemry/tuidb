@@ -86,10 +86,12 @@ func planOne(d Dialect, c Change) (Statement, error) {
 			cols = append(cols, kv)
 		}
 		switch {
-		case len(cols) == 0 && d.Name == "postgres":
-			b.raw("INSERT INTO " + tbl + " DEFAULT VALUES")
-		case len(cols) == 0:
+		case len(cols) == 0 && d.Mutate:
+			return Statement{}, errors.New("ClickHouse cannot insert a row without values: fill at least one column")
+		case len(cols) == 0 && d.Name == "mysql":
 			b.raw("INSERT INTO " + tbl + " () VALUES ()")
+		case len(cols) == 0:
+			b.raw("INSERT INTO " + tbl + " DEFAULT VALUES")
 		default:
 			names := make([]string, len(cols))
 			for i, kv := range cols {

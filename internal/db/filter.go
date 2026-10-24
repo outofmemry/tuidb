@@ -52,15 +52,42 @@ func likeEscape(s string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
+// splitList splits an IN list on commas outside quotes; a doubled quote inside quotes is one literal quote.
 func splitList(v string) []string {
 	var out []string
-	for _, p := range strings.Split(v, ",") {
-		p = strings.TrimSpace(p)
-		if len(p) >= 2 && (p[0] == '\'' || p[0] == '"') && p[len(p)-1] == p[0] {
-			p = p[1 : len(p)-1]
+	var cur strings.Builder
+	var q byte
+	quoted := false
+	flush := func() {
+		s := cur.String()
+		if !quoted {
+			s = strings.TrimSpace(s)
 		}
-		out = append(out, p)
+		out = append(out, s)
+		cur.Reset()
+		quoted = false
 	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case q != 0 && c == q && i+1 < len(v) && v[i+1] == q:
+			cur.WriteByte(q)
+			i++
+		case q != 0 && c == q:
+			q = 0
+		case q != 0:
+			cur.WriteByte(c)
+		case (c == '\'' || c == '"') && strings.TrimSpace(cur.String()) == "":
+			q, quoted = c, true
+			cur.Reset()
+		case c == ',':
+			flush()
+		case quoted && (c == ' ' || c == '\t'):
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flush()
 	return out
 }
 

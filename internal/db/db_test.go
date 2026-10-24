@@ -22,6 +22,10 @@ func TestSplit(t *testing.T) {
 		{"postgres", "select /* ; */ 1", []string{"select /* ; */ 1"}},
 		{"redis", "GET a\n\n# note\nSET b 1\n", []string{"GET a", "SET b 1"}},
 		{"mongo", "db.a.find({x:';'});db.b.find()", []string{"db.a.find({x:';'})", "db.b.find()"}},
+		{"mongo", `db.links.find({url: /^https?:\/\//}); db.links.deleteMany({})`, []string{`db.links.find({url: /^https?:\/\//})`, "db.links.deleteMany({})"}},
+		{"mongo", `db.users.find({name: /a;b/})`, []string{`db.users.find({name: /a;b/})`}},
+		{"mysql", "SELECT `x\\` FROM t; DELETE FROM t;", []string{"SELECT `x\\` FROM t", "DELETE FROM t"}},
+		{"mysql", "  DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\nDELIMITER ;\nSELECT 2;", []string{"CREATE PROCEDURE p() BEGIN SELECT 1; END", "SELECT 2"}},
 	} {
 		var got []string
 		for _, s := range Split(c.dialect, c.in) {
@@ -427,5 +431,38 @@ func TestSplitMySQLDelimiter(t *testing.T) {
 	want := []string{"CREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END", "DROP PROCEDURE q", "SELECT 3", "SELECT 4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestReviewFixesDB(t *testing.T) {
+	if IsReadOnly("postgres", "SELECT 1; DELETE FROM t") || !IsReadOnly("postgres", "SELECT 1;") {
+		t.Error("interior ';' must not be read-only, trailing one may be")
+	}
+	if IsReadOnly("mongo", `db.links.find({url: /^https?:\/\//}); db.links.deleteMany({})`) {
+		t.Error("regex literal hid a write")
+	}
+	for _, c := range []struct {
+		in   string
+		want []string
+	}{
+		{`'x,y', 2`, []string{"x,y", "2"}},
+		{`'it''s', "a""b"`, []string{"it's", `a"b`}},
+		{`1, '2' ,3`, []string{"1", "2", "3"}},
+	} {
+		if got := splitList(c.in); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("splitList(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	for _, c := range []struct {
+		d    Dialect
+		want string
+	}{{PG, "DEFAULT VALUES"}, {MySQL, "() VALUES ()"}, {Dialect{Name: "sqlite", Quote: PG.Quote}, "DEFAULT VALUES"}} {
+		st, err := planOne(c.d, Change{Kind: Insert, ObjRef: ObjRef{Name: "t"}})
+		if err != nil || !strings.HasSuffix(st.Text, c.want) {
+			t.Errorf("%s empty insert: %q %v", c.d.Name, st.Text, err)
+		}
+	}
+	if _, err := planOne(ClickHouse, Change{Kind: Insert, ObjRef: ObjRef{Name: "t"}}); err == nil {
+		t.Error("clickhouse empty insert should error")
 	}
 }

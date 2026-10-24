@@ -67,8 +67,13 @@ func Split(dialect, text string) []Stmt {
 					i++
 				}
 			}
+		case dialect == "mongo" && c == '/' && jsRegexEnd(text, i) > 0: // /re/ may contain // ; or quotes
+			i = jsRegexEnd(text, i)
 		case c == '\'' || c == '"' || c == '`':
 			backslash := r.backslash
+			if c == '`' && (dialect == "mysql" || dialect == "mariadb") {
+				backslash = false // only doubling escapes inside MySQL backticks
+			}
 			if pg && c == '\'' && i > 0 && (text[i-1] == 'E' || text[i-1] == 'e') && (i < 2 || !isWord(text[i-2])) {
 				backslash = true // E'...' strings treat backslash as an escape
 			}
@@ -93,7 +98,7 @@ func Split(dialect, text string) []Stmt {
 				continue
 			}
 			i++
-		case dialect == "mysql" && (i == 0 || text[i-1] == '\n') && len(text) >= i+10 && strings.EqualFold(text[i:i+9], "DELIMITER") && (text[i+9] == ' ' || text[i+9] == '\t'):
+		case dialect == "mysql" && atLineStart(text, i) && len(text) >= i+10 && strings.EqualFold(text[i:i+9], "DELIMITER") && (text[i+9] == ' ' || text[i+9] == '\t'):
 			flush(i)
 			j := i + 9
 			for j < n && text[j] != '\n' {
@@ -128,6 +133,43 @@ func splitLines(text string) []Stmt {
 		off += len(line)
 	}
 	return out
+}
+
+// atLineStart reports whether only blanks sit between the previous newline (or the start) and i.
+func atLineStart(s string, i int) bool {
+	for i > 0 && (s[i-1] == ' ' || s[i-1] == '\t') {
+		i--
+	}
+	return i == 0 || s[i-1] == '\n'
+}
+
+// jsRegexEnd returns the index after a JavaScript regex literal starting at s[i] (flags are left to the
+// caller's word scan), or 0 when the '/' is a division or the literal is not closed on its line.
+// shortcut: decides by the previous byte only, so `) / x /` or `} /re/` read as division; fine for shell one-liners.
+func jsRegexEnd(s string, i int) int {
+	j := i - 1
+	for j >= 0 && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') {
+		j--
+	}
+	if j >= 0 && !strings.ContainsRune("(,:=[{!&|?;+-*%<>~^", rune(s[j])) {
+		return 0
+	}
+	class := false
+	for k := i + 1; k < len(s); k++ {
+		switch {
+		case s[k] == '\n':
+			return 0
+		case s[k] == '\\':
+			k++
+		case s[k] == '[':
+			class = true
+		case s[k] == ']':
+			class = false
+		case s[k] == '/' && !class:
+			return k + 1
+		}
+	}
+	return 0
 }
 
 // skipQuoted returns the index after the closing quote. backslash says \x escapes the next byte.
