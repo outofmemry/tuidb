@@ -434,6 +434,7 @@ type quickLookDlg struct {
 	text  string
 	tree  *docTree
 	raw   bool
+	mini  bool // raw JSON shown on one line (m), pretty-printed otherwise
 	top   int
 	lines []string    // wrapped raw lines, built once per width
 	kinds [][]tokKind // their token kinds (JSON coloring)
@@ -444,6 +445,8 @@ type quickLookDlg struct {
 	isBytes  bool                 // a binary cell: e edits it as hex
 	enc      string               // how rawBytes is shown now
 	onSave   func([]byte) tea.Cmd // set when the cell can be written back
+	info     string               // header line of a binary cell: size, "image/png 640×480", "PDF, 12 bytes"
+	note     string               // footer line under it
 }
 
 // quickLookMax caps what quick look formats: a huge cell would be wrapped and pretty-printed per frame.
