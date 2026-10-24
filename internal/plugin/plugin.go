@@ -83,11 +83,24 @@ func List() ([]Plugin, error) {
 		}
 		out = append(out, p)
 	}
+	js, _ := filepath.Glob(filepath.Join(Dir(), "*.js"))
+	for _, f := range js {
+		out = append(out, loadJS(f))
+	}
 	return out, nil
 }
 
-// Run execs the command without a shell: JSON context on stdin, stdout is the result.
-func (p Plugin) Run(ctx context.Context, in Context) (string, error) {
+// Run runs the plugin. A command plugin execs without a shell (JSON context on stdin, stdout is Output.Text);
+// a .js plugin runs in-process with the API described in m13_script.go.
+func (p Plugin) Run(ctx context.Context, in Context, host Host) (Output, error) {
+	if p.JS {
+		return p.runJS(ctx, in, host)
+	}
+	text, err := p.runCommand(ctx, in)
+	return Output{Text: text}, err
+}
+
+func (p Plugin) runCommand(ctx context.Context, in Context) (string, error) {
 	data, err := json.Marshal(in)
 	if err != nil {
 		return "", err
