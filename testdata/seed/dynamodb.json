@@ -1,0 +1,47 @@
+{
+  "_comment": "Loaded by internal/db/dynamodb/dynamodb_integration_test.go. spec is the driver's CREATE TABLE json; items use plain JSON plus {\"$binary\": base64}, {\"$ss\"|\"$ns\"|\"$bs\": [...]} for what JSON cannot say. Numbers are kept as exact decimal text.",
+  "tables": [
+    {
+      "name": "tuidb_users",
+      "spec": {
+        "keys": [{"name": "id", "type": "N"}],
+        "indexes": [{"name": "by_email", "keys": [{"name": "email", "type": "S"}]}]
+      },
+      "items": [
+        {"id": 1, "name": "Ada Lovelace", "email": "ada@example.com", "age": 36, "active": true, "tags": {"$ss": ["math", "poet"]}},
+        {"id": 2, "name": "Alan Turing", "email": "alan@example.com", "age": 41, "active": false,
+         "scores": {"$ns": [1.5, 2.25, 100]},
+         "profile": {"city": "Wilmslow", "langs": ["en", "de"], "address": {"zip": "SK9"}},
+         "avatar": {"$binary": "3q2+7w=="}},
+        {"id": 3, "name": "Grace Hopper", "email": "grace@example.com", "age": 85, "active": true, "nickname": null,
+         "balance": 12345678901234567890.123456789},
+        {"id": 4, "name": "O'Brien \"Q\"; DROP", "email": "ob@example.com", "history": [1, "two", {"three": 3}, [4]]}
+      ]
+    },
+    {
+      "name": "tuidb_orders",
+      "spec": {
+        "keys": [{"name": "customer", "type": "S"}, {"name": "ts", "type": "N"}],
+        "indexes": [{"name": "by_status", "kind": "LSI", "keys": [{"name": "customer", "type": "S"}, {"name": "status", "type": "S"}], "projection": "KEYS_ONLY"}]
+      },
+      "items": [
+        {"customer": "c1", "ts": 100, "status": "paid", "total": 9.99},
+        {"customer": "c1", "ts": 200, "status": "new", "total": 20},
+        {"customer": "c1", "ts": 300, "status": "paid", "total": 5.5},
+        {"customer": "c2", "ts": 100, "status": "new", "total": 1},
+        {"customer": "c2", "ts": 150, "status": "shipped", "total": 3.25}
+      ]
+    },
+    {
+      "name": "tuidb_events",
+      "spec": {"keys": [{"name": "event_id", "type": "S"}]},
+      "items": [
+        {"event_id": "e1", "kind": "login", "payload": {"ip": "10.0.0.1"}},
+        {"event_id": "e2", "kind": "logout", "payload": {"ip": "10.0.0.2"}, "ttl": 1900000000},
+        {"event_id": "e3", "kind": 7},
+        {"event_id": "e4", "kind": "login", "flags": {"$bs": ["AQI=", "AwQ="]}},
+        {"event_id": "e5"}
+      ]
+    }
+  ]
+}

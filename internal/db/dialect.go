@@ -20,6 +20,8 @@ type Dialect struct {
 	LikeCast bool
 	// BackslashEscapes: string literals read a backslash as an escape (MySQL, ClickHouse).
 	BackslashEscapes bool
+	// Funcs: Contains / Has prefix render as contains(col, ?) / begins_with(col, ?) (PartiQL has no LIKE).
+	Funcs bool
 }
 
 func quoteWith(q string) func(string) string {
