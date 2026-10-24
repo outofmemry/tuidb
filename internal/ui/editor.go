@@ -337,17 +337,18 @@ func (e *Editor) foldInfo() (hid map[int]bool, cnt map[int]int) {
 
 // ToggleFold folds or unfolds the statement under the cursor.
 func (e *Editor) ToggleFold() {
-	for i, s := range db.Split(e.Dialect, e.Text()) {
+	for _, s := range e.stmts() {
 		if e.Offset() < s.Start || e.Offset() > s.End {
 			continue
 		}
 		if e.folds == nil {
-			e.folds = map[int]bool{}
+			e.folds = map[uint64]bool{}
 		}
-		if e.folds[i] {
-			delete(e.folds, i)
+		k := stmtKey(s)
+		if e.folds[k] {
+			delete(e.folds, k)
 		} else {
-			e.folds[i] = true
+			e.folds[k] = true
 			e.move(e.rowOf(s.Start), 0, false)
 		}
 		e.cache.dirty = true
