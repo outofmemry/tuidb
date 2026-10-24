@@ -184,6 +184,7 @@ func (w *Workspace) exportAction() tea.Cmd {
 	}
 	fields := []formField{
 		{Key: "format", Label: "Format", Kind: fChoice, Options: []string{"csv", "json", "sql", "xlsx"}, Value: "csv"},
+		{Key: "header", Label: "Header row", Kind: fBool, Value: fmt.Sprint(cfg.Export.Header), Show: isCSV},
 		{Key: "null_as", Label: "NULL written as", Kind: fText, Value: cfg.CSV.NullAs, Show: isCSV},
 		{Key: "line_break", Label: "Line breaks", Kind: fChoice, Options: []string{"LF", "CRLF"}, Value: lb, Show: isCSV},
 		{Kind: fLabel, Value: "⚠ " + export.CheckCSV(cfg.CSV), Show: func(v map[string]string) bool { return isCSV(v) && export.CheckCSV(cfg.CSV) != "" }},
@@ -207,7 +208,7 @@ func (w *Workspace) exportAction() tea.Cmd {
 		if v["many"] == "true" {
 			return w.pickExportTables(ref)
 		}
-		path, o := strings.TrimSpace(v["path"]), optsOf(v)
+		path, o := w.expandPath(strings.TrimSpace(v["path"]), name), optsOf(v)
 		run := func() tea.Cmd {
 			if v["all"] == "true" {
 				return w.runExportAll(path, o, all)
