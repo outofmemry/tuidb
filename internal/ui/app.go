@@ -177,6 +177,9 @@ func (a *App) askSecret(title, what string) (string, error) {
 	}
 	v, ok := <-ans
 	if !ok {
+		if locked {
+			return "", errors.New("locked")
+		}
 		return "", errors.New("cancelled")
 	}
 	return v, nil
@@ -242,6 +245,10 @@ type testedMsg struct {
 // ---- helpers used by the other files ------------------------------------------------------
 
 func (a *App) push(o Overlay) {
+	if _, isLock := o.(*lockDlg); !isLock && a.locked() { // the lock stays on top: nothing opens over it
+		a.overlays = append(a.overlays[:len(a.overlays)-1], o, a.overlays[len(a.overlays)-1])
+		return
+	}
 	a.overlays = append(a.overlays, o)
 	a.machine = keymap.Machine{Map: a.d.Keys} // a pending prefix must not outlive a dialog
 }
