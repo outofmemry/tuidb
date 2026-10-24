@@ -101,20 +101,42 @@ func (e *Editor) Text() string { return strings.Join(e.lines, "\n") }
 // markChanged flags the buffer for the owner (Changed) and the render cache (dirty).
 func (e *Editor) markChanged() {
 	e.Changed, e.cache.dirty = true, true
-	// shortcut: editing unfolds everything (statement indexes shift); keep per-statement folds if it matters
-	if len(e.folds) > 0 {
-		e.folds = nil
-		if e.OnFolds != nil {
-			e.OnFolds(nil)
+	if len(e.folds) > 0 { // an edited statement hashes differently and unfolds; the others keep their fold
+		keep := map[uint64]bool{}
+		for _, s := range e.stmts() {
+			if k := stmtKey(s); e.folds[k] {
+				keep[k] = true
+			}
+		}
+		e.folds = keep
+		if cur := e.Folded(); !slices.Equal(cur, e.lastFold) {
+			e.foldsChanged()
 		}
 	}
+}
+
+// stmtKey identifies a statement for folding: FNV-1a of its trimmed text. Identical statements share
+// one key, so folding one folds its twins (shortcut: acceptable for SQL scripts, per-occurrence keys if it bites).
+func stmtKey(s db.Stmt) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(strings.TrimSpace(s.Text)))
+	return h.Sum64()
+}
+
+// stmts is the statement list for the current text, cached with the render cache.
+func (e *Editor) stmts() []db.Stmt {
+	c := &e.cache
+	if c.dirty || !c.split {
+		c.stmts, c.split = db.Split(e.Dialect, e.Text()), true
+	}
+	return c.stmts
 }
 
 func (e *Editor) SetText(s string) {
 	s = strings.ToValidUTF8(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\uFFFD")
 	e.lines = strings.Split(s, "\n")
 	e.cache.dirty = true
-	e.folds = nil
+	e.folds, e.lastFold = nil, nil
 	e.cur, e.anchor, e.top, e.left = pos{}, nil, 0, 0
 	e.undo, e.redo, e.lastKind = nil, nil, ""
 	e.blk = nil
