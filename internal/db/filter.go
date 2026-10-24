@@ -35,6 +35,9 @@ func (fs FilterSet) Active() []Filter {
 
 // Operators offered in the filter bar for an engine.
 func Operators(dialect string) []string {
+	if dialect == "partiql" { // DynamoDB: no LIKE, and no suffix test
+		return []string{"=", "<>", "<", ">", "<=", ">=", "IN", "NOT IN", "IS NULL", "IS NOT NULL", "BETWEEN", "NOT BETWEEN", "Contains", "Not contains", "Has prefix"}
+	}
 	ops := []string{"=", "<>", "<", ">", "<=", ">=", "IN", "NOT IN", "IS NULL", "IS NOT NULL", "BETWEEN", "NOT BETWEEN", "LIKE"}
 	if dialect == "postgres" {
 		ops = append(ops, "ILIKE")
@@ -131,6 +134,18 @@ func oneCondition(d Dialect, col string, f Filter, next func(any) string) (strin
 	like := "LIKE"
 	if d.ILike {
 		like = "ILIKE" // TablePlus: Contains/prefix/suffix are case-insensitive on PostgreSQL
+	}
+	if d.Funcs {
+		switch f.Op {
+		case "Contains":
+			return "contains(" + col + ", " + next(f.Value) + ")", nil
+		case "Not contains":
+			return "NOT contains(" + col + ", " + next(f.Value) + ")", nil
+		case "Has prefix":
+			return "begins_with(" + col + ", " + next(f.Value) + ")", nil
+		case "LIKE", "ILIKE", "Has suffix":
+			return "", fmt.Errorf("%s is not supported by PartiQL on DynamoDB", f.Op)
+		}
 	}
 	switch f.Op {
 	case "=", "<>", "<", ">", "<=", ">=":
