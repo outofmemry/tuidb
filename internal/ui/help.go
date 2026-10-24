@@ -43,19 +43,15 @@ type helpDlg struct {
 func (a *App) showHelp() {
 	ctx := a.context()
 	h := &helpDlg{a: a, pre: keymap.Display(a.d.Keys.Prefix)}
-	seen := map[string]bool{}
 	for _, c := range []string{ctx, keymap.Global} {
 		title := strings.ToUpper(c[:1]) + c[1:]
 		h.rows = append(h.rows, helpRow{header: title})
-		bs := a.d.Keys.Bindings(c)
-		sort.SliceStable(bs, func(i, j int) bool { return bs[i].Desc < bs[j].Desc })
-		for _, b := range bs {
-			// Bindings(ctx) also returns the global ones; list each under its own section
-			if seen[b.Action] || b.Context != c {
-				continue
+		// every binding of the context in keymap table order, no-prefix ones included: the web help and `webtuidb -keys`
+		// list the same rows in the same order (M14 check 2), so nothing here re-sorts or filters
+		for _, b := range a.d.Keys.All() {
+			if b.Context == c {
+				h.rows = append(h.rows, helpRow{action: b.Action, key: keymap.Display(b.Key), desc: b.Desc, ctx: b.Context, noPref: b.NoPrefix})
 			}
-			seen[b.Action] = true
-			h.rows = append(h.rows, helpRow{action: b.Action, key: keymap.Display(b.Key), desc: b.Desc, ctx: b.Context})
 		}
 		if ctx == keymap.Global {
 			break
