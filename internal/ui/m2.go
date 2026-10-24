@@ -304,11 +304,16 @@ func (w *Workspace) importWizard(ref db.ObjRef, hasRef bool) tea.Cmd {
 		{Key: "source", Label: "Format", Kind: fChoice, Options: []string{"csv", "json", "sql"}, Value: "csv"},
 		{Key: "header", Label: "First row is the header", Kind: fBool, Value: "true", Show: csv},
 		{Key: "delim", Label: "Delimiter", Kind: fText, Value: w.a.d.Cfg.CSV.Delimiter, Show: csv},
+		{Key: "encoding", Label: "File encoding", Kind: fChoice, Options: []string{"utf-8", "latin1", "windows-1252", "utf-16le", "utf-16be", "shift_jis", "gbk"}, Value: "utf-8"},
+		{Key: "nullas", Label: "NULL as", Kind: fText, Hint: "cell text that becomes NULL (empty: the [csv] null_as setting)", Show: notSQL},
+		{Key: "emptynull", Label: "Empty is NULL", Kind: fBool, Value: "false", Show: notSQL},
+		{Key: "keepquote", Label: "Keep formula apostrophe", Kind: fBool, Value: "false", Show: notSQL},
 		{Key: "create", Label: "Create the table", Kind: fBool, Show: notSQL},
 		{Key: "table", Label: "Table", Kind: fText, Value: ref.Name, Show: notSQL},
 	}, func(v map[string]string) tea.Cmd {
 		path := strings.TrimSpace(v["path"])
-		o := importer.Options{Source: importer.Source(v["source"]), CSV: w.a.d.Cfg.CSV, Header: v["header"] == "true", CreateTable: v["create"] == "true"}
+		o := importer.Options{Source: importer.Source(v["source"]), CSV: w.a.d.Cfg.CSV, Header: v["header"] == "true", CreateTable: v["create"] == "true", Encoding: v["encoding"], Driver: w.conn.Driver,
+			NullAs: v["nullas"], EmptyIsNull: v["emptynull"] == "true", KeepFormulaQuote: v["keepquote"] == "true"}
 		if d := v["delim"]; d != "" {
 			o.CSV.Delimiter = d
 		}
