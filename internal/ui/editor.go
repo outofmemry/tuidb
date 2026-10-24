@@ -1117,7 +1117,7 @@ func (e *Editor) View(th Theme, focused bool) string {
 				if curLine { // the cursor-line tint runs to the right edge
 					line += th.CurRow.Render(strings.Repeat(" ", pad))
 				} else {
-					line += strings.Repeat(" ", pad)
+					line += blank(pad)
 				}
 			}
 			out = append(out, line)
@@ -1125,6 +1125,10 @@ func (e *Editor) View(th Theme, focused bool) string {
 	}
 	if e.ac.open && focused {
 		e.overlayComplete(th, out, gw)
+	}
+	if e.vim.on && e.vim.cmdOn && len(out) > 0 { // the ":" command line takes the bottom row
+		line := ansi.Truncate(th.Accent.Render(":"+e.vim.cmd+"▏"), e.W, "")
+		out[len(out)-1] = line + strings.Repeat(" ", max(0, e.W-width(line)))
 	}
 	return strings.Join(out, "\n")
 }
