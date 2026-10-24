@@ -73,6 +73,23 @@ key = "~/.ssh/id_ed25519"      # empty: ssh-agent
 Safe mode works as in TablePlus: Alert modes ask for confirmation (showing the exact statements),
 Safe modes ask for the database password. Mode 2 lets `SELECT`/`EXPLAIN`/`SHOW` through.
 
+## Web UI
+
+```sh
+make web build        # builds web/ into the binary (needs Node 20+; plain `make build` works without it, API only)
+tuidb --frontend --open
+```
+
+`--frontend` is opt-in: without it tuidb starts the terminal UI and never opens a port. With it, tuidb serves the same engine over a local HTTP API plus a browser app (TanStack Router, Query, Table and Virtual, CodeMirror). It shares `connections.toml`, query history, saved queries, pinned and recent tables and per-table filters/sort with the terminal UI, and enforces each connection's Safe Mode on the server.
+
+| Flag (with `--frontend`) | Meaning |
+|---|---|
+| `--listen addr` | default `127.0.0.1:7788`; non-loopback addresses are refused unless `--insecure-listen` |
+| `--open` | open the browser at the printed URL |
+| `--token t` | API token; default is random, printed once as `http://.../#token=...` |
+
+The token travels in the URL fragment (never sent to the server or logged) and is kept in `sessionStorage`. For frontend development run `tuidb --frontend --token dev` and `cd web && npm run dev`, which proxies `/api` to port 7788.
+
 ## Data and state
 
 Query history, saved queries and UI state live under `~/.local/share/tuidb/`

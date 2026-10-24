@@ -16,6 +16,7 @@ import (
 	"tuidb/internal/keymap"
 	"tuidb/internal/store"
 	"tuidb/internal/ui"
+	"tuidb/internal/web"
 
 	_ "tuidb/internal/db/cassandra"
 	_ "tuidb/internal/db/clickhouse"
@@ -41,11 +42,28 @@ func main() {
 func run() error {
 	cfgPath := flag.String("config", filepath.Join(config.ConfigDir(), "config.toml"), "path to config.toml")
 	keys := flag.Bool("keys", false, "print the key bindings (after config overrides) and exit")
+	frontend := flag.Bool("frontend", false, "serve the web UI instead of starting the terminal UI")
+	listen := flag.String("listen", "127.0.0.1:7788", "with --frontend: address to listen on")
+	openBrowser := flag.Bool("open", false, "with --frontend: open the browser")
+	token := flag.String("token", "", "with --frontend: API token (default: random)")
+	insecure := flag.Bool("insecure-listen", false, "with --frontend: allow a non-loopback --listen address (credentials go over the network)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: tuidb [flags] [connection-name | URL]\n\n  URL: postgresql:// mysql:// mariadb:// cockroachdb:// sqlite:// duckdb:// clickhouse:// cassandra:// dynamodb:// d1:// redis:// mongodb://\n\nflags:\n")
+		fmt.Fprintf(os.Stderr, "usage: tuidb [flags] [connection-name | URL]\n       tuidb --frontend [--listen addr] [--open]\n\n  URL: postgresql:// mysql:// mariadb:// cockroachdb:// sqlite:// duckdb:// clickhouse:// cassandra:// dynamodb:// d1:// redis:// mongodb://\n\nflags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if !*frontend {
+		var stray []string
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "listen", "open", "token", "insecure-listen":
+				stray = append(stray, "--"+f.Name)
+			}
+		})
+		if len(stray) > 0 {
+			return fmt.Errorf("%s only works together with --frontend", strings.Join(stray, ", "))
+		}
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -76,6 +94,15 @@ func run() error {
 		Cfg: cfg, Keys: km, Conns: conns, ConnPath: connPath, State: state,
 		Hist:    &store.History{Dir: filepath.Join(data, "history")},
 		Queries: &store.Queries{Root: filepath.Join(data, "queries")},
+	}
+	if *frontend {
+		if flag.NArg() > 0 {
+			return fmt.Errorf("--frontend takes no connection argument; pick the connection in the browser")
+		}
+		return web.Run(web.Options{
+			Cfg: cfg, Conns: conns, ConnPath: connPath, State: state, Hist: d.Hist, Queries: d.Queries,
+			Listen: *listen, Token: *token, Open: *openBrowser, Insecure: *insecure,
+		})
 	}
 	app := ui.NewApp(d)
 

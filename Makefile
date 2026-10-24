@@ -1,4 +1,8 @@
-.PHONY: build test up down smoke
+.PHONY: build test up down smoke web
+# Build the web app into internal/web/dist, which the Go binary embeds (`make web build`).
+web:
+	cd web && npm ci && npm run build
+	touch internal/web/dist/.gitkeep
 build:
 	go build -o tuidb .
 test:
