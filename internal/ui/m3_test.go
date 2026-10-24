@@ -63,7 +63,7 @@ func TestM3UsersDropNeedsTheName(t *testing.T) {
 	h.connect()
 	h.prefix("u")
 	h.press("down", "enter") // ann
-	h.press("down", "down", "down", "down", "down", "enter")
+	h.pickLabel("Drop user")
 	h.want("Drop user ann?")
 	h.press("enter")
 	h.want("type \"ann\"")
