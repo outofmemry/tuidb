@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +60,7 @@ func (w *Workspace) job(label string, work func(ctx context.Context, sess db.Ses
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	w.jobCancel = cancel
+	je := w.addJob(label, cancel) // the jobs centre (alt+J) lists it until dismissed
 	ch, sess, start := make(chan func() tea.Cmd, 16), w.sess, time.Now()
 	go func() {
 		defer close(ch)
@@ -69,7 +71,7 @@ func (w *Workspace) job(label string, work func(ctx context.Context, sess db.Ses
 					err = fmt.Errorf("internal error: %v", r)
 				}
 			}()
-			err = work(ctx, sess, func(f func() tea.Cmd) { ch <- f })
+			err = work(ctx, sess, func(f func() tea.Cmd) { ch <- je.noting(w, f) })
 		}()
 		stopped := err != nil && ctx.Err() != nil // decided when the work ended, not when the callback runs
 		ch <- func() tea.Cmd {
