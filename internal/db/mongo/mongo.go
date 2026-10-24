@@ -145,7 +145,7 @@ func (driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (
 }
 
 func (s *session) Caps() db.Capabilities {
-	return db.Capabilities{Indexes: true, Views: true, Document: true, Editor: "mongo", Dialect: "mongo", DatabaseNoun: "database"}
+	return db.Capabilities{Indexes: true, Views: true, Document: true, ProcessList: true, Editor: "mongo", Dialect: "mongo", DatabaseNoun: "database"}
 }
 
 func (s *session) ServerInfo() string                        { return s.info }
@@ -759,3 +759,55 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 	}
 	return nil
 }
+
+// Processes implements db.ProcessLister via currentOp.
+func (s *session) Processes(ctx context.Context) ([]db.ProcessInfo, error) {
+	var out struct {
+		Inprog []bson.M `bson:"inprog"`
+	}
+	if err := s.client.Database("admin").RunCommand(ctx, bson.D{{Key: "currentOp", Value: 1}}).Decode(&out); err != nil {
+		return nil, fmt.Errorf("currentOp: %w", err)
+	}
+	ps := make([]db.ProcessInfo, 0, len(out.Inprog))
+	for _, op := range out.Inprog {
+		ps = append(ps, processFromOp(op))
+	}
+	return ps, nil
+}
+
+func processFromOp(op bson.M) db.ProcessInfo {
+	p := db.ProcessInfo{ID: fmt.Sprint(op["opid"]), Elapsed: time.Duration(toInt(op["secs_running"])) * time.Second}
+	if a, _ := op["effectiveUsers"].(bson.A); len(a) > 0 {
+		switch u := a[0].(type) {
+		case bson.M:
+			p.User, _ = u["user"].(string)
+		case bson.D:
+			v, _ := lookup(u, "user")
+			p.User, _ = v.(string)
+		}
+	}
+	p.DB, _ = op["ns"].(string)
+	p.DB, _, _ = strings.Cut(p.DB, ".")
+	if p.State, _ = op["op"].(string); p.State == "" {
+		p.State, _ = op["desc"].(string)
+	}
+	if c, ok := op["command"]; ok {
+		if b, err := bson.MarshalExtJSON(bson.M{"v": c}, false, false); err == nil {
+			p.Query = strings.TrimSuffix(strings.TrimPrefix(string(b), `{"v":`), "}")
+		}
+	}
+	return p
+}
+
+func (s *session) Kill(ctx context.Context, id string) error {
+	var n any = id // mongos ids are strings like "shard:123"
+	if i, err := strconv.ParseInt(id, 10, 64); err == nil {
+		n = i
+	}
+	if _, err := s.runCmd(ctx, "admin", bson.D{{Key: "killOp", Value: 1}, {Key: "op", Value: n}}); err != nil {
+		return fmt.Errorf("killOp: %w", err)
+	}
+	return nil
+}
+
+var _ db.ProcessLister = (*session)(nil)
