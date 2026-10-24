@@ -183,6 +183,7 @@ func numberedPath(path string, n int) string {
 
 // runExportAll writes every result tab to its own file, path-1, path-2...
 func (w *Workspace) runExportAll(path string, o export.Options, results []*db.Result) tea.Cmd {
+	w.jobFile = numberedPath(path, 1)
 	return w.job("export "+plural(len(results), "result"), func(ctx context.Context, _ db.Session, _ func(func() tea.Cmd)) error {
 		for i, res := range results {
 			if err := ctx.Err(); err != nil {
