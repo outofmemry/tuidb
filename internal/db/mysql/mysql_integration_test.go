@@ -36,7 +36,11 @@ func open(t *testing.T, bootstrap ...string) *session {
 	c.Bootstrap = bootstrap
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	s, err := drv{}.Open(ctx, c, nil)
+	var d db.Driver = drv{}
+	if c.Driver == config.MariaDB { // TUIDB_TEST_URL_MYSQL=mariadb://... runs this suite through the MariaDB driver's configuration
+		d = New(config.MariaDB, func(c *db.Capabilities) { c.Sequences = true })
+	}
+	s, err := d.Open(ctx, c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +86,10 @@ func TestIntegrationOpen(t *testing.T) {
 	if sc, _ := s.Schemas(ctx); sc != nil || s.Caps().Schemas {
 		t.Error("mysql has no schemas")
 	}
+}
+
+func isNow(def string) bool {
+	return strings.EqualFold(strings.TrimSuffix(def, "()"), "CURRENT_TIMESTAMP")
 }
 
 func contains(l []string, v string) bool {
@@ -145,10 +153,11 @@ func TestIntegrationCatalog(t *testing.T) {
 	for _, c := range cols {
 		by[c.Name] = c
 	}
-	if len(cols) != 7 || cols[0].Name != "id" || !by["id"].PK || by["id"].Extra != "auto_increment" || by["id"].Type != "int" {
+	if len(cols) != 7 || cols[0].Name != "id" || !by["id"].PK || by["id"].Extra != "auto_increment" || !strings.HasPrefix(by["id"].Type, "int") {
 		t.Errorf("customers columns %+v", cols)
 	}
-	if by["name"].Nullable || !by["email"].Nullable || by["balance"].Default != "0.00" || by["created_at"].Default != "CURRENT_TIMESTAMP" || by["created_at"].Type != "timestamp" {
+	// MariaDB reports int(11) and current_timestamp()
+	if by["name"].Nullable || !by["email"].Nullable || by["balance"].Default != "0.00" || !isNow(by["created_at"].Default) || by["created_at"].Type != "timestamp" {
 		t.Errorf("customers column details %+v", cols)
 	}
 	ocols, _ := s.Columns(ctx, ref("orders"))
@@ -211,7 +220,11 @@ func TestIntegrationRowsAndCount(t *testing.T) {
 		t.Fatalf("rows %v", r.Rows)
 	}
 	ann := r.Rows[1]
-	if ann[3] != "vip" || ann[4] != "120.50" || ann[6] != `{"tags": ["a", "b"], "tier": "gold"}` {
+	json := `{"tags": ["a", "b"], "tier": "gold"}` // MySQL normalizes JSON; MariaDB keeps the text as inserted
+	if s.maria {
+		json = `{"tier": "gold", "tags": ["a","b"]}`
+	}
+	if ann[3] != "vip" || ann[4] != "120.50" || ann[6] != json {
 		t.Errorf("ann %#v", ann)
 	}
 	if _, ok := ann[5].(time.Time); !ok {
@@ -255,8 +268,15 @@ func TestIntegrationRowsAndCount(t *testing.T) {
 
 func TestIntegrationExecValues(t *testing.T) {
 	s := open(t, "SET SESSION sql_mode = ''") // allows zero dates
-	r := exec(t, s, "SELECT CAST(1 AS DECIMAL(10,2)), CAST(-1 AS SIGNED), CAST(1 AS UNSIGNED), 1.5e0, 'x', X'01ff', DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05', NULL, CAST('{\"a\":1}' AS JSON), TIME '12:30:00'")
+	asJSON := "CAST('{\"a\":1}' AS JSON)"
+	if s.maria { // MariaDB has no CAST AS JSON and stores the text unchanged
+		asJSON = "'{\"a\": 1}'"
+	}
+	r := exec(t, s, "SELECT CAST(1 AS DECIMAL(10,2)), CAST(-1 AS SIGNED), CAST(1 AS UNSIGNED), 1.5e0, 'x', X'01ff', DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05', NULL, "+asJSON+", TIME '12:30:00'")
 	want := []any{"1.00", int64(-1), uint64(1), 1.5, "x", []byte{1, 0xff}, time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC), nil, `{"a": 1}`, "12:30:00"}
+	if s.maria { // MariaDB types CAST(.. AS UNSIGNED) as an unsigned INT, which the driver reads as int64
+		want[2], want[9] = int64(1), `{"a": 1}`
+	}
 	for i, w := range want {
 		if fmt.Sprintf("%#v", r.Rows[0][i]) != fmt.Sprintf("%#v", w) {
 			t.Errorf("col %d (%s): got %#v want %#v", i, r.Columns[i].Type, r.Rows[0][i], w)
@@ -459,7 +479,7 @@ func TestIntegrationPlanTable(t *testing.T) {
 
 	// the structure we created reads back, and diffing it with itself plans nothing
 	loaded := tableDef(t, s, tbl)
-	if got := loaded.Columns[3]; got.Default != "CURRENT_TIMESTAMP" || got.Extra != "on update CURRENT_TIMESTAMP" {
+	if got := loaded.Columns[3]; !isNow(got.Default) || !strings.EqualFold(strings.Replace(got.Extra, "()", "", 1), "on update CURRENT_TIMESTAMP") {
 		t.Errorf("stamp column %+v", got)
 	}
 	if loaded.Columns[1].Default != "'x'" || len(loaded.ForeignKeys) != 1 || loaded.ForeignKeys[0].OnDelete != "SET NULL" {
@@ -656,6 +676,9 @@ func TestIntegrationScripts(t *testing.T) {
 // Comments, collations, generated columns and functional indexes survive a structure edit and a copy.
 func TestIntegrationPlanTableKeepsAttributes(t *testing.T) {
 	s := open(t)
+	if s.maria {
+		t.Skip("MySQL-only syntax (functional index, NOT NULL generated column); internal/db/mariadb covers the MariaDB equivalent")
+	}
 	ctx := context.Background()
 	tbl := tempTable(t, s)
 	copied := tbl + "_c"

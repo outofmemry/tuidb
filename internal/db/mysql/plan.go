@@ -16,7 +16,7 @@ func qualified(schema, name string) string {
 	return db.MySQL.QualifiedName(db.ObjRef{Schema: schema, Name: name})
 }
 
-var kindKeyword = map[db.Kind]string{db.KindTable: "TABLE", db.KindView: "VIEW", db.KindFunction: "FUNCTION", db.KindProcedure: "PROCEDURE"}
+var kindKeyword = map[db.Kind]string{db.KindTable: "TABLE", db.KindView: "VIEW", db.KindFunction: "FUNCTION", db.KindProcedure: "PROCEDURE", db.KindSequence: "SEQUENCE"}
 
 func (s *session) Script(ctx context.Context, kind db.ScriptKind, ref db.ObjRef) (string, error) {
 	name := db.MySQL.QualifiedName(ref)
@@ -30,7 +30,7 @@ func (s *session) Script(ctx context.Context, kind db.ScriptKind, ref db.ObjRef)
 		}
 		return "DROP " + kw + " " + name + ";", nil
 	case db.ScriptTruncate:
-		return "TRUNCATE TABLE " + name + ";", nil
+		return strings.Join(s.emptyTable(ref), ";\n") + ";", nil
 	case db.ScriptSelectTop:
 		return "SELECT * FROM " + name + " LIMIT 100;", nil
 	}
@@ -51,9 +51,9 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		return stmts("DROP " + kw + " " + name), nil
 	case db.OpTruncate:
 		if opts["cascade"] == "true" {
-			return nil, errors.New("MySQL has no TRUNCATE ... CASCADE: empty the child tables first")
+			return nil, fmt.Errorf("%s has no TRUNCATE ... CASCADE: empty the child tables first", s.engine())
 		}
-		return stmts("TRUNCATE TABLE " + name), nil
+		return stmts(s.emptyTable(ref)...), nil
 	case db.OpClone:
 		if ref.Kind != db.KindTable {
 			return nil, errors.New("only tables can be cloned")
@@ -68,8 +68,8 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		}
 		return out, nil
 	case db.OpRenameObject:
-		if ref.Kind != db.KindTable && ref.Kind != db.KindView {
-			return nil, fmt.Errorf("MySQL cannot rename a %s", ref.Kind)
+		if ref.Kind != db.KindTable && ref.Kind != db.KindView && ref.Kind != db.KindSequence { // RENAME TABLE also renames a MariaDB sequence
+			return nil, fmt.Errorf("%s cannot rename a %s", s.engine(), ref.Kind)
 		}
 		if newName == "" {
 			return nil, errors.New("rename needs a new name")
@@ -89,7 +89,7 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 	case db.OpDropDatabase:
 		return stmts("DROP DATABASE " + q(ref.Name)), nil
 	case db.OpRenameDatabase:
-		return nil, errors.New("MySQL cannot rename a database: create a new one and move the tables with RENAME TABLE")
+		return nil, fmt.Errorf("%s cannot rename a database: create a new one and move the tables with RENAME TABLE", s.engine())
 	}
 	return nil, fmt.Errorf("unknown admin operation %q", op)
 }
@@ -206,7 +206,24 @@ func fkSQL(fk db.ForeignKey) (string, error) {
 }
 
 func (s *session) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
-	return planTable(old, new)
+	out, err := planTable(old, new)
+	if err == nil && old != nil && s.isVersioned(old.Schema, old.Name) {
+		// MariaDB refuses every ALTER of a system-versioned table unless history is kept (error 4119).
+		for i := range out {
+			out[i].Text = "SET STATEMENT system_versioning_alter_history=KEEP FOR " + out[i].Text
+		}
+	}
+	return out, err
+}
+
+// emptyTable is TRUNCATE, which a system-versioned table refuses (error 4137): its rows are deleted
+// and then their history is purged, so the table ends up as empty as after a TRUNCATE.
+func (s *session) emptyTable(ref db.ObjRef) []string {
+	name := db.MySQL.QualifiedName(ref)
+	if s.isVersioned(ref.Schema, ref.Name) {
+		return []string{"DELETE FROM " + name, "DELETE HISTORY FROM " + name}
+	}
+	return []string{"TRUNCATE TABLE " + name}
 }
 
 func primaryKey(t *db.TableDef) []string {

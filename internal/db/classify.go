@@ -259,16 +259,29 @@ func IsReadOnly(dialect, stmt string) bool {
 	up := upper(ts)
 	switch up[0] {
 	case "SELECT", "VALUES", "TABLE":
+		if dialect == "mysql" && advancesSequence(up) { // MariaDB: reading NEXTVAL moves the sequence
+			return false
+		}
 		return !hasAny(up, "INTO")
 	case "SHOW", "DESCRIBE", "DESC", "EXISTS":
 		return true
 	case "WITH":
-		return !hasWrite(ts)
+		return !hasWrite(ts) && !(dialect == "mysql" && advancesSequence(up))
 	case "EXPLAIN":
 		if hasAny(up[1:], "ANALYZE", "ANALYSE") {
 			return !hasWrite(ts[1:]) // EXPLAIN ANALYZE runs the statement; EXECUTE/CALL/DO count as writes
 		}
 		return true
+	}
+	return false
+}
+
+// advancesSequence spots NEXTVAL(..), SETVAL(..) and NEXT VALUE FOR, which change a MariaDB sequence.
+func advancesSequence(up []string) bool {
+	for i, t := range up {
+		if t == "NEXTVAL" || t == "SETVAL" || t == "NEXT" && i+2 < len(up) && up[i+1] == "VALUE" && up[i+2] == "FOR" {
+			return true
+		}
 	}
 	return false
 }

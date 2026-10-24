@@ -39,15 +39,19 @@ func (s *session) Objects(ctx context.Context, _ string) ([]db.Object, error) {
 	}
 	defer rows.Close()
 	var out []db.Object
+	versioned := map[string]bool{}
 	for rows.Next() {
 		var name, typ string
 		var n sql.NullInt64
 		if err := rows.Scan(&name, &typ, &n); err != nil {
 			return nil, err
 		}
+		versioned[cur+"."+name] = typ == "SYSTEM VERSIONED"
 		o := db.Object{ObjRef: db.ObjRef{Name: name, Kind: db.KindTable}}
 		if strings.Contains(typ, "VIEW") {
 			o.Kind = db.KindView
+		} else if typ == "SEQUENCE" && s.caps.Sequences { // MariaDB; the sequence is a one-row table
+			o.Kind = db.KindSequence
 		} else if n.Valid {
 			o.Detail = strconv.FormatInt(n.Int64, 10)
 		}
@@ -56,6 +60,9 @@ func (s *session) Objects(ctx context.Context, _ string) ([]db.Object, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	s.versioned = versioned
+	s.mu.Unlock()
 	rr, err := s.db().QueryContext(ctx, "SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.routines WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_TYPE DESC, ROUTINE_NAME", cur)
 	if err != nil {
 		return nil, fmt.Errorf("list routines: %w", err)
@@ -77,8 +84,15 @@ func (s *session) Objects(ctx context.Context, _ string) ([]db.Object, error) {
 
 func (s *session) loadColumns(ctx context.Context, ref db.ObjRef) ([]db.Column, error) {
 	// The collation is only loaded where it differs from the table's: MODIFY without one keeps the table default.
+	// MariaDB's JSON is LONGTEXT COLLATE utf8mb4_bin plus CHECK (json_valid(col)); a MODIFY that spells it
+	// as longtext would silently drop the check, so such columns are reported as json.
+	isJSON := "0"
+	if s.maria {
+		isJSON = "(c.DATA_TYPE = 'longtext' AND c.COLLATION_NAME = 'utf8mb4_bin' AND EXISTS (SELECT 1 FROM information_schema.check_constraints k " +
+			"WHERE k.CONSTRAINT_SCHEMA = c.TABLE_SCHEMA AND k.TABLE_NAME = c.TABLE_NAME AND k.CHECK_CLAUSE = CONCAT('json_valid(`', c.COLUMN_NAME, '`)')))"
+	}
 	rows, err := s.db().QueryContext(ctx, `SELECT c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT, c.EXTRA, c.COLUMN_KEY, c.DATA_TYPE,
-			c.COLUMN_COMMENT, IF(c.COLLATION_NAME <> t.TABLE_COLLATION, c.COLLATION_NAME, NULL), c.GENERATION_EXPRESSION
+			c.COLUMN_COMMENT, IF(c.COLLATION_NAME <> t.TABLE_COLLATION, c.COLLATION_NAME, NULL), c.GENERATION_EXPRESSION, `+isJSON+`, t.TABLE_TYPE
 		FROM information_schema.columns c JOIN information_schema.tables t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME
 		WHERE c.TABLE_SCHEMA = ? AND c.TABLE_NAME = ? ORDER BY c.ORDINAL_POSITION`, s.schemaOf(ref), ref.Name)
 	if err != nil {
@@ -87,10 +101,15 @@ func (s *session) loadColumns(ctx context.Context, ref db.ObjRef) ([]db.Column, 
 	defer rows.Close()
 	var out []db.Column
 	for rows.Next() {
-		var name, typ, nullable, extra, key, dataType, comment string
+		var name, typ, nullable, extra, key, dataType, comment, tableType string
 		var def, coll, gen sql.NullString
-		if err := rows.Scan(&name, &typ, &nullable, &def, &extra, &key, &dataType, &comment, &coll, &gen); err != nil {
+		var json bool
+		if err := rows.Scan(&name, &typ, &nullable, &def, &extra, &key, &dataType, &comment, &coll, &gen, &json, &tableType); err != nil {
 			return nil, err
+		}
+		s.noteVersioned(s.schemaOf(ref), ref.Name, tableType == "SYSTEM VERSIONED")
+		if json {
+			typ, coll = "json", sql.NullString{}
 		}
 		c := db.Column{Name: name, OrigName: name, Type: typ, Nullable: nullable == "YES", PK: key == "PRI"}
 		c.Default, c.HasDef = columnDefault(dataType, def, extra, s.maria)
@@ -277,6 +296,8 @@ func (s *session) DDL(ctx context.Context, ref db.ObjRef) (string, error) {
 		kw, idx = "TABLE", 1
 	case db.KindView:
 		kw, idx = "VIEW", 1
+	case db.KindSequence:
+		kw, idx = "SEQUENCE", 1
 	case db.KindFunction:
 		kw, idx = "FUNCTION", 2
 	case db.KindProcedure:

@@ -26,9 +26,22 @@ import (
 
 func init() { db.Register(drv{}) }
 
-type drv struct{}
+// drv is the MySQL driver; its zero value is "mysql". New builds a sibling that speaks the same
+// protocol under another registered name (MariaDB), with its capabilities adjusted by adjust.
+type drv struct {
+	name   string
+	adjust func(*db.Capabilities)
+}
 
-func (drv) Name() string { return "mysql" }
+// New returns a driver registered under name that reuses this package's session code.
+func New(name string, adjust func(*db.Capabilities)) db.Driver { return drv{name, adjust} }
+
+func (d drv) Name() string {
+	if d.name == "" {
+		return "mysql"
+	}
+	return d.name
+}
 
 var caps = db.Capabilities{
 	Indexes: true, Triggers: true, ForeignKeys: true, Views: true, Functions: true,
@@ -39,18 +52,25 @@ var caps = db.Capabilities{
 type session struct {
 	conn config.Connection
 	dial db.DialFunc
+	caps db.Capabilities
 
 	mu     sync.RWMutex
 	pool   *sql.DB
 	dbname string
 	cols   map[string][]string // column names per table, for Any-column filters
+	// MariaDB system-versioned tables (seen by Objects and Columns), which cannot be TRUNCATEd and
+	// refuse ALTER unless system_versioning_alter_history=KEEP.
+	versioned map[string]bool
 
 	info  string
 	maria bool
 }
 
-func (drv) Open(ctx context.Context, conn config.Connection, dial db.DialFunc) (db.Session, error) {
-	s := &session{conn: conn, dial: dial, cols: map[string][]string{}}
+func (d drv) Open(ctx context.Context, conn config.Connection, dial db.DialFunc) (db.Session, error) {
+	s := &session{conn: conn, dial: dial, caps: caps, cols: map[string][]string{}, versioned: map[string]bool{}}
+	if d.adjust != nil {
+		d.adjust(&s.caps)
+	}
 	pool, err := s.openPool(ctx, conn.Database)
 	if err != nil {
 		return nil, err
@@ -72,6 +92,13 @@ func serverInfo(version string) (string, bool) {
 		return "MariaDB " + version[:i], true
 	}
 	return "MySQL " + version, false
+}
+
+func (s *session) engine() string {
+	if s.maria {
+		return "MariaDB"
+	}
+	return "MySQL"
 }
 
 // bootConnector runs the Bootstrap statements on every new physical connection.
@@ -180,7 +207,7 @@ func tlsConfig(c config.Connection) (*tls.Config, bool, error) {
 	return t, false, nil
 }
 
-func (s *session) Caps() db.Capabilities { return caps }
+func (s *session) Caps() db.Capabilities { return s.caps }
 func (s *session) ServerInfo() string    { return s.info }
 func (s *session) Close() error          { return s.db().Close() }
 func (s *session) Ping(ctx context.Context) error {
@@ -210,10 +237,29 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 	}
 	s.mu.Lock()
 	old := s.pool
-	s.pool, s.dbname, s.cols = pool, name, map[string][]string{}
+	s.pool, s.dbname, s.cols, s.versioned = pool, name, map[string][]string{}, map[string]bool{}
 	s.mu.Unlock()
 	old.Close()
 	return nil
+}
+
+// noteVersioned records whether schema.name is a system-versioned table.
+func (s *session) noteVersioned(schema, name string, v bool) {
+	s.mu.Lock()
+	if s.versioned == nil {
+		s.versioned = map[string]bool{}
+	}
+	s.versioned[schema+"."+name] = v
+	s.mu.Unlock()
+}
+
+func (s *session) isVersioned(schema, name string) bool {
+	if schema == "" {
+		schema = s.CurrentDatabase()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.versioned[schema+"."+name]
 }
 
 func (s *session) Plan(changes []db.Change) ([]db.Statement, error) {
@@ -237,6 +283,14 @@ func convertArg(a any) any {
 // isDDL: MySQL commits implicitly around these, so a transaction cannot undo them.
 func isDDL(text string) bool {
 	f := strings.Fields(text)
+	if len(f) > 2 && strings.EqualFold(f[0], "SET") && strings.EqualFold(f[1], "STATEMENT") { // MariaDB: SET STATEMENT v=x FOR <stmt>
+		for i, w := range f {
+			if strings.EqualFold(w, "FOR") {
+				f = f[i+1:]
+				break
+			}
+		}
+	}
 	if len(f) == 0 {
 		return false
 	}
@@ -290,8 +344,8 @@ func (s *session) applyDDL(ctx context.Context, stmts []db.Statement) error {
 			args[j] = convertArg(a)
 		}
 		if _, err := s.db().ExecContext(ctx, st.Text, args...); err != nil {
-			return fmt.Errorf("statement %d (%s): %w (%d of %d statements were already applied and stay applied: MySQL cannot roll back DDL)",
-				i+1, st.Shown(), err, i, len(stmts))
+			return fmt.Errorf("statement %d (%s): %w (%d of %d statements were already applied and stay applied: %s cannot roll back DDL)",
+				i+1, st.Shown(), err, i, len(stmts), s.engine())
 		}
 	}
 	return nil
@@ -546,11 +600,19 @@ func (s *session) Processes(ctx context.Context) ([]db.ProcessInfo, error) {
 		return nil, fmt.Errorf("process list: %w", err)
 	}
 	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("process list: %w", err)
+	}
 	var out []db.ProcessInfo
 	for rows.Next() {
 		var id, secs int64
 		var user, host, dbn, cmd, state, info sql.NullString
-		if err := rows.Scan(&id, &user, &host, &dbn, &cmd, &secs, &state, &info); err != nil {
+		dest := []any{&id, &user, &host, &dbn, &cmd, &secs, &state, &info}
+		for len(dest) < len(cols) { // MariaDB appends a Progress column
+			dest = append(dest, new(sql.RawBytes))
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("process list: %w", err)
 		}
 		st := state.String
