@@ -554,8 +554,8 @@ func TestFlowDatabaseManagement(t *testing.T) {
 	}
 	// the list is shown again after a change; drop needs the name typed back
 	h.want("Open database")
-	h.press("down", "down", "alt+enter") // "other" -> menu
-	h.press("down", "down", "enter")     // Drop…
+	h.press("down", "down", "alt+enter")                     // "other" -> menu
+	h.press("down", "down", "down", "down", "down", "enter") // Drop…
 	h.want("Drop other?")
 	h.typeText("oops")
 	h.press("enter")
@@ -567,7 +567,7 @@ func TestFlowDatabaseManagement(t *testing.T) {
 		t.Fatalf("applied: %+v", h.fake.applied)
 	}
 	h.want("Open database") // refreshed again; the open database is protected
-	h.press("down", "alt+enter", "down", "down", "enter")
+	h.press("down", "alt+enter", "down", "down", "down", "down", "down", "enter")
 	h.want("cannot be dropped")
 }
 
