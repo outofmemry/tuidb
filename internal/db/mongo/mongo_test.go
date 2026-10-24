@@ -362,3 +362,21 @@ func TestProjectColumns(t *testing.T) {
 		t.Errorf("project = %+v", r)
 	}
 }
+
+func TestProcessFromOp(t *testing.T) {
+	p := processFromOp(bson.M{"opid": int32(42), "ns": "app.users", "op": "query", "secs_running": int64(3),
+		"effectiveUsers": bson.A{bson.M{"user": "ann", "db": "admin"}}, "command": bson.M{"find": "users"}})
+	want := db.ProcessInfo{ID: "42", User: "ann", DB: "app", State: "query", Elapsed: 3 * time.Second, Query: `{"find":"users"}`}
+	if p != want {
+		t.Errorf("got %+v want %+v", p, want)
+	}
+	if p := processFromOp(bson.M{"opid": int32(1), "desc": "conn1"}); p.State != "conn1" || p.User != "" || p.Query != "" {
+		t.Errorf("bare op: %+v", p)
+	}
+}
+
+func TestProcessDBFromNS(t *testing.T) {
+	if p := processFromOp(bson.M{"opid": "s:1", "ns": "shop.orders"}); p.DB != "shop" || p.ID != "s:1" {
+		t.Errorf("%+v", p)
+	}
+}
