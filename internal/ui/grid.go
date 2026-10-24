@@ -863,7 +863,12 @@ func ParseClip(text string) [][]string {
 
 // clipValue keeps pasted text as text: a cell whose value is the word NULL stays that word
 // (use Set Value > NULL for a real NULL), so a copy/paste round trip cannot change the data.
-func clipValue(s string) any { return s }
+func clipValue(s string) any {
+	if len(s) > 1 && s[0] == '\'' && strings.ContainsRune("=+-@\t\r", rune(s[1])) {
+		return s[1:] // undo the quote clipCell put in front of a formula
+	}
+	return s
+}
 
 // PasteRows inserts the parsed rows as new rows after the cursor. Values go to columns in order;
 // columns the clipboard does not cover stay DEFAULT and are left out of the INSERT.
