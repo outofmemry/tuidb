@@ -854,7 +854,7 @@ func (w *Workspace) openAnything() tea.Cmd {
 		all = append(all, pickItem{Label: name, Detail: "database", Value: target{kind: "database", name: name}})
 	}
 	for _, f := range []struct{ label, act string }{
-		{"New SQL editor", "new_query_tab"}, {"Open connection", "open_connection"}, {"Open database", "open_database"},
+		{"New SQL editor", "new_query_tab"}, {"Open connection", "open_connection"}, {"New session", "new_session"}, {"Switch session", "switch_session"}, {"Open database", "open_database"},
 		{"Safe mode", "safe_mode"}, {"Key bindings", "help"}, {"Reload", "reload"}, {"Process list", "process_list"}, {"Disconnect", "disconnect"},
 	} {
 		all = append(all, pickItem{Label: f.label, Detail: "feature", Value: target{kind: "action", name: f.act}})

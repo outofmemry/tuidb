@@ -140,9 +140,16 @@ func (s *sidebar) handle(msg tea.Msg) tea.Cmd {
 		return s.prefetch(m)
 	case databasesMsg:
 		if m.err != nil {
+			s.w.a.askDB = false
 			return s.w.a.fail(m.err)
 		}
 		s.dbs = m.dbs
+		if s.w.a.askDB {
+			s.w.a.askDB = false
+			if len(m.dbs) < 2 {
+				return nil
+			}
+		}
 		return s.databasePicker(m.dbs)
 	case dbSwitchedMsg:
 		if m.err != nil {

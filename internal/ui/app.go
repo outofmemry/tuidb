@@ -35,6 +35,7 @@ type App struct {
 	welcome   *welcome
 	wss       []*Workspace
 	active    int
+	askDB     bool // set by new_session: offer the database list once the connection opens
 	inWS      bool // false: welcome screen
 	overlays  []Overlay
 	machine   keymap.Machine
@@ -256,6 +257,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case connectedMsg:
 		if m.err != nil {
+			a.askDB = false
 			a.toast = ""
 			a.errorDialog("Connection failed", m.err)
 			return a, nil
@@ -270,7 +272,11 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		w.resize(a.w, a.h-2)
 		a.wss = append(a.wss, w)
 		a.active, a.inWS = len(a.wss)-1, true
-		return a, tea.Batch(a.say("connected to %s", c.Name), w.init())
+		cmds := []tea.Cmd{a.say("connected to %s", c.Name), w.init()}
+		if a.askDB { // new_session: databasesMsg shows the picker only when there is a choice
+			cmds = append(cmds, w.pickDatabase())
+		}
+		return a, tea.Batch(cmds...)
 	case reconnectedMsg:
 		w := a.wsByID(m.ws)
 		if m.err != nil {
@@ -414,7 +420,11 @@ func (a *App) run(action string) tea.Cmd {
 	case "workspaces":
 		return a.pickWorkspace()
 	case "open_connection":
-		return a.pickConnection()
+		return a.pickConnection(false)
+	case "new_session":
+		return a.pickConnection(true)
+	case "switch_session":
+		return a.pickWorkspace()
 	case "next_workspace", "prev_workspace":
 		if len(a.wss) > 0 {
 			d := 1
@@ -461,20 +471,28 @@ func (a *App) confirmQuit() tea.Cmd {
 	return quit()
 }
 
-func (a *App) pickConnection() tea.Cmd {
+// pickConnection lists saved connections; askDB makes the new workspace offer its database list next.
+func (a *App) pickConnection(askDB bool) tea.Cmd {
 	var items []pickItem
 	for _, c := range a.d.Conns {
 		items = append(items, pickItem{Label: c.Name, Detail: c.Driver + " " + c.Host, Value: c})
 	}
 	a.push(&pickerDlg{title: "Open connection", filter: true, items: items, empty: "no saved connections",
-		onPick: func(it pickItem, _ bool) tea.Cmd { return a.openConnection(it.Value.(config.Connection)) }})
+		onPick: func(it pickItem, _ bool) tea.Cmd {
+			a.askDB = askDB
+			return a.openConnection(it.Value.(config.Connection))
+		}})
 	return nil
 }
 
 func (a *App) pickWorkspace() tea.Cmd {
 	var items []pickItem
 	for i, w := range a.wss {
-		items = append(items, pickItem{Label: w.conn.Name + " / " + w.sess.CurrentDatabase(), Detail: w.conn.Driver, Value: i})
+		detail := w.conn.Driver
+		if i == a.active && a.inWS {
+			detail += "  ● current"
+		}
+		items = append(items, pickItem{Label: w.conn.Name + " / " + w.sess.CurrentDatabase(), Detail: detail, Value: i})
 	}
 	items = append(items, pickItem{Label: "‹ connection list ›", Value: -1})
 	a.push(&pickerDlg{title: "Workspaces", items: items, onPick: func(it pickItem, _ bool) tea.Cmd {

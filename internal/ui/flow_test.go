@@ -1574,3 +1574,28 @@ func TestFlowPreviewStructureBeforeLoadDoesNotPanic(t *testing.T) {
 		t.Error("preview before the structure has loaded must return an error")
 	}
 }
+
+func TestFlowNewSessionAsksDatabase(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("n")
+	h.want("Open connection")
+	h.press("enter")
+	h.want("Open database") // fake lists two databases
+	if len(h.a.wss) != 2 {
+		t.Fatalf("workspaces: %d", len(h.a.wss))
+	}
+	h.press("esc")
+	h.prefix("K") // open_connection keeps skipping the database step
+	h.press("enter")
+	h.wantNot("Open database")
+}
+
+func TestFlowSwitchSessionPicker(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.prefix("l")
+	h.want("Workspaces")
+	h.want("shop / shop")
+	h.want("current")
+}

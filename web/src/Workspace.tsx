@@ -11,7 +11,7 @@ import { Machine, canon, contextOf, display } from './keys'
 
 // Actions the web UI answers (its own plus the ones tabs and the sidebar handle via the tuidb:action event).
 // Everything else in the keymap is listed as "not in the web UI" so the help screen stays identical to the terminal's.
-export const SUPPORTED = new Set(['help', 'new_query_tab', 'new_tab', 'close_tab', 'next_tab', 'prev_tab', 'toggle_sidebar', 'disconnect', 'reload', 'open_connection', 'quit',
+export const SUPPORTED = new Set(['help', 'new_query_tab', 'new_tab', 'close_tab', 'next_tab', 'prev_tab', 'toggle_sidebar', 'disconnect', 'reload', 'open_connection', 'new_session', 'switch_session', 'quit',
   'reload_tab', 'filters', 'columns', 'add_row', 'duplicate_rows', 'delete_rows', 'commit', 'preview', 'discard', 'undo', 'next_page', 'prev_page', 'first_row', 'last_row', 'count_exact',
   'show_data', 'show_structure', 'show_json', 'toggle_row_detail', 'quick_look', 'run_current', 'run_all', 'cancel_query', 'add_to_queries', 'set_limit', 'sidebar_search', 'apply_filters',
   ...Array.from({ length: 9 }, (_, i) => `tab_${i + 1}`)])
@@ -33,6 +33,16 @@ export function Workspace({ sid }: { sid: string }) {
   const [collapsed, setCollapsed] = useState(false)
   const [help, setHelp] = useState(false)
   const [switcher, setSwitcher] = useState(false)
+  const dbSel = useRef<HTMLSelectElement>(null)
+  const setAskDb = (from: string | null) => { try { from ? sessionStorage.setItem(ASK_DB, from) : sessionStorage.removeItem(ASK_DB) } catch { /* private mode */ } }
+  const nDbs = dbs.data?.databases.length
+  useEffect(() => { // new_session: once the workspace we switched to has its database list, offer it
+    let from: string | null = null
+    try { from = sessionStorage.getItem(ASK_DB) } catch { /* private mode */ }
+    if (!from || from === sid || nDbs === undefined) return
+    setAskDb(null)
+    if (nDbs > 1) setTimeout(() => dbSel.current?.focus(), 0)
+  }, [sid, nDbs])
   const conns = useQuery({ queryKey: ['conns'], queryFn: () => api<Connection[]>('GET', '/connections'), enabled: switcher })
   const [pending, setPending] = useState<string | null>(null) // context the prefix was pressed in, for which-key
   const machine = useRef<Machine | null>(null)
@@ -114,7 +124,8 @@ export function Workspace({ sid }: { sid: string }) {
       case 'toggle_sidebar': setSide((s) => !s); return setCollapsed((c) => !c)
       case 'disconnect': case 'quit': return disconnect()
       case 'reload': return qc.invalidateQueries()
-      case 'open_connection': return setSwitcher(true)
+      case 'open_connection': case 'switch_session': return setSwitcher(true)
+      case 'new_session': setAskDb(sid); return setSwitcher(true)
     }
     if (n) return tabs[Number(n[1]) - 1] && setActive(tabs[Number(n[1]) - 1].id)
     // tab-level actions: the active tab (or the sidebar) claims the event by calling preventDefault
@@ -134,7 +145,7 @@ export function Workspace({ sid }: { sid: string }) {
         </div>
         {switcher && (
           <>
-            <div className="backdrop" onClick={() => setSwitcher(false)} aria-hidden />
+            <div className="backdrop" onClick={() => { setSwitcher(false); setAskDb(null) }} aria-hidden />
             <div className="switcher popover" role="menu" aria-label="Connections">
               {conns.isLoading && <div className="note dim">Loading…</div>}
               {(conns.data ?? []).map((c) => {
@@ -154,7 +165,7 @@ export function Workspace({ sid }: { sid: string }) {
         <span className="info">{i.serverInfo}</span>
         <span className="level" title="Safe mode decides what needs confirmation before it is sent">{i.levelLabel}</span>
         {(dbs.data?.databases.length ?? 0) > 1 && (
-          <select value={i.database} onChange={(e) => switchDb(e.target.value)} title={i.caps.DatabaseNoun}>
+          <select ref={dbSel} value={i.database} onChange={(e) => switchDb(e.target.value)} title={i.caps.DatabaseNoun}>
             {dbs.data!.databases.map((d) => <option key={d}>{d}</option>)}
           </select>
         )}
@@ -211,6 +222,7 @@ export function Workspace({ sid }: { sid: string }) {
 
 // Open sessions survive navigation within this browser tab, so the switcher can jump back to one.
 const OPEN = 'tuidb-open'
+const ASK_DB = 'tuidb-ask-db' // new_session: focus the database picker once the next workspace has loaded
 function openSessions(): Record<string, string> { try { return JSON.parse(sessionStorage.getItem(OPEN) || '{}') } catch { return {} } }
 function remember(name: string, sid: string) { const o = openSessions(); if (o[name] !== sid) { o[name] = sid; try { sessionStorage.setItem(OPEN, JSON.stringify(o)) } catch { /* private mode */ } } }
 function forget(sid: string) { const o = openSessions(); for (const k in o) if (o[k] === sid) delete o[k]; try { sessionStorage.setItem(OPEN, JSON.stringify(o)) } catch { /* private mode */ } }

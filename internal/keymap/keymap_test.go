@@ -175,3 +175,15 @@ func TestBuildRejectsEscPrefixAndEmptyLists(t *testing.T) {
 		t.Errorf("a space spec must mean the space bar, got %q", k)
 	}
 }
+
+func TestSessionBindings(t *testing.T) {
+	m, err := Build("C-d", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]string{"n": "new_session", "l": "switch_session"} {
+		if got, ok := m.Lookup(Global, k); !ok || got != want {
+			t.Errorf("prefix %s = %q, %v; want %q", k, got, ok, want)
+		}
+	}
+}
