@@ -744,7 +744,7 @@ func (a *App) render() string {
 	if a.w < 20 || a.h < 6 {
 		return fmt.Sprintf("webtuidb needs at least 20×6 cells (this terminal is %d×%d)", a.w, a.h)
 	}
-	bodyH := a.h - 2
+	bodyH := a.bodyH()
 	var body string
 	if w := a.ws(); w != nil {
 		body = w.view(a.th, a.w, bodyH)
@@ -756,8 +756,15 @@ func (a *App) render() string {
 		wk := a.whichKey(a.w)
 		lines = append(lines[:max(0, len(lines)-len(wk))], wk...)
 	}
-	out := a.topBar() + "\n" + strings.Join(lines, "\n") + "\n" + a.statusLine()
+	out := a.topBar() + "\n" + strings.Join(lines, "\n")
+	if !a.zen() {
+		out += "\n" + a.statusLine()
+	}
 	for _, o := range a.overlays {
+		if l, ok := o.(*lockDlg); ok { // the lock covers everything
+			out = l.cover(a.th, a.w, a.h)
+			continue
+		}
 		out = composite(out, o.View(a.th, a.w, a.h), a.w, a.h)
 	}
 	return out
