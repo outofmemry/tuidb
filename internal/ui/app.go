@@ -146,7 +146,11 @@ func (a *App) approve(ctx context.Context, ap mcp.Approval) (bool, error) {
 }
 
 func (a *App) Init() tea.Cmd {
-	cmds := []tea.Cmd{a.init(), pump(a.mcpUI)}
+	cmds := []tea.Cmd{a.init(), pump(a.mcpUI), a.idleTick()}
+	a.m15.lastKey = time.Now()
+	if a.passcodeSet() { // M15.37: the app starts locked
+		a.lock()
+	}
 	if themeName(a.d.Cfg.Theme.Name) == "auto" {
 		cmds = append(cmds, tea.RequestBackgroundColor) // answered by a BackgroundColorMsg
 	}
@@ -156,7 +160,13 @@ func (a *App) Init() tea.Cmd {
 // askSecret shows a password dialog from a non-UI goroutine and blocks until it is answered.
 func (a *App) askSecret(title, what string) (string, error) {
 	ans := make(chan string, 1)
+	var locked bool // written on the UI loop before ans is closed, read after: the channel orders them
 	a.mcpUI <- func() tea.Cmd {
+		if a.locked() { // no dialog can be answered behind the lock screen: fail the caller instead of hanging it
+			locked = true
+			close(ans)
+			return nil
+		}
 		f := newForm(title, []formField{{Key: "v", Label: what, Kind: fSecret}}, func(v map[string]string) tea.Cmd {
 			ans <- v["v"]
 			return nil
