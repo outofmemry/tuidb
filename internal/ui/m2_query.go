@@ -182,24 +182,25 @@ func (t *queryTab) resultOnly(name string) tea.Cmd {
 		rv.chart = !rv.chart
 	case "load_more":
 		return t.loadMore(rv)
-	case "copy_rows", "copy_cells", "copy_rows_as":
+	case "column_menu":
+		return t.resultColumnMenu(rv)
+	case "copy_rows", "copy_cells", "copy_rows_as", "copy_cells_as", "copy_column":
 		g := rv.grid
 		if g == nil {
 			return t.ws.a.say("nothing to copy: this result has no rows")
 		}
 		switch name {
+		case "copy_column":
+			return t.copyOut(g.CopyColumn(), "column")
+		case "copy_cells_as":
+			t.ws.a.pushCopyAs("Copy selected cells as", CopyFormats, func(f CopyFormat) tea.Cmd { return t.copyOut(g.CopyCells(f, tbl), "cells") })
+			return nil
 		case "copy_rows":
 			return t.copyOut(g.CopyRows(FmtCSV, tbl), "rows")
 		case "copy_cells":
 			return t.copyOut(g.CopyCells(FmtPlain, tbl), "cells")
 		}
-		var items []pickItem
-		for _, f := range CopyFormats {
-			items = append(items, pickItem{Label: string(f), Value: f})
-		}
-		t.ws.a.push(&pickerDlg{title: "Copy rows as", items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
-			return t.copyOut(g.CopyRows(it.Value.(CopyFormat), tbl), "rows")
-		}})
+		t.ws.a.pushCopyAs("Copy rows as", CopyFormats, func(f CopyFormat) tea.Cmd { return t.copyOut(g.CopyRows(f, tbl), "rows") })
 	}
 	return nil
 }
