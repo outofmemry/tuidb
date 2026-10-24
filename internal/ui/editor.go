@@ -1053,12 +1053,12 @@ func (e *Editor) View(th Theme, focused bool) string {
 			}
 			from, end := seg[0], seg[1]
 			var sb strings.Builder
-			num := th.Dim.Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
+			num := th.Dim.Inherit(th.EditorBG).Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
 			if ri == e.cur.row {
-				num = th.Accent.Bold(true).Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
+				num = th.Accent.Inherit(th.EditorBG).Bold(true).Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
 			}
 			if si > 0 {
-				num = strings.Repeat(" ", gw-2)
+				num = blank(gw - 2)
 			}
 			sb.WriteString(num + rule)
 			curLine := focused && e.Opts.Highlight && ri == e.cur.row
