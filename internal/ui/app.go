@@ -897,11 +897,15 @@ func (a *App) statusLine() string {
 		right = st.Render(" " + icon + a.toast + " ")
 	default:
 		// hints give way to the context: drop pairs from the end until both fit (help stays)
-		pairs := a.contextHintPairs()
+		pairs, own := a.contextHintPairs(), len(a.d.Cfg.General.Hints) > 0
 		for {
 			right = a.th.StatusBar.Render(" " + a.renderHints(pairs) + " ")
 			if len(pairs) <= 2 || a.w-width(l)-width(right) >= 0 {
 				break
+			}
+			if own { // [general] hints: no help pair to keep, drop from the end
+				pairs = pairs[:len(pairs)-2]
+				continue
 			}
 			pairs = append(pairs[:len(pairs)-4], pairs[len(pairs)-2:]...)
 		}
@@ -918,6 +922,9 @@ func (a *App) statusLine() string {
 // the status line so the next step is always visible.
 // contextHintPairs are key/label pairs for the focused pane; the last pair is always help.
 func (a *App) contextHintPairs() []string {
+	if p := a.configuredHints(); p != nil {
+		return p
+	}
 	pre := keymap.Display(a.d.Keys.Prefix)
 	k := func(action string) string {
 		for _, b := range a.d.Keys.Bindings(a.context()) {
