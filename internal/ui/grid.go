@@ -758,7 +758,7 @@ func (g *Grid) View(th Theme, focused bool) string {
 	// Widths are tracked as ints: measuring the growing line after every cell made a frame O(cells²).
 	var hdr strings.Builder
 	hdr.WriteString(th.HeaderCell.Render(fit("", gw)))
-	hsep := th.HeaderCell.Foreground(lipgloss.Color(th.pal["border"])).Render("│")
+	hsep := th.HeaderCell.Foreground(lipgloss.Color(th.pal["grid_line"])).Render("│")
 	for i, used := g.left, gw; i < len(g.Cols) && used < g.W; i++ {
 		c := g.Cols[i]
 		used += c.Width + 1
@@ -782,7 +782,7 @@ func (g *Grid) View(th Theme, focused bool) string {
 		head += th.HeaderCell.Render(strings.Repeat(" ", pad))
 	}
 	lines := []string{head}
-	sep := th.Border.Render("│") // styled once per frame, not once per cell
+	sep := th.GridLine.Render("│") // styled once per frame, not once per cell
 	for vi := 0; vi < g.bodyH(); vi++ {
 		ri := g.top + vi
 		if ri >= len(g.Rows) {
