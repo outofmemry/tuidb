@@ -399,3 +399,169 @@ func TestEditorUndoInvalidatesRenderCache(t *testing.T) {
 	e.Undo()
 	_ = e.View(NewTheme(configTheme()), true) // used to panic: offsets cached for one line
 }
+
+// vkeys sends each string as one key: single-rune strings are typed text, "enter" and "esc" are special.
+func vkeys(e *Editor, ks ...string) {
+	for _, k := range ks {
+		switch k {
+		case "enter":
+			e.Handle(tea.KeyPressMsg{Code: tea.KeyEnter})
+		case "esc":
+			e.Handle(tea.KeyPressMsg{Code: tea.KeyEscape})
+		default:
+			for _, c := range k {
+				e.Handle(tea.KeyPressMsg{Code: c, Text: string(c)})
+			}
+		}
+	}
+}
+
+func vimEd(text string) *Editor {
+	e := newEd()
+	e.SetText(text)
+	e.vim.on = true
+	return e
+}
+
+func TestVimVisualDelete(t *testing.T) {
+	e := vimEd("select 1 from t")
+	vkeys(e, "v", "l", "l", "d")
+	if e.Text() != "ect 1 from t" || e.vim.vmode != 0 {
+		t.Fatalf("v + d: %q mode %q", e.Text(), e.vim.vmode)
+	}
+	e = vimEd("a\nb\nc")
+	vkeys(e, "V", "j", "d")
+	if e.Text() != "c" {
+		t.Fatalf("V + d: %q", e.Text())
+	}
+	vkeys(e, "p") // the deleted lines are in the register
+	if e.Text() != "c\na\nb" {
+		t.Fatalf("p: %q", e.Text())
+	}
+	e = vimEd("one two three")
+	vkeys(e, "w", "v", "e", "y", "$", "p")
+	if e.Text() != "one two threetwo" {
+		t.Fatalf("yank: %q", e.Text())
+	}
+	e = vimEd("a\nb")
+	vkeys(e, "V", ">")
+	if !strings.HasPrefix(e.Text(), "  a") { // newEd indents by two spaces
+		t.Fatalf("indent: %q", e.Text())
+	}
+}
+
+func TestVimCounts(t *testing.T) {
+	e := vimEd("a\nb\nc\nd")
+	vkeys(e, "2", "d", "d")
+	if e.Text() != "c\nd" {
+		t.Fatalf("2dd: %q", e.Text())
+	}
+	e = vimEd("abcdef")
+	vkeys(e, "3", "x")
+	if e.Text() != "def" {
+		t.Fatalf("3x: %q", e.Text())
+	}
+	e = vimEd("a\nb\nc\nd")
+	vkeys(e, "3", "j")
+	if e.cur.row != 3 {
+		t.Fatalf("3j: row %d", e.cur.row)
+	}
+	e = vimEd("one two three four")
+	vkeys(e, "d", "2", "w")
+	if e.Text() != "three four" {
+		t.Fatalf("d2w: %q", e.Text())
+	}
+}
+
+func TestVimCommandLine(t *testing.T) {
+	e := vimEd("a\nb\nc")
+	vkeys(e, ":", "w", "enter")
+	if cmd, _ := e.takeEx(); cmd != "w" {
+		t.Fatalf(":w should be routed to the tab, got %q", cmd)
+	}
+	vkeys(e, ":", "3", "enter")
+	if e.cur.row != 2 || e.vim.cmdOn {
+		t.Fatalf(":3 -> row %d", e.cur.row)
+	}
+	vkeys(e, ":", "z", "esc")
+	if cmd, note := e.takeEx(); cmd != "" || note != "" || e.vim.cmdOn {
+		t.Fatal("esc must cancel the command line")
+	}
+	vkeys(e, ":", "n", "o", "h", "enter")
+	if _, note := e.takeEx(); note == "" {
+		t.Fatal(":noh should report")
+	}
+	for _, c := range []string{"q", "q!", "wq"} {
+		vkeys(e, ":", c, "enter")
+		if got, _ := e.takeEx(); got != c {
+			t.Fatalf(":%s routed as %q", c, got)
+		}
+	}
+}
+
+func TestFoldSurvivesEditAbove(t *testing.T) {
+	e := newEd()
+	e.SetText("select 1;\nselect\n  2;\nselect 3;")
+	var got [][]int
+	e.OnFolds = func(f []int) { got = append(got, f) }
+	e.cur = pos{1, 0}
+	e.ToggleFold()
+	if f := e.Folded(); len(f) != 1 || f[0] != 1 {
+		t.Fatalf("folded %v", f)
+	}
+	e.cur = pos{0, 0}
+	e.Insert("select 0;\n")
+	if f := e.Folded(); len(f) != 1 || f[0] != 2 {
+		t.Fatalf("after an edit above the fold is %v, want [2]", f)
+	}
+	if hid, _ := e.foldInfo(); !hid[3] {
+		t.Fatal("the folded body should still be hidden")
+	}
+	if last := got[len(got)-1]; len(last) != 1 || last[0] != 2 {
+		t.Fatalf("OnFolds saw %v", got)
+	}
+	e.cur = pos{2, 0}
+	e.Insert("x") // editing the folded statement itself unfolds it
+	if len(e.Folded()) != 0 {
+		t.Fatalf("edited statement stays folded: %v", e.Folded())
+	}
+}
+
+func TestSelectAllAndClick(t *testing.T) {
+	e := newEd()
+	e.SetText("ab\ncd")
+	e.SelectAll()
+	if e.Selection() != "ab\ncd" {
+		t.Fatalf("%q", e.Selection())
+	}
+	e.ClickAt(e.gutterW()+1, 1)
+	if e.cur != (pos{1, 1}) || e.HasSelection() {
+		t.Fatalf("click -> %v", e.cur)
+	}
+}
+
+func TestVimCommandLineAndVisualRender(t *testing.T) {
+	e := vimEd("select 1\nfrom t")
+	vkeys(e, "V")
+	th := NewTheme(configTheme())
+	if !strings.Contains(e.vimBadge(), "VL") {
+		t.Fatalf("badge %q", e.vimBadge())
+	}
+	e.View(th, true)
+	vkeys(e, "esc", ":", "w", "q")
+	if out := e.View(th, true); !strings.Contains(out, ":wq") {
+		t.Fatalf("the command line should show on the bottom row:\n%s", out)
+	}
+}
+
+// R-021: count x operator count is clamped, so 99999d99999w cannot freeze the UI goroutine.
+func TestVimCountProductRefused(t *testing.T) {
+	e := vimEd("a b c d e")
+	vkeys(e, "9", "9", "9", "9", "9", "d", "9", "9", "9", "9", "9", "w")
+	if e.Text() != "a b c d e" {
+		t.Fatalf("an oversized count must not run: %q", e.Text())
+	}
+	if _, note := e.takeEx(); !strings.Contains(note, "count too large") {
+		t.Fatalf("no refusal note: %q", note)
+	}
+}
