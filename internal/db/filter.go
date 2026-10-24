@@ -38,6 +38,9 @@ func Operators(dialect string) []string {
 	if dialect == "partiql" { // DynamoDB: no LIKE, and no suffix test
 		return []string{"=", "<>", "<", ">", "<=", ">=", "IN", "NOT IN", "IS NULL", "IS NOT NULL", "BETWEEN", "NOT BETWEEN", "Contains", "Not contains", "Has prefix"}
 	}
+	if dialect == "cql" { // CQL has no <>, NOT IN, IS NULL, BETWEEN or substring matching (LIKE needs a SASI index)
+		return []string{"=", "<", ">", "<=", ">=", "IN", "LIKE"}
+	}
 	ops := []string{"=", "<>", "<", ">", "<=", ">=", "IN", "NOT IN", "IS NULL", "IS NOT NULL", "BETWEEN", "NOT BETWEEN", "LIKE"}
 	if dialect == "postgres" {
 		ops = append(ops, "ILIKE")
@@ -80,8 +83,11 @@ func (fs FilterSet) Where(d Dialect, cols []string, startArg int) (string, []any
 	}
 	for _, f := range fs.Active() {
 		if f.Column == RawColumn {
-			if strings.TrimSpace(f.Value) != "" {
-				parts = append(parts, "("+f.Value+")")
+			if v := strings.TrimSpace(f.Value); v != "" {
+				if d.Name != "cql" { // CQL has no parenthesized relations
+					v = "(" + v + ")"
+				}
+				parts = append(parts, v)
 			}
 			continue
 		}

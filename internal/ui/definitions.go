@@ -74,6 +74,10 @@ func triggerSQL(dialect string, ref db.ObjRef, t db.Trigger) string {
 	if dialect == "postgres" {
 		return fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON %s;\n%s\n  %s;\n", d.Quote(t.Name), tbl, head, strings.TrimSuffix(t.Statement, ";"))
 	}
+	if dialect == "cql" { // a Cassandra trigger is a Java class on the server's classpath, not SQL
+		return fmt.Sprintf("-- %s runs the Java class %s on every write to the table.\nDROP TRIGGER IF EXISTS %s ON %s;\nCREATE TRIGGER %s ON %s USING '%s';\n",
+			t.Name, t.Statement, d.Quote(t.Name), tbl, d.Quote(t.Name), tbl, strings.ReplaceAll(t.Statement, "'", "''"))
+	}
 	return fmt.Sprintf("DROP TRIGGER IF EXISTS %s;\n%s FOR EACH ROW\n  %s;\n", d.Quote(t.Name), head, strings.TrimSuffix(t.Statement, ";"))
 }
 
@@ -81,6 +85,9 @@ func newTriggerSQL(dialect string, ref db.ObjRef) string {
 	d, ok := db.DialectFor(dialect)
 	if !ok {
 		return ""
+	}
+	if dialect == "cql" {
+		return fmt.Sprintf("-- A trigger is a Java class (ITrigger) that must already be in the server's triggers directory.\nCREATE TRIGGER my_trigger ON %s USING 'com.example.MyTrigger';\n", d.QualifiedName(ref))
 	}
 	if dialect == "postgres" {
 		return fmt.Sprintf("-- Create the trigger function first (RETURNS trigger), then run this.\nCREATE TRIGGER my_trigger\n  AFTER INSERT ON %s\n  FOR EACH ROW EXECUTE FUNCTION my_function();\n", d.QualifiedName(ref))

@@ -54,7 +54,12 @@ services:
   cassandra:
     image: cassandra:5.0
     ports: ["127.0.0.1:59042:9042"]
-    healthcheck: {test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces'"], interval: 10s, timeout: 10s, retries: 30}
+    environment: {MAX_HEAP_SIZE: 512M, HEAP_NEWSIZE: 128M}
+    # The image has no env switches for these, so patch cassandra.yaml before starting: password login, plus the UDF and
+    # materialized-view features the seed uses (both off by default). The healthcheck doubles as setup: it logs in as the
+    # default superuser and creates tuidb/tuidb.
+    command: ["sh", "-c", "sed -i -e 's/^authenticator:.*/authenticator: PasswordAuthenticator/' -e 's/^user_defined_functions_enabled:.*/user_defined_functions_enabled: true/' -e 's/^materialized_views_enabled:.*/materialized_views_enabled: true/' /etc/cassandra/cassandra.yaml && exec docker-entrypoint.sh cassandra -f"]
+    healthcheck: {test: ["CMD-SHELL", "cqlsh -u cassandra -p cassandra -e \"CREATE ROLE IF NOT EXISTS tuidb WITH PASSWORD = 'tuidb' AND SUPERUSER = true AND LOGIN = true\""], interval: 10s, timeout: 20s, retries: 40}
   dynamodb:
     image: amazon/dynamodb-local:latest
     command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]

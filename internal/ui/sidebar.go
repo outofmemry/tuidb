@@ -693,12 +693,14 @@ func (s *sidebar) newDatabase() tea.Cmd {
 		{Key: "name", Label: "Name", Kind: fText},
 		{Key: "encoding", Label: "Encoding", Kind: fText, Show: func(map[string]string) bool { return s.w.caps.Dialect == "postgres" || s.w.caps.Dialect == "mysql" }},
 		{Key: "collation", Label: "Collation", Kind: fText, Show: func(map[string]string) bool { return s.w.caps.Dialect == "postgres" || s.w.caps.Dialect == "mysql" }},
+		{Key: "strategy", Label: "Replication strategy", Kind: fText, Value: "SimpleStrategy", Show: func(map[string]string) bool { return s.w.caps.Dialect == "cql" }},
+		{Key: "replication", Label: "Replication (factor, or dc1:3,dc2:2)", Kind: fText, Value: "1", Show: func(map[string]string) bool { return s.w.caps.Dialect == "cql" }},
 	}, func(v map[string]string) tea.Cmd {
 		name := strings.TrimSpace(v["name"])
 		if name == "" {
 			return s.w.a.fail(fmt.Errorf("a %s needs a name", noun))
 		}
-		return s.databaseAdmin(db.OpCreateDatabase, name, map[string]string{"encoding": v["encoding"], "collation": v["collation"]}, "created")
+		return s.databaseAdmin(db.OpCreateDatabase, name, map[string]string{"encoding": v["encoding"], "collation": v["collation"], "strategy": v["strategy"], "replication": v["replication"]}, "created")
 	}))
 	return nil
 }

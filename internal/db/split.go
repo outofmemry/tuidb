@@ -104,7 +104,7 @@ func Split(dialect, text string) []Stmt {
 			}
 			i = j
 			start = i
-		case strings.HasPrefix(text[i:], term):
+		case strings.HasPrefix(text[i:], term) && !(dialect == "cql" && inCQLBatch(text[start:i])):
 			flush(i)
 			i += len(term)
 			start = i
