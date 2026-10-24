@@ -2,8 +2,6 @@ package ui
 
 import (
 	"fmt"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 // extra runs the milestone-3 editor actions and returns the message to show.
@@ -13,13 +11,14 @@ func (e *Editor) extra(name string) string {
 		e.Invis = !e.Invis
 		return map[bool]string{true: "showing spaces (·) and tabs (→)", false: "invisible characters hidden"}[e.Invis]
 	case "vim_mode":
-		e.vim.on, e.vim.insert, e.vim.pend = !e.vim.on, false, ""
+		on, reg, regLine := !e.vim.on, e.vim.reg, e.vim.regLine
+		e.vim = vimState{on: on, reg: reg, regLine: regLine} // visual and ":" mode must not survive the toggle
+		e.anchor = nil
 		if !e.vim.on {
 			return "vim keys off"
 		}
 		e.vimClamp()
-		// shortcut: normal/insert only, no visual mode, counts or ":" commands; use the prefix keys for save/run.
-		return "vim keys on: NORMAL (h j k l w b 0 $ gg G x dd yy p u i a o O, Esc)"
+		return "vim keys on: NORMAL (motions with counts, v V visual, d y c > < p u i a o O, :w :q :wq :q! :<n> :noh, Esc)"
 	}
 	had := e.HasSelection()
 	q := e.Selection()
