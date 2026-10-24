@@ -478,10 +478,15 @@ func (q *quickLookDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case "esc", "q":
 		return nil, nil
 	case "c":
-		return q, setClip(q.text)
+		return q, setClip(q.shown())
 	case "r":
 		if q.tree != nil {
 			q.raw = !q.raw
+		}
+		return q, nil
+	case "m": // PRETTY / MINIFY the raw JSON
+		if q.tree != nil {
+			q.raw, q.mini, q.lines, q.top = true, !q.mini, nil, 0
 		}
 		return q, nil
 	case "v":
@@ -495,6 +500,13 @@ func (q *quickLookDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case "s":
 		if q.a != nil && q.isBytes {
 			return q, q.saveAs()
+		}
+	case "h", "b", "t": // binary display: hex dump / base64 / text
+		if q.a != nil && q.isBytes {
+			q.enc = map[string]string{"h": "Hex dump", "b": "Base64", "t": "UTF-8"}[key]
+			q.text = decodeAs(q.rawBytes, q.enc)
+			q.tree, q.raw, q.lines, q.top = nil, true, nil, 0
+			return q, nil
 		}
 	}
 	if !q.raw {
