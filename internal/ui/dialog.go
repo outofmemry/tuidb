@@ -488,6 +488,7 @@ type pickItem struct {
 	Label  string
 	Detail string
 	Value  any
+	Dim    bool // greyed out: the entry exists but this UI cannot do it (menus.Item.UI), Detail says why
 }
 
 type pickerDlg struct {
@@ -624,7 +625,10 @@ func (p *pickerDlg) View(th Theme, maxW, maxH int) string {
 		}
 		lbl := ansi.Truncate(ansi.Strip(it.Label), lw, "…")
 		left := on(lipgloss.NewStyle()).Render(lbl)
-		if mark {
+		if it.Dim {
+			left = on(th.Dim).Render(lbl)
+		}
+		if mark && !it.Dim {
 			left = fuzzyMark(q, lbl, on(lipgloss.NewStyle()), on(th.Accent.Bold(true)))
 		}
 		body = append(body, listRow(th, sel, left, det, cw))
@@ -749,6 +753,10 @@ func (c *checklistDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 				c.items[c.sel].Seq = c.seq
 			}
 		}
+	case "A", "shift+A": // uncheck all
+		for i := range c.items {
+			c.items[i].Checked = false
+		}
 	case "a":
 		all := true
 		for _, it := range c.items {
@@ -789,5 +797,5 @@ func (c *checklistDlg) View(th Theme, maxW, maxH int) string {
 	if m := moreLine(th, c.top, len(c.items)-end); m != "" {
 		body = append(body, m)
 	}
-	return box(th, c.title, body, "Space: toggle   a: all   Enter: apply   Esc: cancel", w)
+	return box(th, c.title, body, "Space: toggle   a: check all   A: uncheck all   Enter: apply   Esc: cancel", w)
 }
