@@ -526,12 +526,11 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.quit = true
 		return a, tea.Quit
 	case tea.KeyPressMsg:
+		a.m15.lastKey = time.Now()
 		return a, a.key(m)
-	case tea.MouseClickMsg:
-		if w := a.ws(); w != nil && a.inWS && len(a.overlays) == 0 && m.Button == tea.MouseLeft {
-			return a, w.click(m.X, m.Y)
-		}
-		return a, nil
+	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
+		a.m15.lastKey = time.Now()
+		return a, a.mouse(msg.(tea.MouseMsg))
 	case tea.MouseWheelMsg:
 		// the wheel is three arrow keys (the terminal convention), so every pane and dialog
 		// scrolls without knowing about the mouse; horizontal ticks move one column
