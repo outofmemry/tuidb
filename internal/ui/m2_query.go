@@ -117,8 +117,19 @@ func (t *queryTab) reformat(pretty bool) tea.Cmd {
 		return t.ws.a.say("beautify works on SQL editors only")
 	}
 	src := t.ed.Selection()
-	if src == "" {
-		src = t.ed.Text()
+	if src == "" { // nothing selected: the statement under the cursor, else the whole buffer
+		text := t.ed.Text()
+		if a, b, ok := db.StatementRangeAt(t.ws.caps.Dialect, text, t.ed.Offset()); ok {
+			a += len(text[a:]) - len(strings.TrimLeft(text[a:], " \t\r\n"))
+			b = a + len(strings.TrimRight(text[a:b], " \t\r\n"))
+			if b > a {
+				t.ed.SelectBytes(a, b)
+				src = text[a:b]
+			}
+		}
+		if src == "" {
+			src = text
+		}
 	}
 	c := t.ws.a.d.Cfg.Editor
 	out := sqlfmt.Uglify(src, t.ws.caps.Dialect)
