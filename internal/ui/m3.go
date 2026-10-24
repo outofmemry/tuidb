@@ -716,7 +716,7 @@ func (w *Workspace) showDiagram(tbls []diagram.Table, schema, focus string, sche
 			}))
 			return nil
 		},
-		// the structure editor adds columns, keys and foreign keys, so these keys hand over to it
+		// the structure editor adds columns and keys, so these keys hand over to it
 		"n": func() tea.Cmd { d.done = true; return w.newTableDialog() },
 		"e": func() tea.Cmd {
 			d.done = true
@@ -729,6 +729,12 @@ func (w *Workspace) showDiagram(tbls []diagram.Table, schema, focus string, sche
 			}})
 			return nil
 		},
+		"a":       handover(func() tea.Cmd { return w.diagramAddFK(tbls, schema, reopen) }),
+		"x":       handover(func() tea.Cmd { return w.diagramDropTable(tbls, reopen) }),
+		"S":       switchSchema,
+		"shift+S": switchSchema,
+		"y":       func() tea.Cmd { return w.diagramCopyColumn(tbls) },
+		"c":       func() tea.Cmd { return w.diagramSetColor(tbls, schema, colors) },
 	}
 	w.a.push(d)
 }
