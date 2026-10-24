@@ -963,7 +963,7 @@ func (e *Editor) styleFor(th Theme, key int) lipgloss.Style {
 	case key&keyStmt != 0:
 		st = st.Inherit(th.AltRow)
 	}
-	return st
+	return st.Inherit(th.EditorBG) // editor_bg fills in where no highlight set a background
 }
 
 // View renders exactly W x H cells, with the autocomplete popup anchored under the cursor.
@@ -1001,7 +1001,8 @@ func (e *Editor) View(th Theme, focused bool) string {
 	a, b, hasSel := e.selRange()
 	br0, br1, bc0, bc1, hasBlk := e.blockRect()
 	gw, tw := e.gutterW(), e.textW()
-	rule := th.Border.Render("│") + " "
+	rule := th.Border.Inherit(th.EditorBG).Render("│ ")
+	blank := func(n int) string { return th.EditorBG.Render(strings.Repeat(" ", max(0, n))) }
 	var out []string
 	hid, foldN := e.foldInfo()
 	var vis []int // visible lines when something is folded
@@ -1023,7 +1024,7 @@ func (e *Editor) View(th Theme, focused bool) string {
 			}
 		}
 		if ri >= len(e.lines) {
-			out = append(out, strings.Repeat(" ", gw-2)+rule+strings.Repeat(" ", max(0, e.W-gw)))
+			out = append(out, blank(gw-2)+rule+blank(e.W-gw))
 			continue
 		}
 		if ri >= len(c.kinds) { // folds jump past the lexed window
