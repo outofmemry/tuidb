@@ -202,6 +202,39 @@ func inlineArgs(d db.Dialect, sql string, args []any) string {
 	return sql
 }
 
+// addFilterCopy is filter_add_copy: a new filter below the selected one, same column and operator, empty value.
+func (t *tableTab) addFilterCopy() {
+	fb, fs := &t.fb, &t.filters.Filters
+	if len(*fs) == 0 {
+		return
+	}
+	fb.sel = clamp(fb.sel, 0, len(*fs)-1)
+	nf := (*fs)[fb.sel]
+	nf.Value = ""
+	*fs = append((*fs)[:fb.sel+1], append([]db.Filter{nf}, (*fs)[fb.sel+1:]...)...)
+	fb.sel++
+	fb.field = ffValue
+	t.syncEdit()
+}
+
+// clearFilters is filter_clear_all: drop every filter, close the bar and reload.
+func (t *tableTab) clearFilters() tea.Cmd {
+	return t.guard(func() tea.Cmd { // nothing changes until the unsaved-changes prompt is answered
+		t.filters.Filters = nil
+		t.fb.focus, t.showFilters = false, false
+		return t.applyFiltersNow()
+	})
+}
+
+// exportFiltered is filter_export: the export dialog for this table with the applied filters.
+func (t *tableTab) exportFiltered() tea.Cmd {
+	// the filters on the bar, as the web does (no filter = the whole table); exportAction reads the applied set
+	was, had := t.appliedSet, t.hasApplied
+	t.markApplied()
+	defer func() { t.appliedSet, t.hasApplied = was, had }()
+	return t.ws.exportAction()
+}
+
 func (t *tableTab) showFilterSQL() tea.Cmd {
 	d, ok := db.DialectFor(t.ws.caps.Dialect)
 	if !ok {
