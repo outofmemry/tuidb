@@ -469,7 +469,7 @@ func (w *Workspace) startImport(path string, o importer.Options) tea.Cmd {
 					cmds = append(cmds, tt.load())
 				}
 			}
-			return fmt.Sprintf("imported %d rows into %s", rows, o.Table.Name), tea.Batch(cmds...)
+			return fmt.Sprintf("processed %d rows into %s", rows, o.Table.Name), tea.Batch(cmds...)
 		})
 	})
 }
