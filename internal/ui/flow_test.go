@@ -1120,14 +1120,16 @@ func TestFlowEditFunctionAndTriggerDefinitions(t *testing.T) {
 	h.want("Triggers on customers")
 	h.want("New trigger")
 	h.press("down", "enter")
+	h.want("Trigger on customers") // the name / timing / event grid above the body
+	h.press("ctrl+s")
 	trig := h.a.ws().tab().(*queryTab)
 	if !strings.Contains(trig.ed.Text(), `DROP TRIGGER IF EXISTS "audit" ON "public"."customers";`) || !strings.Contains(trig.ed.Text(), "EXECUTE FUNCTION log_order()") {
 		t.Errorf("trigger text: %q", trig.ed.Text())
 	}
 	h.prefix("2") // back to the customers tab
 	h.prefix("alt+t")
-	h.press("enter") // New trigger…
-	if nt := h.a.ws().tab().(*queryTab); !strings.Contains(nt.ed.Text(), "CREATE TRIGGER my_trigger") {
+	h.press("enter", "ctrl+s") // New trigger…
+	if nt := h.a.ws().tab().(*queryTab); !strings.Contains(nt.ed.Text(), `CREATE TRIGGER "my_trigger"`) {
 		t.Errorf("template: %q", nt.ed.Text())
 	}
 	h.prefix("alt+t") // from a SQL tab there is no table
