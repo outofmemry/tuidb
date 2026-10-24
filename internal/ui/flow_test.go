@@ -1529,3 +1529,37 @@ func TestWheelScrollsThreeRows(t *testing.T) {
 		t.Fatalf("wheel up moved to row %d, want 0", g.row)
 	}
 }
+
+func TestFlowWelcomeEngineStripFiltersAndPrefills(t *testing.T) {
+	h := newHarness(t, nil)
+	h.want("Postgres")        // engine tiles are drawn
+	h.want("more")            // the strip scrolls when the tiles do not all fit
+	h.press("right", "right") // all -> postgres -> mysql
+	h.want("MySQL connections (0 of 1)")
+	h.wantNot("shop") // the postgres connection is hidden by the filter
+	h.want("No MySQL connections yet.")
+	h.press("n")
+	h.want("New connection")
+	h.want("mysql") // the form is pre-filled with the picked engine
+	h.press("esc")
+	h.press("left")
+	h.want("shop")
+}
+
+func TestWelcomeEngineArtIsAligned(t *testing.T) {
+	for d, art := range engineArt {
+		if len(art) != 4 {
+			t.Errorf("%q: %d lines, want 4", d, len(art))
+		}
+		for _, l := range art {
+			if width(l) != 9 {
+				t.Errorf("%q: %q is %d cells wide, want 9", d, l, width(l))
+			}
+		}
+	}
+	for _, d := range config.Drivers {
+		if engineArt[d] == nil || engineName[d] == "" {
+			t.Errorf("%s has no tile", d)
+		}
+	}
+}

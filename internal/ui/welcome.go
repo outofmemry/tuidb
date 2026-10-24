@@ -21,6 +21,110 @@ type welcome struct {
 	sel, top  int
 	search    lineEdit
 	searching bool
+	engine    int // 0 = all engines, otherwise 1+index into config.Drivers; filters the list and pre-fills n
+	tileTop   int // first visible tile in the engine strip
+}
+
+// engineName is the display name on an engine tile; engineArt its four-line, eight-cell logo.
+var engineName = map[string]string{
+	config.Postgres: "Postgres", config.MySQL: "MySQL", config.MariaDB: "MariaDB", config.Cockroach: "Cockroach",
+	config.SQLite: "SQLite", config.DuckDB: "DuckDB", config.ClickHouse: "ClickHouse", config.Cassandra: "Cassandra",
+	config.DynamoDB: "DynamoDB", config.D1: "Cloudflare", config.Redis: "Redis", config.Mongo: "MongoDB",
+}
+
+var engineArt = map[string][]string{
+	"": { // all engines: a database cylinder
+		`  .---.  `,
+		` (_____) `,
+		` |     | `,
+		` ` + "`" + `-----' `},
+	config.Postgres: { // elephant
+		` ,--.__  `,
+		`( o   _\ `,
+		` \_  (_) `,
+		`  ` + "`" + `-'    `},
+	config.MySQL: { // dolphin
+		`    __   `,
+		` .-'  ` + "`" + `. `,
+		`(_,-._,' `,
+		`   ` + "`" + `-'   `},
+	config.MariaDB: { // seal
+		`  __     `,
+		` (  \__  `,
+		`  \__  ) `,
+		`    ` + "`" + `-'  `},
+	config.Cockroach: { // roach
+		` \_|_/   `,
+		`-( o )-  `,
+		`-(   )-  `,
+		` /` + "`" + `|'\   `},
+	config.SQLite: { // feather
+		`    /|   `,
+		`   / |   `,
+		`  /  |   `,
+		` /___|   `},
+	config.DuckDB: { // duck
+		`   __    `,
+		` <(o )__ `,
+		`  ( ._>  `,
+		`   ` + "`" + `-'   `},
+	config.ClickHouse: { // bars
+		` _ _ _ _ `,
+		`| | | | |`,
+		`| | | | |`,
+		`|_|_|_|_|`},
+	config.Cassandra: { // eye
+		`  .---.  `,
+		` ( (@) ) `,
+		`  ` + "`" + `---'  `,
+		`   ~~~   `},
+	config.DynamoDB: { // table
+		` .-----. `,
+		` |-----| `,
+		` |-----| `,
+		` ` + "`" + `-----' `},
+	config.D1: { // cloud
+		`   .--.  `,
+		` .(    ) `,
+		`(  D1   )`,
+		` ` + "`" + `-----' `},
+	config.Redis: { // stacked boxes
+		`  .---.  `,
+		` /_____\ `,
+		` \_____/ `,
+		`  \___/  `},
+	config.Mongo: { // leaf
+		`    ,    `,
+		`   /|\   `,
+		`  ( | )  `,
+		`   \|/   `},
+}
+
+// trimArt cuts the blank columns shared by all lines of a logo so center can place its ink, not its padding.
+func trimArt(art []string) []string {
+	l, r := 9, 9
+	for _, s := range art {
+		l = min(l, len(s)-len(strings.TrimLeft(s, " ")))
+		r = min(r, len(s)-len(strings.TrimRight(s, " ")))
+	}
+	out := make([]string, len(art))
+	for i, s := range art {
+		out[i] = s[l : len(s)-r]
+	}
+	return out
+}
+
+func center(s string, w int) string {
+	pad := max(0, w-width(s))
+	return strings.Repeat(" ", pad/2) + s + strings.Repeat(" ", pad-pad/2)
+}
+
+// driver returns the selected engine, or "" for all.
+func (w *welcome) driver() string {
+	if w.engine == 0 {
+		return ""
+	}
+	return config.Drivers[w.engine-1]
 }
 
 func newWelcome(a *App) *welcome {
@@ -40,6 +144,9 @@ func (w *welcome) rows() []connRow {
 	conns := w.a.d.Conns
 	order := make([]int, 0, len(conns))
 	for i, c := range conns {
+		if d := w.driver(); d != "" && c.Driver != d {
+			continue
+		}
 		if w.search.Value() == "" {
 			order = append(order, i)
 			continue
@@ -135,6 +242,10 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 		w.move(1)
 	case "up", "k":
 		w.move(-1)
+	case "right", "l":
+		w.pick(1)
+	case "left", "h":
+		w.pick(-1)
 	case "enter":
 		if r, ok := w.current(); ok {
 			return w.a.openConnection(r.conn)
@@ -173,10 +284,17 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// pick moves the engine cursor and snaps the list back to its top.
+func (w *welcome) pick(d int) {
+	w.engine = clamp(w.engine+d, 0, len(config.Drivers))
+	w.sel, w.top = 0, 0
+	w.move(0)
+}
+
 func (w *welcome) action(action string) tea.Cmd {
 	switch action {
 	case "new_connection":
-		return w.form(config.Connection{Driver: config.Postgres}, -1)
+		return w.form(config.Connection{Driver: orDefault(w.driver(), config.Postgres)}, -1)
 	case "open_database", "new_query_tab", "new_tab":
 		return w.a.say("connect first: Enter on a connection")
 	}
@@ -478,22 +596,74 @@ func (w *welcome) save(v map[string]string, idx int) tea.Cmd {
 func (w *welcome) view(th Theme, W, H int) string {
 	n := len(w.a.d.Conns)
 	rows := w.rows()
-	// ---- header: logo + what this is
+	byDriver := map[string]int{}
+	for _, c := range w.a.d.Conns {
+		byDriver[c.Driver]++
+	}
+	// ---- header: wordmark + tagline (a single line when the terminal is short)
 	var head []string
 	tag := []string{
 		th.Title.Render("a database client for the terminal"),
-		th.Dim.Render("PostgreSQL · MySQL · ClickHouse · Redis · MongoDB"),
+		th.Dim.Render(fmt.Sprintf("%d engines · %d saved", len(config.Drivers), n)),
 		"",
 		th.Hint.Render("browse and edit tables, run queries, review the SQL before it is sent."),
 		th.Hint.Render("every action is ") + th.chip(keymap.Display(w.a.d.Keys.Prefix)) + th.Hint.Render(" then a key; ") + th.chip(keymap.Display(w.a.d.Keys.Prefix)+" ?") + th.Hint.Render(" lists them."),
 	}
-	for i, l := range Logo {
-		line := "  " + th.LogoStyle(i, len(Logo)).Render(l)
-		if W >= logoW+50 && i < len(tag) {
-			line += "   " + tag[i]
+	if H >= 26 {
+		for i, l := range Logo {
+			line := "  " + th.LogoStyle(i, len(Logo)).Render(l)
+			if W >= logoW+50 && i < len(tag) {
+				line += "   " + tag[i]
+			}
+			head = append(head, line)
 		}
-		head = append(head, line)
+	} else {
+		head = append(head, "  "+th.LogoStyle(0, 1).Render("tuidb")+"  "+tag[0])
 	}
+	head = append(head, "")
+	// ---- engine strip: one logo tile per driver; the cursor filters the list and pre-fills n
+	const tileW = 13
+	tiles := append([]string{""}, config.Drivers...)
+	fitTiles := max(1, (W-6)/(tileW+1))
+	w.tileTop = clamp(w.tileTop, max(0, w.engine-fitTiles+1), min(w.engine, max(0, len(tiles)-fitTiles)))
+	tile := make([]string, 7)
+	for i := w.tileTop; i < min(len(tiles), w.tileTop+fitTiles); i++ {
+		d := tiles[i]
+		name, count := "All", n
+		if d != "" {
+			name, count = engineName[d], byDriver[d]
+		}
+		edge, art := th.Border, th.DriverStyle(d)
+		if d == "" {
+			art = th.Accent
+		}
+		if i == w.engine {
+			edge = th.Accent
+		}
+		label := name
+		if count > 0 {
+			label += " ·" + strconv.Itoa(count)
+		}
+		label = center(label, tileW-2)
+		if i == w.engine {
+			label = th.Bold.Render(label)
+		}
+		tile[0] += " " + edge.Render("╭"+strings.Repeat("─", tileW-2)+"╮")
+		for j, l := range trimArt(engineArt[d]) {
+			tile[1+j] += " " + edge.Render("│") + art.Render(center(l, tileW-2)) + edge.Render("│")
+		}
+		tile[5] += " " + edge.Render("│") + label + edge.Render("│")
+		tile[6] += " " + edge.Render("╰"+strings.Repeat("─", tileW-2)+"╯")
+	}
+	more := ""
+	if w.tileTop > 0 {
+		more += th.Dim.Render(fmt.Sprintf("  ‹ %d", w.tileTop))
+	}
+	if w.tileTop+fitTiles < len(tiles) {
+		more += th.Dim.Render(fmt.Sprintf("  › %d more", len(tiles)-w.tileTop-fitTiles))
+	}
+	head = append(head, " "+th.Section.Render("Engines")+"  "+th.chips("←/→", "pick")+th.Hint.Render("  filters the list; ")+th.chip("n")+th.Hint.Render(" creates one")+more)
+	head = append(head, tile...)
 	head = append(head, "")
 	// ---- body: connections frame (+ quick start frame when wide enough)
 	bodyH := max(6, H-len(head)-2)
@@ -509,18 +679,21 @@ func (w *welcome) view(th Theme, W, H int) string {
 	if w.searching || w.search.Value() != "" {
 		list = append(list, th.Accent.Render(" / ")+w.search.View(listW-6, th, w.searching), "")
 	}
-	if n == 0 {
+	if len(rows) == 0 {
+		what := "connections"
+		if d := w.driver(); d != "" {
+			what = engineName[d] + " connections"
+		}
 		list = append(list, "",
-			"  "+th.Bold.Render("No connections yet."),
+			"  "+th.Bold.Render("No "+what+" yet."),
 			"",
-			"  "+th.chips("n", "create a connection"),
+			"  "+th.chips("n", "create one"),
 			"  "+th.chips("i", "import a URL such as postgresql://user:pw@host/db"),
 			"",
 			"  "+th.Dim.Render("or start with one:  tuidb postgresql://user:pw@host:5432/db"))
 	} else {
 		list = append(list, "   "+th.Section.Render(fit("NAME", 26)+fit("DRIVER", 12)+fit("HOST", 26)+"TAG"))
 	}
-	listW -= 0
 	listH := max(1, bodyH-2-len(list))
 	w.sel = clamp(w.sel, 0, max(0, len(rows)-1))
 	if w.sel < w.top {
@@ -569,6 +742,9 @@ func (w *welcome) view(th Theme, W, H int) string {
 		list = append(list, line)
 	}
 	title := fmt.Sprintf("Connections (%d)", n)
+	if d := w.driver(); d != "" {
+		title = fmt.Sprintf("%s connections (%d of %d)", engineName[d], byDriver[d], n)
+	}
 	if len(w.a.wss) > 0 {
 		title += fmt.Sprintf(" · %d open", len(w.a.wss))
 	}
