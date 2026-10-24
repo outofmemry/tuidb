@@ -164,7 +164,7 @@ func (t *assistantTab) send() tea.Cmd {
 				return nil
 			}
 			w.m3.chat = append(w.m3.chat, ai.Message{Role: "assistant", Content: cleanReply(reply)})
-			return nil
+			return w.persistChat()
 		}
 	}))
 }
@@ -186,13 +186,25 @@ func (t *assistantTab) sendFailed(text string, err error, stopped bool) tea.Cmd 
 		}
 	}
 	t.in.Set(text)
+	seq := w.a.toastSeq
+	save := w.persistChat() // a failed save must be reported too, not overwritten by the send error's toast
+	note := ""
+	if w.a.toastSeq != seq && w.a.toastErr {
+		note = "; " + w.a.toast
+	}
 	switch {
 	case stopped:
-		return w.a.say("assistant: stopped")
+		if note != "" {
+			return tea.Batch(save, w.a.fail(fmt.Errorf("assistant: stopped%s", note)))
+		}
+		return tea.Batch(save, w.a.say("assistant: stopped"))
 	case errors.Is(err, errNoAIKey):
-		return w.a.say("%s", err.Error())
+		if note != "" {
+			return tea.Batch(save, w.a.fail(fmt.Errorf("%s%s", err.Error(), note)))
+		}
+		return tea.Batch(save, w.a.say("%s", err.Error()))
 	}
-	return w.a.fail(fmt.Errorf("assistant: %w", err))
+	return tea.Batch(save, w.a.fail(fmt.Errorf("assistant: %w%s", err, note)))
 }
 
 // cleanReply drops terminal control sequences (CSI / OSC) and control bytes from model output,
