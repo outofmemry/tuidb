@@ -375,6 +375,11 @@ func (w *Workspace) userCreate(ua db.UserAdmin) tea.Cmd {
 func (w *Workspace) userMenu(ua db.UserAdmin, u db.User) tea.Cmd {
 	items := []pickItem{{Label: "Details", Value: "details"}, {Label: "Change password…", Value: "password"}, {Label: "Attributes…", Value: "attrs"},
 		{Label: "Grant privileges…", Value: "grant"}, {Label: "Revoke privileges…", Value: "revoke"}, {Label: "Drop user…", Value: "drop"}}
+	if !w.isPG() {
+		items = append(items[:3], append([]pickItem{{Label: "Resource limits…", Value: "limits"}}, items[3:]...)...)
+	} else {
+		items = append(items[:3], append([]pickItem{{Label: "Connection limit…", Value: "limits"}}, items[3:]...)...)
+	}
 	w.a.push(&pickerDlg{title: userLabel(u), items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
 		switch it.Value.(string) {
 		case "details":
@@ -402,6 +407,8 @@ func (w *Workspace) userMenu(ua db.UserAdmin, u db.User) tea.Cmd {
 			w.a.push(&checklistDlg{title: "Attributes of " + userLabel(u), items: w.attrItems(u.Attrs), onOK: func(items []checkItem) tea.Cmd {
 				return w.userApply(ua, "attributes changed for "+userLabel(u), w.attrChanges(u, items)...)
 			}})
+		case "limits":
+			return w.userLimits(ua, u)
 		case "grant":
 			obj := "public"
 			if r, ok := w.targetRef(); ok {
