@@ -238,9 +238,9 @@ func (h *History) AppendAll(conn string, entries []HistoryEntry) (int, error) {
 	_, werr := f.Write(out)
 	f.Close()
 	if werr != nil {
-		return werr
+		return 0, werr
 	}
-	return h.trimLocked(conn, buf.Len()/len(entries)+1)
+	return len(fresh), h.trimLocked(conn, buf.Len()/len(fresh)+1)
 }
 
 // trimLocked keeps the file to the newest maxEntries; n is the size of one just-written line.
