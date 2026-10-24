@@ -76,6 +76,8 @@ type tableTab struct {
 	ddlTop              int
 	ddlBase             string // DDL as loaded; triggers are appended for display
 	loaded              structureLoadedMsg
+	structSeq           int
+	structCancel        []context.CancelFunc
 	fkEdits             map[string]*db.ForeignKey
 	creating            bool
 	docs                []string
@@ -170,6 +172,7 @@ type tableCountMsg struct {
 }
 
 type structureLoadedMsg struct {
+	seq  int
 	cols []db.Column
 	idxs []db.Index
 	fks  []db.ForeignKey
@@ -178,6 +181,7 @@ type structureLoadedMsg struct {
 }
 
 type ddlLoadedMsg struct {
+	seq int
 	ddl string
 	err error
 }
@@ -267,6 +271,13 @@ func (t *tableTab) loadRows() tea.Cmd {
 	return cmd
 }
 
+func (t *tableTab) cancelStructure() {
+	for _, c := range t.structCancel {
+		c()
+	}
+	t.structCancel = nil
+}
+
 func (t *tableTab) cancelLoads() {
 	for _, c := range t.cancels {
 		c()
@@ -278,6 +289,7 @@ func (t *tableTab) cancelLoads() {
 func (t *tableTab) Close() {
 	t.closed = true
 	t.cancelLoads()
+	t.cancelStructure()
 }
 
 func (t *tableTab) Busy() bool { return t.loading }
@@ -288,7 +300,7 @@ func (t *tableTab) CancelWork() tea.Cmd {
 		return nil
 	}
 	t.cancelLoads()
-	t.loading, t.seq = false, t.seq+1
+	t.loading, t.committing, t.seq = false, false, t.seq+1
 	return t.ws.a.say("load of %s cancelled", t.ref.Name)
 }
 
@@ -354,6 +366,9 @@ func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {
 			}
 		}
 	case structureLoadedMsg:
+		if m.seq != t.structSeq {
+			return nil
+		}
 		t.structLoaded = true
 		if m.err != nil {
 			t.structErr = m.err.Error()
@@ -365,6 +380,9 @@ func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {
 		t.buildStructure(m)
 		t.applyCols()
 	case ddlLoadedMsg:
+		if m.seq != t.structSeq {
+			return nil
+		}
 		if m.err == nil {
 			t.ddlBase = m.ddl
 		} else {
@@ -444,7 +462,7 @@ func (t *tableTab) applyCols() {
 			}
 		}
 	}
-	t.grid.Editable = t.ref.Kind == db.KindTable && t.keyVisible(t.resCols)
+	t.grid.Editable = !t.loading && t.ref.Kind == db.KindTable && t.keyVisible(t.resCols)
 }
 
 // keyVisible says whether the loaded columns still identify rows safely.
@@ -831,10 +849,11 @@ func (t *tableTab) Do(name string) tea.Cmd {
 		}
 		if name == "reload_tab" { // the structure views reload the structure, not the rows
 			if t.structPending() {
-				t.ws.a.push(&confirmDlg{title: "Reload and discard pending changes?", yes: "Reload", danger: true, onYes: func() tea.Cmd { t.structLoaded = false; return t.loadStructure() }})
+				t.ws.a.push(&confirmDlg{title: "Reload and discard pending changes?", yes: "Reload", danger: true, onYes: func() tea.Cmd { t.structLoaded, t.cols = false, nil; t.ws.forget(&t.ref); return t.loadStructure() }})
 				return nil
 			}
-			t.structLoaded = false
+			t.structLoaded, t.cols = false, nil
+			t.ws.forget(&t.ref)
 			return t.loadStructure()
 		}
 	}
@@ -857,6 +876,9 @@ func (t *tableTab) Do(name string) tea.Cmd {
 
 func (t *tableTab) Statements() ([]db.Statement, error) {
 	if t.view == viewStructure || t.view == viewIndex {
+		if t.structGrid == nil || !t.structLoaded {
+			return nil, fmt.Errorf("the structure is still loading")
+		}
 		return t.structStatements()
 	}
 	return t.ws.sess.Plan(t.grid.Changes(t.ref))

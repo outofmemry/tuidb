@@ -41,9 +41,12 @@ type colMeta struct{ orig string }
 func (t *tableTab) loadStructure() tea.Cmd {
 	ws, ref, caps := t.ws, t.ref, t.ws.caps
 	cached := ws.meta[ref]
-	main := ws.async(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
+	t.cancelStructure() // a newer load replaces the old one; its late reply is dropped by seq
+	t.structSeq++
+	seq := t.structSeq
+	main, c1 := ws.asyncCancel(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
 		var (
-			m  structureLoadedMsg
+			m  = structureLoadedMsg{seq: seq}
 			mu sync.Mutex
 			wg sync.WaitGroup
 		)
@@ -77,10 +80,11 @@ func (t *tableTab) loadStructure() tea.Cmd {
 		wg.Wait()
 		return m
 	})
-	ddl := ws.async(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
+	ddl, c2 := ws.asyncCancel(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
 		d, err := sess.DDL(ctx, ref)
-		return ddlLoadedMsg{ddl: d, err: err}
+		return ddlLoadedMsg{seq: seq, ddl: d, err: err}
 	})
+	t.structCancel = []context.CancelFunc{c1, c2}
 	return tea.Batch(main, ddl)
 }
 
@@ -227,6 +231,7 @@ func (t *tableTab) oldDef() *db.TableDef {
 func (t *tableTab) newDef() (*db.TableDef, error) {
 	d := &db.TableDef{Schema: t.ref.Schema, Name: t.ref.Name}
 	seen := map[string]bool{}
+	live := map[string]bool{} // fkEdits keys (original column names) whose column still exists
 	for _, r := range t.structGrid.Rows {
 		if r.State == rowDeleted {
 			continue
@@ -239,6 +244,7 @@ func (t *tableTab) newDef() (*db.TableDef, error) {
 			return nil, fmt.Errorf("duplicate column name %q", name)
 		}
 		seen[strings.ToLower(name)] = true
+		live[fkKey(r, name)] = true
 		c := db.Column{Name: name, Type: typ, Nullable: cellStr(r.Cur[scNull]) == "YES", Extra: cellStr(r.Cur[scExtra])}
 		if r.State != rowNew {
 			if m, ok := r.Meta.(colMeta); ok {
@@ -289,8 +295,8 @@ func (t *tableTab) newDef() (*db.TableDef, error) {
 			d.ForeignKeys = append(d.ForeignKeys, fk)
 		}
 	}
-	for _, fk := range t.fkEdits {
-		if fk != nil {
+	for k, fk := range t.fkEdits {
+		if fk != nil && live[k] {
 			d.ForeignKeys = append(d.ForeignKeys, *fk)
 		}
 	}
@@ -654,6 +660,14 @@ func (t *tableTab) ddlInput(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// fkKey is the key of a column's FK edit: its original name, so a rename keeps the edit attached.
+func fkKey(r *gridRow, name string) string {
+	if m, ok := r.Meta.(colMeta); ok && r.State != rowNew {
+		return m.orig
+	}
+	return name
+}
+
 // fkForm edits the foreign key of the column under the cursor (create, change or delete).
 func (t *tableTab) fkForm(g *Grid) tea.Cmd {
 	r := g.cur()
@@ -665,12 +679,13 @@ func (t *tableTab) fkForm(g *Grid) tea.Cmd {
 		return nil
 	}
 	var cur *db.ForeignKey
-	if e, edited := t.fkEdits[col]; edited {
+	key := fkKey(r, col)
+	if e, edited := t.fkEdits[key]; edited {
 		cur = e
 	} else {
 		for i := range t.loaded.fks {
 			for _, c := range t.loaded.fks[i].Columns {
-				if c == col {
+				if c == key {
 					cur = &t.loaded.fks[i]
 				}
 			}
@@ -702,7 +717,7 @@ func (t *tableTab) fkForm(g *Grid) tea.Cmd {
 		{Key: "remove", Label: "Delete this key", Kind: fBool, Value: "false", Show: func(map[string]string) bool { return cur != nil }},
 	}, func(vals map[string]string) tea.Cmd {
 		if vals["remove"] == "true" {
-			t.fkEdits[col] = nil
+			t.fkEdits[key] = nil
 			g.SetCell(nil)
 			return nil
 		}
@@ -717,7 +732,7 @@ func (t *tableTab) fkForm(g *Grid) tea.Cmd {
 			fk.Name = cur.Name
 			fk.Columns = cur.Columns
 		}
-		t.fkEdits[col] = fk
+		t.fkEdits[key] = fk
 		g.SetCell(fkText(*fk, col))
 		return nil
 	})

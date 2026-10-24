@@ -355,7 +355,7 @@ func (t *docTree) view(th Theme, W, H int) string {
 // ---- hooks used by tableTab -------------------------------------------------------------
 
 func (t *tableTab) jsonView(th Theme, W, H int) string {
-	if t.jsonCache.docs == nil || &t.jsonCache.docs[0] != &t.docs[0] || len(t.jsonCache.docs) != len(t.docs) {
+	if t.jsonCache.docs == nil || len(t.jsonCache.docs) != len(t.docs) || len(t.docs) > 0 && &t.jsonCache.docs[0] != &t.docs[0] {
 		t.jsonCache.docs = t.docs
 		t.jsonCache.lines = docLines(t.docs)
 		t.jsonCache.kinds = make([][]tokKind, len(t.jsonCache.lines)) // once per result, not per frame

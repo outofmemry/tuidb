@@ -195,6 +195,22 @@ func (t *tableTab) filterInput(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
+// inlineArgs substitutes placeholders left to right, so "?" dialects keep their argument order.
+func inlineArgs(d db.Dialect, sql string, args []any) string {
+	pos := 0
+	for i, a := range args {
+		p := d.Param(i + 1)
+		j := strings.Index(sql[pos:], p)
+		if j < 0 {
+			break
+		}
+		lit := d.Literal(a)
+		sql = sql[:pos+j] + lit + sql[pos+j+len(p):]
+		pos += j + len(lit)
+	}
+	return sql
+}
+
 func (t *tableTab) showFilterSQL() tea.Cmd {
 	d, ok := db.DialectFor(t.ws.caps.Dialect)
 	if !ok {
@@ -208,9 +224,7 @@ func (t *tableTab) showFilterSQL() tea.Cmd {
 	if err != nil {
 		return t.ws.a.fail(err)
 	}
-	for i := len(args) - 1; i >= 0; i-- { // inline args for display
-		sql = strings.Replace(sql, d.Param(i+1), d.Literal(args[i]), 1)
-	}
+	sql = inlineArgs(d, sql, args)
 	if sql == "" {
 		sql = "(no active filters)"
 	}

@@ -1563,3 +1563,14 @@ func TestWelcomeEngineArtIsAligned(t *testing.T) {
 		}
 	}
 }
+
+func TestFlowPreviewStructureBeforeLoadDoesNotPanic(t *testing.T) {
+	h := newHarness(t, nil)
+	h.connect()
+	h.openCustomers()
+	tab := h.a.ws().tab().(*tableTab)
+	tab.view, tab.structGrid, tab.idxGrid, tab.structLoaded = viewStructure, nil, nil, false
+	if _, err := tab.Statements(); err == nil {
+		t.Error("preview before the structure has loaded must return an error")
+	}
+}

@@ -230,6 +230,13 @@ func (w *Workspace) asyncCancel(tab int, f func(ctx context.Context, sess db.Ses
 
 func (w *Workspace) handle(m wsMsg) tea.Cmd {
 	if _, apply := m.msg.(applyDoneMsg); !apply && m.gen != w.gen {
+		if qd, ok := m.msg.(queryDoneMsg); ok { // the run it belonged to is gone: free the tab instead of leaving it "running"
+			for _, t := range w.tabs {
+				if q, ok := t.(*queryTab); ok && q.ID() == m.tab && q.batch == qd.batch {
+					return q.Cancel()
+				}
+			}
+		}
 		return nil // from before a database switch / reconnect: not this session's data
 	}
 	if cm, ok := m.msg.(colsMetaMsg); ok && cm.err == nil && cm.cols != nil {
@@ -440,6 +447,15 @@ func (w *Workspace) newQueryTab(text string) tea.Cmd {
 		t.ed.SetText(text)
 	}
 	return w.addTab(t)
+}
+
+// openSaved opens a saved query in a new tab that auto-saves back to its file.
+func (w *Workspace) openSaved(q store.Query) tea.Cmd {
+	cmd := w.newQueryTab(q.SQL)
+	if t, ok := w.tab().(*queryTab); ok {
+		t.savedAs, t.lastAuto = q.Path, q.SQL
+	}
+	return cmd
 }
 
 // ---- messages without a tab -------------------------------------------------------------
@@ -760,6 +776,11 @@ func (w *Workspace) pickSafeMode() tea.Cmd {
 	w.a.push(&pickerDlg{title: "Safe mode for " + w.conn.Name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
 		l := it.Value.(safemode.Level)
 		// leaving a password-protected level needs the password, like TablePlus
+		if (w.level == safemode.Safe1 || w.level == safemode.Safe2) && w.o.Password == "" {
+			// nothing to compare against: a blank field must not pass as "the database password"
+			w.a.push(&confirmDlg{title: "This connection has no stored password. Change safe mode to " + l.Label() + "?", yes: "Change", danger: true, onYes: func() tea.Cmd { return apply(l) }})
+			return nil
+		}
 		if w.level == safemode.Safe1 || w.level == safemode.Safe2 {
 			f := newForm("Enter the database password to change safe mode", []formField{{Key: "pw", Label: "Password", Kind: fSecret}},
 				func(map[string]string) tea.Cmd { return apply(l) })
@@ -868,7 +889,7 @@ func (w *Workspace) openAnything() tea.Cmd {
 		case "object":
 			return w.openObject(t.ref, ctrl)
 		case "query":
-			return w.newQueryTab(t.q.SQL)
+			return w.openSaved(t.q)
 		case "database":
 			return w.openDatabase(t.name)
 		}

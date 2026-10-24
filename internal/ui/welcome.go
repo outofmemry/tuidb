@@ -454,7 +454,7 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		for _, fl := range f.fields {
 			if fl.Key == "port" {
 				old := fl.edit.Value()
-				if old == "" || old == strconv.Itoa(config.DefaultPort(c.Driver)) || isDefaultPort(old) {
+				if old == "" || v["driver"] != c.Driver && (old == strconv.Itoa(config.DefaultPort(c.Driver)) || isDefaultPort(old)) { // only when the driver really changed
 					fl.edit.Set(portText(config.DefaultPort(v["driver"])))
 				}
 			}
@@ -622,49 +622,51 @@ func (w *welcome) view(th Theme, W, H int) string {
 	}
 	head = append(head, "")
 	// ---- engine strip: one logo tile per driver; the cursor filters the list and pre-fills n
-	const tileW = 13
-	tiles := append([]string{""}, config.Drivers...)
-	fitTiles := max(1, (W-6)/(tileW+1))
-	w.tileTop = clamp(w.tileTop, max(0, w.engine-fitTiles+1), min(w.engine, max(0, len(tiles)-fitTiles)))
-	tile := make([]string, 7)
-	for i := w.tileTop; i < min(len(tiles), w.tileTop+fitTiles); i++ {
-		d := tiles[i]
-		name, count := "All", n
-		if d != "" {
-			name, count = engineName[d], byDriver[d]
+	if H-len(head) >= 17 { // strip (9 rows) + frame borders + the 6-row body floor; a short terminal drops it so the list stays visible
+		const tileW = 13
+		tiles := append([]string{""}, config.Drivers...)
+		fitTiles := max(1, (W-6)/(tileW+1))
+		w.tileTop = clamp(w.tileTop, max(0, w.engine-fitTiles+1), min(w.engine, max(0, len(tiles)-fitTiles)))
+		tile := make([]string, 7)
+		for i := w.tileTop; i < min(len(tiles), w.tileTop+fitTiles); i++ {
+			d := tiles[i]
+			name, count := "All", n
+			if d != "" {
+				name, count = engineName[d], byDriver[d]
+			}
+			edge, art := th.Border, th.DriverStyle(d)
+			if d == "" {
+				art = th.Accent
+			}
+			if i == w.engine {
+				edge = th.Accent
+			}
+			label := name
+			if count > 0 {
+				label += " ·" + strconv.Itoa(count)
+			}
+			label = center(label, tileW-2)
+			if i == w.engine {
+				label = th.Bold.Render(label)
+			}
+			tile[0] += " " + edge.Render("╭"+strings.Repeat("─", tileW-2)+"╮")
+			for j, l := range trimArt(engineArt[d]) {
+				tile[1+j] += " " + edge.Render("│") + art.Render(center(l, tileW-2)) + edge.Render("│")
+			}
+			tile[5] += " " + edge.Render("│") + label + edge.Render("│")
+			tile[6] += " " + edge.Render("╰"+strings.Repeat("─", tileW-2)+"╯")
 		}
-		edge, art := th.Border, th.DriverStyle(d)
-		if d == "" {
-			art = th.Accent
+		more := ""
+		if w.tileTop > 0 {
+			more += th.Dim.Render(fmt.Sprintf("  ‹ %d", w.tileTop))
 		}
-		if i == w.engine {
-			edge = th.Accent
+		if w.tileTop+fitTiles < len(tiles) {
+			more += th.Dim.Render(fmt.Sprintf("  › %d more", len(tiles)-w.tileTop-fitTiles))
 		}
-		label := name
-		if count > 0 {
-			label += " ·" + strconv.Itoa(count)
-		}
-		label = center(label, tileW-2)
-		if i == w.engine {
-			label = th.Bold.Render(label)
-		}
-		tile[0] += " " + edge.Render("╭"+strings.Repeat("─", tileW-2)+"╮")
-		for j, l := range trimArt(engineArt[d]) {
-			tile[1+j] += " " + edge.Render("│") + art.Render(center(l, tileW-2)) + edge.Render("│")
-		}
-		tile[5] += " " + edge.Render("│") + label + edge.Render("│")
-		tile[6] += " " + edge.Render("╰"+strings.Repeat("─", tileW-2)+"╯")
+		head = append(head, " "+th.Section.Render("Engines")+"  "+th.chips("←/→", "pick")+th.Hint.Render("  filters the list; ")+th.chip("n")+th.Hint.Render(" creates one")+more)
+		head = append(head, tile...)
+		head = append(head, "")
 	}
-	more := ""
-	if w.tileTop > 0 {
-		more += th.Dim.Render(fmt.Sprintf("  ‹ %d", w.tileTop))
-	}
-	if w.tileTop+fitTiles < len(tiles) {
-		more += th.Dim.Render(fmt.Sprintf("  › %d more", len(tiles)-w.tileTop-fitTiles))
-	}
-	head = append(head, " "+th.Section.Render("Engines")+"  "+th.chips("←/→", "pick")+th.Hint.Render("  filters the list; ")+th.chip("n")+th.Hint.Render(" creates one")+more)
-	head = append(head, tile...)
-	head = append(head, "")
 	// ---- body: connections frame (+ quick start frame when wide enough)
 	bodyH := max(6, H-len(head)-2)
 	sideW := 0
@@ -675,6 +677,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 	if sideW > 0 {
 		listW--
 	}
+	addrW := clamp(listW-4-41-12, 4, 26) // host column shrinks first so the TAG badge (up to 12 cells) stays visible
 	var list []string
 	if w.searching || w.search.Value() != "" {
 		list = append(list, th.Accent.Render(" / ")+w.search.View(listW-6, th, w.searching), "")
@@ -692,7 +695,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			"",
 			"  "+th.Dim.Render("or start with one:  tuidb postgresql://user:pw@host:5432/db"))
 	} else {
-		list = append(list, "   "+th.Section.Render(fit("NAME", 26)+fit("DRIVER", 12)+fit("HOST", 26)+"TAG"))
+		list = append(list, "   "+th.Section.Render(fit("NAME", 26)+fit("DRIVER", 12)+fit("HOST", addrW)+"TAG"))
 	}
 	listH := max(1, bodyH-2-len(list))
 	w.sel = clamp(w.sel, 0, max(0, len(rows)-1))
@@ -735,7 +738,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			name = th.Bold.Render(name)
 		}
 		// a stripe in the driver color leads each row, so a mixed list scans by engine
-		line := th.DriverStyle(c.Driver).Render("▎") + cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, 26)) + tagS
+		line := th.DriverStyle(c.Driver).Render("▎") + cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, addrW)) + tagS
 		if i == w.sel {
 			line = th.SelRow.Render(fit(line, listW-4))
 		}

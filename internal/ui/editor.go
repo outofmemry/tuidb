@@ -377,7 +377,8 @@ func (e *Editor) Undo() {
 	e.undo = e.undo[:len(e.undo)-1]
 	e.redo = append(e.redo, editSnap{lines: append([]string(nil), e.lines...), cur: e.cur})
 	e.lines, e.cur, e.anchor, e.lastKind = s.lines, s.cur, nil, ""
-	e.ac.open, e.Changed = false, true
+	e.ac.open = false
+	e.markChanged()
 	e.scroll()
 }
 
@@ -389,7 +390,8 @@ func (e *Editor) Redo() {
 	e.redo = e.redo[:len(e.redo)-1]
 	e.undo = append(e.undo, editSnap{lines: append([]string(nil), e.lines...), cur: e.cur})
 	e.lines, e.cur, e.anchor, e.lastKind = s.lines, s.cur, nil, ""
-	e.ac.open, e.Changed = false, true
+	e.ac.open = false
+	e.markChanged()
 	e.scroll()
 }
 
@@ -773,7 +775,7 @@ func (e *Editor) View(th Theme, focused bool) string {
 		curLine := focused && e.Opts.Highlight && ri == e.cur.row
 		end := min(len(r), e.left+tw)
 		bytePos := 0
-		if curStmt != nil {
+		if curStmt != nil && ri < len(offs) {
 			bytePos = offs[ri] + len(string(r[:min(e.left, len(r))]))
 		}
 		// Characters are grouped into runs that share a style and rendered once per run:

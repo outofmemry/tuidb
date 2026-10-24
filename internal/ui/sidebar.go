@@ -535,7 +535,7 @@ func (s *sidebar) activate(newTab bool) tea.Cmd {
 	case sbObject:
 		return s.w.openObject(r.obj.ObjRef, newTab)
 	case sbQuery:
-		return s.w.newQueryTab(r.q.SQL)
+		return s.w.openSaved(r.q)
 	case sbHistory:
 		return s.w.newQueryTab(r.h.SQL)
 	}
@@ -763,9 +763,9 @@ func (s *sidebar) queryMenu(q store.Query) tea.Cmd {
 	s.w.a.push(&pickerDlg{title: q.Name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
 		switch it.Value.(string) {
 		case "open":
-			return s.w.newQueryTab(q.SQL)
+			return s.w.openSaved(q)
 		case "run":
-			cmd := s.w.newQueryTab(q.SQL)
+			cmd := s.w.openSaved(q)
 			if t, ok := s.w.tab().(*queryTab); ok {
 				return tea.Batch(cmd, t.runAll())
 			}
@@ -829,9 +829,13 @@ func (s *sidebar) adminOp(op db.AdminOp) tea.Cmd {
 }
 
 func (s *sidebar) cloneDialog(ref db.ObjRef) tea.Cmd {
+	withData := "true"
+	if s.w.caps.Dialect == "cql" { // Cassandra cannot copy rows: default to structure only
+		withData = "false"
+	}
 	s.w.a.push(newForm("Clone "+ref.Name, []formField{
 		{Key: "new_name", Label: "New name", Kind: fText, Value: ref.Name + "_clone"},
-		{Key: "with_data", Label: "Duplicate content", Kind: fBool, Value: "true"},
+		{Key: "with_data", Label: "Duplicate content", Kind: fBool, Value: withData},
 	}, func(v map[string]string) tea.Cmd {
 		stmts, err := s.w.sess.PlanAdmin(db.OpClone, ref, map[string]string{"new_name": v["new_name"], "with_data": v["with_data"]})
 		if err != nil {

@@ -388,3 +388,14 @@ func TestLineEditWideRunes(t *testing.T) {
 		}
 	}
 }
+
+func TestEditorUndoInvalidatesRenderCache(t *testing.T) {
+	e := newEd()
+	e.SetText("select 1\nfrom t\nwhere a = 1")
+	_ = e.View(NewTheme(configTheme()), true) // builds the cache for three lines
+	e.SetText("select 1")
+	e.undo = []editSnap{{lines: []string{"select 1", "from t", "where a = 1"}}}
+	_ = e.View(NewTheme(configTheme()), true) // cache now holds one line
+	e.Undo()
+	_ = e.View(NewTheme(configTheme()), true) // used to panic: offsets cached for one line
+}

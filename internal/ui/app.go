@@ -447,6 +447,12 @@ func (a *App) confirmQuit() tea.Cmd {
 		return tea.Quit
 	}
 	for _, w := range a.wss {
+		if w.applying {
+			a.push(&confirmDlg{title: "A commit is still running. Quit anyway?", lines: []string{"Quitting now cuts the running statements off."}, yes: "Quit", danger: true, onYes: quit})
+			return nil
+		}
+	}
+	for _, w := range a.wss {
 		if w.dirty() {
 			a.push(&confirmDlg{title: "Quit with uncommitted changes?", lines: []string{"Pending edits will be lost."}, yes: "Quit", danger: true, onYes: quit})
 			return nil

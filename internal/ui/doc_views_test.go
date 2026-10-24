@@ -156,3 +156,11 @@ func TestQuickLookTreeForJSONRawForText(t *testing.T) {
 		t.Error("esc closes")
 	}
 }
+
+func TestJSONViewSurvivesReloadToZeroDocuments(t *testing.T) {
+	tt := &tableTab{docs: []string{`{"a":1}`}}
+	th := NewTheme(configTheme())
+	_ = tt.jsonView(th, 40, 5)
+	tt.docs = nil
+	_ = tt.jsonView(th, 40, 5) // used to index docs[0] of an empty slice
+}

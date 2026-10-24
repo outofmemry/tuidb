@@ -487,11 +487,25 @@ func (t *queryTab) afterEdit() tea.Cmd {
 }
 
 func (t *queryTab) resultsInput(msg tea.Msg) tea.Cmd {
+	rv := t.res[t.rc]
+	if rv.grid != nil && rv.grid.Editing() { // paste into the open cell editor
+		switch m := msg.(type) {
+		case tea.PasteMsg:
+			rv.grid.edit.Handle(m)
+			return nil
+		case tea.ClipboardMsg:
+			rv.grid.edit.Handle(tea.PasteMsg{Content: m.Content})
+			return nil
+		case tea.KeyPressMsg:
+			if m.Keystroke() == "ctrl+v" {
+				return tea.ReadClipboard
+			}
+		}
+	}
 	k, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return nil
 	}
-	rv := t.res[t.rc]
 	if rv.grid != nil && t.resultEditKeys(rv.grid, msg) {
 		return nil
 	}
@@ -694,6 +708,9 @@ func (t *queryTab) addToQueries() tea.Cmd {
 		q, err := t.ws.a.d.Queries.Save(strings.Trim(v["folder"], "/ "), v["name"], kws, text)
 		if err != nil {
 			return t.ws.a.fail(err)
+		}
+		if text == t.ed.Text() { // the whole buffer was saved: keep auto-saving it
+			t.savedAs, t.lastAuto = q.Path, text
 		}
 		return t.ws.a.say("saved %s", q.Name)
 	}))

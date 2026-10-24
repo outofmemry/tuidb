@@ -211,6 +211,7 @@ func (t *queryTab) resultAction(name string) (bool, tea.Cmd) {
 		return false, nil
 	}
 	g := rv.grid
+	g.FinishEdit(true) // an open inline editor would otherwise land in the row the action moves to
 	switch name {
 	case "add_row":
 		g.AddRow()
