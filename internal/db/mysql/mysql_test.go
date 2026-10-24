@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -141,6 +143,15 @@ func TestUseRe(t *testing.T) {
 	}
 	if useRe.MatchString("USER()") || useRe.MatchString("SELECT 1") {
 		t.Error("useRe too greedy")
+	}
+}
+
+// DDL on a pinned connection would commit the user's open transaction, so Apply refuses it before any I/O.
+func TestPinnedApplyRefusesDDL(t *testing.T) {
+	p := pinned{&session{pinned: true}}
+	err := p.Apply(context.Background(), []db.Statement{{Text: "INSERT INTO t VALUES (1)"}, {Text: "ALTER TABLE t ADD c int"}})
+	if err == nil || !strings.Contains(err.Error(), "release the pin") {
+		t.Errorf("got %v", err)
 	}
 }
 
@@ -414,5 +425,58 @@ func TestIndexSQLKeyParts(t *testing.T) {
 	want := "UNIQUE INDEX `i` (`title`(10), `created` DESC, `plain`, (lower(x)) DESC)"
 	if err != nil || got != want {
 		t.Errorf("got %q (%v) want %q", got, err, want)
+	}
+}
+
+func TestDDLFailureSaysWhatWasApplied(t *testing.T) {
+	err := ddlFailure("MySQL", 2, 4, "ALTER TABLE t ADD c int", errors.New("boom"))
+	for _, want := range []string{"statement 3 (ALTER TABLE t ADD c int)", "boom", "2 of 4 statements were already applied", "MySQL cannot roll back DDL"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q missing %q", err, want)
+		}
+	}
+}
+
+func TestReadOnlyRefusesWrites(t *testing.T) {
+	s := &session{conn: config.Connection{ReadOnly: true}}
+	if _, err := s.Exec(context.Background(), "DELETE FROM t", 10); !errors.Is(err, errReadOnly) {
+		t.Errorf("Exec: %v", err)
+	}
+	if err := s.Apply(context.Background(), []db.Statement{{Text: "UPDATE t SET a = 1"}}); !errors.Is(err, errReadOnly) {
+		t.Errorf("Apply: %v", err)
+	}
+}
+
+func TestIAMRefusesPlaintext(t *testing.T) {
+	for _, m := range []string{"disable", "prefer"} {
+		s := &session{conn: config.Connection{Host: "h", IAMAuth: true, SSLMode: m}}
+		if _, err := s.openPool(context.Background(), ""); err == nil || !strings.Contains(err.Error(), "iam_auth needs TLS") {
+			t.Errorf("%s: %v", m, err)
+		}
+	}
+}
+
+type nopConnector struct{}
+
+func (nopConnector) Connect(context.Context) (driver.Conn, error) { return nil, nil }
+func (nopConnector) Driver() driver.Driver                        { return nil }
+
+func TestPinnedConnectorRefusesSecondConnection(t *testing.T) {
+	c := &onceConnector{Connector: nopConnector{}}
+	if _, err := c.Connect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Connect(context.Background()); err == nil {
+		t.Error("a replacement connection must not be opened silently")
+	}
+}
+
+func TestReadOnlyGatesKillAndPinnedApply(t *testing.T) {
+	s := &session{conn: config.Connection{ReadOnly: true}}
+	if err := s.Kill(context.Background(), "1"); !errors.Is(err, errReadOnly) {
+		t.Errorf("Kill: %v", err)
+	}
+	if err := (pinned{s}).Apply(context.Background(), []db.Statement{{Text: "DELETE FROM t"}}); !errors.Is(err, errReadOnly) {
+		t.Errorf("pinned Apply: %v", err)
 	}
 }
