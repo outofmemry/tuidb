@@ -38,10 +38,17 @@ var (
 	ClickHouse = Dialect{Name: "clickhouse", Quote: chQuote, Param: func(int) string { return "?" }, Mutate: true, NowExpr: "now()", LikeCast: true, BackslashEscapes: true, CastText: func(e string) string { return "toString(" + e + ")" }}
 )
 
-// extraDialects lets a driver's own file register a Dialect (SQLite, DuckDB, ...) from init().
+// extraDialects holds dialects registered with RegisterDialect (drivers call it from init()).
 var extraDialects = map[string]Dialect{}
 
-func registerDialect(d Dialect) { extraDialects[d.Name] = d }
+func RegisterDialect(d Dialect) { extraDialects[d.Name] = d }
+
+func init() {
+	RegisterDialect(Dialect{Name: "sqlite", Quote: quoteWith(`"`), Param: func(int) string { return "?" }, NowExpr: "CURRENT_TIMESTAMP",
+		CastText: func(e string) string { return "CAST(" + e + " AS TEXT)" }})
+	RegisterDialect(Dialect{Name: "duckdb", Quote: quoteWith(`"`), Param: func(n int) string { return "$" + strconv.Itoa(n) }, ILike: true, NowExpr: "now()",
+		LikeCast: true, CastText: func(e string) string { return "CAST(" + e + " AS VARCHAR)" }})
+}
 
 func DialectFor(name string) (Dialect, bool) {
 	if d, ok := extraDialects[name]; ok {

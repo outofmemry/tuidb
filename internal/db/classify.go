@@ -287,8 +287,10 @@ func hasAny(toks []string, words ...string) bool {
 // hasCode reports whether text has anything besides whitespace and comments (used by Split).
 func hasCode(dialect, text string) bool { return len(scan(dialect, text)) > 0 }
 
-// readOnlyExtra lets a driver's own file replace the classifier for its dialect (register from init()).
+// readOnlyExtra holds classifiers registered with RegisterReadOnly; they replace the generic one for that dialect.
 var readOnlyExtra = map[string]func(stmt string) bool{}
+
+func RegisterReadOnly(dialect string, f func(stmt string) bool) { readOnlyExtra[dialect] = f }
 
 // lexRules are the lexical facts about a dialect that Split and scan must agree with the server on:
 // a classifier that thinks a string or comment is open when the server has closed it can be talked
