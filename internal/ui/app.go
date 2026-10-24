@@ -30,6 +30,7 @@ type Deps struct {
 	Hist     *store.History
 	Queries  *store.Queries
 	State    *store.State
+	Chats    *store.Chats // assistant chats; nil = store.DefaultChats()
 	Connect  ConnectFunc
 	NoTimers bool // tests: toasts stay until replaced, no timer commands are created
 }
@@ -58,6 +59,7 @@ type App struct {
 	mcpErr    error                         // the listener could not start
 	pending   map[string]context.CancelFunc // connections being opened (by name): one attempt each, cancellable
 	mcpUI     chan func() tea.Cmd           // MCP goroutine -> UI loop (drained by pump from Init)
+	m15       appM15                        // focus, idle time and mouse state (m15_app.go)
 }
 
 func NewApp(d *Deps) *App {
