@@ -24,7 +24,9 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
     headers: { Authorization: 'Bearer ' + token(), 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  const data = await res.json().catch(() => ({}))
+  const text = await res.text() // an aborted or truncated body throws here instead of becoming {}
+  let data: any = {}
+  if (text) { try { data = JSON.parse(text) } catch (e) { if (res.ok) throw e } }
   if (!res.ok) throw new ApiError(res.status, data.error ?? res.statusText, data)
   return data as T
 }

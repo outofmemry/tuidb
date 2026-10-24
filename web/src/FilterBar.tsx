@@ -14,7 +14,7 @@ export function FilterBar({ value, columns, operators, onApply }: { value: Filte
     window.addEventListener('tuidb:action', h)
     return () => window.removeEventListener('tuidb:action', h)
   })
-  const apply = () => onApply({ ...draft, Filters: draft.Filters.filter((f) => f.Column === RAW ? f.Value.trim() : f.Enabled || f.Value || noValue(f.Op)) })
+  const apply = () => onApply({ ...draft, Filters: draft.Filters.filter((f) => f.Column === RAW ? f.Value.trim() : f.Value || noValue(f.Op)) })
   return (
     <div className="filterbar" data-ctx="filterbar" onKeyDown={(e) => e.key === 'Enter' && apply()}>
       {draft.Filters.map((f, i) => (

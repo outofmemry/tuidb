@@ -33,8 +33,10 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   const f = filter.toLowerCase()
   const hide = (k: string) => (k === 'function' || k === 'procedure') ? sb.ShowFunctions === false : k === 'sequence' ? sb.ShowSequences === false : k === 'type' ? sb.ShowTypes === false : false
   const byKey = (k: string) => all.find((o) => keyOf(o) === k || recentKey(o) === k)
-  const pinned = (short.data?.pinned ?? []).map(byKey).filter(Boolean) as DbObject[]
-  const recent = (short.data?.recent ?? []).map(byKey).filter(Boolean).slice(0, 8) as DbObject[]
+  // pins and recents can name another schema's objects, which are not in `all`; keep them (assumed tables) so they can still be opened or unpinned
+  const lookup = (k: string) => byKey(k) ?? (objects.data && k.includes('.') ? { Schema: k.slice(0, k.indexOf('.')), Name: k.slice(k.indexOf('.') + 1), Kind: 'table', Detail: '' } : undefined)
+  const pinned = (short.data?.pinned ?? []).map(lookup).filter(Boolean) as DbObject[]
+  const recent = (short.data?.recent ?? []).map(lookup).filter(Boolean).slice(0, 8) as DbObject[]
   const isPinned = (o: ObjRef) => (short.data?.pinned ?? []).includes(keyOf(o))
 
   const admin = async (op: string, ref: ObjRef, opts?: Record<string, string>) => {

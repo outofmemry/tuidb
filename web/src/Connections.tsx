@@ -20,7 +20,6 @@ export function Connections() {
   const save = useMutation({
     mutationFn: (list: Connection[]) => api('PUT', '/connections', list),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['conns'] }); setEdit(null) },
-    onError: (e) => setMsg(e.message),
   })
   const connect = useMutation({
     mutationFn: (name: string) => api<{ id: string }>('POST', '/sessions', { Name: name }),
@@ -72,12 +71,12 @@ export function Connections() {
           </div>
         ))}
       </div>
-      {edit && meta.data && <ConnForm meta={meta.data} init={edit.c} onClose={() => setEdit(null)} onSave={(c) => upsert(c, edit.idx)} />}
+      {edit && meta.data && <ConnForm meta={meta.data} init={edit.c} error={save.error?.message} onClose={() => { save.reset(); setEdit(null) }} onSave={(c) => upsert(c, edit.idx)} />}
     </div>
   )
 }
 
-function ConnForm({ meta, init, onSave, onClose }: { meta: Meta; init: Connection; onSave: (c: Connection) => void; onClose: () => void }) {
+function ConnForm({ meta, init, error, onSave, onClose }: { meta: Meta; init: Connection; error?: string; onSave: (c: Connection) => void; onClose: () => void }) {
   const [c, setC] = useState<Connection>(init)
   const [test, setTest] = useState('')
   const [url, setUrl] = useState('')
@@ -92,20 +91,23 @@ function ConnForm({ meta, init, onSave, onClose }: { meta: Meta; init: Connectio
     }, 300)
     return () => clearTimeout(t)
   }, [c])
-  const parseUrl = async () => {
-    if (!dirty.current) return
-    if (!url.trim()) { dirty.current = false; return }
+  // returns the connection with the URL applied, or undefined when the URL does not parse
+  const parseUrl = async (): Promise<Connection | undefined> => {
+    if (!dirty.current) return c
+    if (!url.trim()) { dirty.current = false; return c }
     try {
       const p = await api<Connection>('POST', '/connections/parse', { url })
       dirty.current = false
       setUrlErr('')
-      setC((x) => ({ ...x, Driver: p.Driver, Host: p.Host, Port: p.Port, User: p.User, Password: p.Password, Database: p.Database, SSLMode: p.SSLMode, Options: p.Options,
-        Name: x.Name || p.Name, Tag: p.Tag || x.Tag, Color: p.Color || x.Color }))
+      const merge = (x: Connection): Connection => ({ ...x, Driver: p.Driver, Host: p.Host, Port: p.Port, User: p.User, Password: p.Password, Database: p.Database, SSLMode: p.SSLMode, Options: p.Options,
+        Name: x.Name || p.Name, Tag: p.Tag || x.Tag, Color: p.Color || x.Color })
+      setC(merge)
+      return merge(c)
     } catch (e) { setUrlErr(`That URL isn't valid: ${e instanceof Error ? e.message : e}`) }
   }
   const set = <K extends keyof Connection>(k: K, v: Connection[K]) => setC((x) => ({ ...x, [k]: v }))
   const file = FILE_BASED.includes(c.Driver)
-  const clean = (): Connection => ({ ...c, Port: c.Port ? Number(c.Port) : undefined, SSH: c.SSH?.Host ? c.SSH : null })
+  const clean = (x = c): Connection => ({ ...x, Port: x.Port ? Number(x.Port) : undefined, SSH: x.SSH?.Host ? x.SSH : null })
   const field = (label: string, k: keyof Connection, type = 'text') => (
     <>
       <label>{label}</label>
@@ -118,7 +120,7 @@ function ConnForm({ meta, init, onSave, onClose }: { meta: Meta; init: Connectio
         <label>Connection URL</label>
         <div className="urlrow">
           <input className="mono" type={showUrl ? 'text' : 'password'} autoComplete="off" spellCheck={false} placeholder="postgresql://user:password@host:5432/database" value={url}
-            onChange={(e) => { dirty.current = true; setUrl(e.target.value) }} onBlur={parseUrl} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); parseUrl() } }} />
+            onChange={(e) => { dirty.current = true; setUrl(e.target.value) }} onBlur={() => { parseUrl() }} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); parseUrl() } }} />
           <button type="button" onClick={() => setShowUrl(!showUrl)}>{showUrl ? 'Hide' : 'Show'}</button>
         </div>
         {urlErr && <p className="err" style={{ gridColumn: '1 / -1', margin: 0 }}>{urlErr}</p>}
@@ -143,11 +145,12 @@ function ConnForm({ meta, init, onSave, onClose }: { meta: Meta; init: Connectio
           </>}
         </>}
       </div>
+      {error && <p className="err" role="alert">{error}</p>}
       <div className="actions">
         {test && <span className={`grow ${test.startsWith('Connected') || test.startsWith('Testing') ? 'dim' : 'err'}`}>{test}</span>}
         <button onClick={async () => { setTest('Testing…'); try { const r = await api<{ serverInfo: string }>('POST', '/connections/test', clean()); setTest('Connected: ' + r.serverInfo) } catch (e) { setTest(String(e instanceof Error ? e.message : e)) } }}>Test</button>
         <button onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={!c.Name} onClick={() => onSave(clean())}>Save</button>
+        <button className="primary" disabled={!c.Name} onClick={async () => { const m = await parseUrl(); if (m) onSave(clean(m)) }}>Save</button>
       </div>
     </Dialog>
   )

@@ -70,6 +70,7 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
   })
 
   const res = rowsQ.data
+  const stale = rowsQ.isPlaceholderData // the previous page stays on screen while reloading, but its server snapshot may be gone
   const pending = Object.keys(edits).length + deletes.size + inserts.length
   const clearPending = () => { setEdits({}); setDeletes(new Set()); setInserts([]); setSelected(null) }
   const guard = () => pending === 0 || window.confirm('Discard pending changes?')
@@ -148,10 +149,16 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
     setDeletes((d) => { const x = new Set(d); x.has(selected) ? x.delete(selected) : x.add(selected); return x })
   }
 
+  // the PK values the user saw, so the server rejects a stale snapshot instead of touching another row
+  const keyOfRow = (k: string) => {
+    const cells = res?.cells[Number(k.slice(1))] ?? []
+    return Object.fromEntries((res?.columns ?? []).flatMap((c, i) => (c.pk ? [[c.name, cells[i] ?? '']] : [])))
+  }
   const body = () => ({
     resultId: res?.resultId,
-    updates: Object.entries(edits).filter(([k]) => !deletes.has(k)).map(([k, set]) => ({ row: Number(k.slice(1)), set })),
+    updates: Object.entries(edits).filter(([k]) => !deletes.has(k)).map(([k, set]) => ({ row: Number(k.slice(1)), set, key: keyOfRow(k) })),
     deletes: [...deletes].map((k) => Number(k.slice(1))),
+    deleteKeys: [...deletes].map(keyOfRow),
     inserts: inserts.map((n) => n.vals),
   })
   const makePlan = async (): Promise<Plan | null> => {
@@ -159,7 +166,13 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
   }
   const applied = () => { setPlan(null); clearPending(); setNonce((n) => n + 1); notify('Changes sent') }
   const previewSql = async () => { const p = await makePlan(); if (p) setPlan(p) }
+  const busy = useRef(false) // a second click while the first is still planning or sending would duplicate inserts
   const commit = async () => {
+    if (busy.current) return
+    busy.current = true
+    try { await send() } finally { busy.current = false }
+  }
+  const send = async () => {
     const p = await makePlan(); if (!p) return
     if (p.gate.confirm || p.gate.password) { setPlan(p); return }
     try { await api('POST', `${base}/apply`, { planId: p.planId, confirmed: true }); applied() } catch (e) { notify(e instanceof ApiError ? e.message : String(e)) }
@@ -202,7 +215,7 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
           {info.caps.Document && <option value="json">JSON</option>}
         </select>
         <span className="grow" />
-        {view === 'data' && res?.editable && <>
+        {view === 'data' && res?.editable && !stale && <>
           <button onClick={addRow}>Add row</button>
           <button onClick={duplicate} disabled={!selected}>Duplicate row</button>
           <button onClick={del} disabled={!selected}>{selected && deletes.has(selected) ? 'Keep row' : 'Delete row'}</button>
@@ -213,11 +226,11 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
       {!res && !rowsQ.error && <div className="note dim">Loading rows…</div>}
       {rowsQ.error && <div className="err note">{rowsQ.error.message}</div>}
       {view === 'data' && res && res.cells.length === 0 && inserts.length === 0 && (
-        <div className="empty">{hasActive ? 'No rows match these filters.' : 'This table has no rows yet. Add one to start.'}</div>
+        <div className="empty">{hasActive ? 'No rows match these filters.' : res.editable ? 'This table has no rows yet. Add one to start.' : 'This table has no rows yet.'}</div>
       )}
       {view === 'data' && res && (res.cells.length > 0 || inserts.length > 0) && (
         <div className="body">
-          <Grid columns={res.columns} rows={rows} sort={sort} onSort={onSort} edited={editedAll} editable={res.editable} onOpen={setCell}
+          <Grid columns={res.columns} rows={rows} sort={sort} onSort={onSort} edited={editedAll} editable={res.editable && !stale} onOpen={setCell}
             selected={selected} onSelect={setSelected} onSpace={() => setDetail(!detail)} />
           {detail && (
             <div className="detail" role="region" aria-label="Row details">

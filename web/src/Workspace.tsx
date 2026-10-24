@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { api, clip, qs, recentKey, sameRef, type Connection, type Meta, type ObjRef, type Plan, type SessionInfo } from './api'
+import { api, ApiError, clip, qs, recentKey, sameRef, type Connection, type Meta, type ObjRef, type Plan, type SessionInfo } from './api'
 import { DataTab } from './DataTab'
 import { Dialog, PlanDialog } from './Dialogs'
 import { QueryTab } from './QueryTab'
@@ -89,7 +89,9 @@ export function Workspace({ sid }: { sid: string }) {
     if (tabs.length && !window.confirm('Switching closes all open tabs. Continue?')) return
     try { await api('POST', `/sessions/${sid}/database`, { Name: name }); setTabs([]); setActive(0); qc.invalidateQueries() } catch (e) { notify(String(e)) }
   }
-  const disconnect = async () => { await api('DELETE', `/sessions/${sid}`).catch(() => {}); forget(sid); qc.clear(); nav({ to: '/' }) }
+  const disconnect = async () => {
+    try { await api('DELETE', `/sessions/${sid}`) } catch (e) { if (!(e instanceof ApiError && e.status === 404)) return notify(`Could not disconnect: ${e instanceof Error ? e.message : e}. Try again.`) }
+    forget(sid); qc.clear(); nav({ to: '/' }) }
   // Switching keeps this session open on the server, so coming back is instant; Disconnect closes it.
   const switchTo = async (name: string) => {
     setSwitcher(false)
@@ -164,7 +166,7 @@ export function Workspace({ sid }: { sid: string }) {
       </div>
       <div className="main">
         {side && <div className="scrim" onClick={() => setSide(false)} aria-hidden />}
-        <Sidebar open={side} collapsed={collapsed} sid={sid} info={i} meta={meta.data} onOpen={openObj} onQueryText={newQuery} onPlan={setPlan} notify={notify} />
+        <Sidebar key={i.database} open={side} collapsed={collapsed} sid={sid} info={i} meta={meta.data} onOpen={openObj} onQueryText={newQuery} onPlan={setPlan} notify={notify} />
         <div className="content">
           <div className="tabs">
             {tabs.map((t) => (
@@ -183,7 +185,7 @@ export function Workspace({ sid }: { sid: string }) {
             </div>
           ))}
         </div>
-        {drawer && <Drawer kind={drawer} conn={i.name} onUse={(t) => newQuery(t)} onClose={() => setDrawer('')} />}
+        {drawer && <Drawer kind={drawer} conn={i.name} notify={notify} onUse={(t) => newQuery(t)} onClose={() => setDrawer('')} />}
       </div>
       {plan && <PlanDialog sid={sid} plan={plan} onClose={() => setPlan(null)} onApplied={() => { setPlan(null); qc.invalidateQueries(); notify('Changes sent') }} />}
       {pending && machine.current && (
@@ -244,17 +246,18 @@ function onAccent(hex: string) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? '#1e1f23' : '#f6f5f1'
 }
 
-function Drawer({ kind, conn, onUse, onClose }: { kind: 'history' | 'queries'; conn: string; onUse: (t: string) => void; onClose: () => void }) {
+function Drawer({ kind, conn, notify, onUse, onClose }: { kind: 'history' | 'queries'; conn: string; notify: (m: string) => void; onUse: (t: string) => void; onClose: () => void }) {
   const [q, setQ] = useState('')
   const hist = useQuery({ queryKey: ['history', conn, q], queryFn: () => api<{ id: string; SQL?: string; sql: string; time: string }[]>('GET', '/history' + qs({ conn, q, limit: 200 })), enabled: kind === 'history', gcTime: 0 })
   const saved = useQuery({ queryKey: ['queries'], queryFn: () => api<{ Path: string; Name: string; Folder: string; SQL: string }[]>('GET', '/queries'), enabled: kind === 'queries', gcTime: 0 })
   return (
     <div className="drawer">
       <div className="toolbar"><strong className="grow">{kind === 'history' ? 'History' : 'Saved queries'}</strong>
-        {kind === 'history' && <button className="ghost" onClick={async () => { if (window.confirm('Clear history for this connection?')) { await api('DELETE', '/history' + qs({ conn })); hist.refetch() } }}>Clear</button>}
+        {kind === 'history' && <button className="ghost" onClick={async () => { if (!window.confirm('Clear history for this connection?')) return; try { await api('DELETE', '/history' + qs({ conn })) } catch (e) { notify(`Could not clear history: ${e instanceof Error ? e.message : e}`) } finally { hist.refetch() } }}>Clear</button>}
         <button className="ghost" onClick={onClose} aria-label="Close">✕</button></div>
       {kind === 'history' && <input placeholder="Search history" value={q} onChange={(e) => setQ(e.target.value)} />}
       <div className="scroll">
+        {(kind === 'history' ? hist : saved).error && <div className="err note">{(kind === 'history' ? hist : saved).error!.message} <button className="ghost" onClick={() => (kind === 'history' ? hist : saved).refetch()}>Retry</button></div>}
         {kind === 'history' && (hist.data ?? []).map((h) => (
           <div key={h.id} className="hist-item" onClick={() => onUse(h.sql)}><pre>{h.sql}</pre><div className="dim">{new Date(h.time).toLocaleString()}</div></div>
         ))}

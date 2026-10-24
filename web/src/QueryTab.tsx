@@ -26,12 +26,13 @@ export function QueryTab({ sid, info, initial, notify, shown }: { sid: string; i
   const ctrl = useRef<AbortController | null>(null)
 
   const send = async (body: Record<string, unknown>) => {
-    ctrl.current = new AbortController()
+    if (running) return
+    const mine = ctrl.current = new AbortController()
     setRunning(true); setError(''); setGate(null)
     const t0 = performance.now()
     try {
-      const r = await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, { ...body, limit }, ctrl.current.signal)
-      setResults(r.results); setActive(Math.max(0, r.results.findIndex((x) => x.error))); setPassword('')
+      const r = await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, { ...body, limit }, mine.signal)
+      setResults(r.results); setJson(false); setActive(Math.max(0, r.results.findIndex((x) => x.error))); setPassword('')
       if (!r.results.length) setError('Nothing ran. Type a statement first.')
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') setError(`Cancelled after ${Math.round(performance.now() - t0)} ms.`)
@@ -40,6 +41,7 @@ export function QueryTab({ sid, info, initial, notify, shown }: { sid: string; i
       } else setError(e instanceof Error ? e.message : String(e))
     } finally { setRunning(false) }
   }
+  useEffect(() => () => ctrl.current?.abort(), [])
 
   const run = (all: boolean) => {
     const v = view.current; if (!v) return
@@ -106,7 +108,7 @@ export function QueryTab({ sid, info, initial, notify, shown }: { sid: string; i
       {running && <><div className="progress" role="progressbar" aria-label="Running" /><div className="dim note">Running…</div></>}
       {cur && (cur.error ? <pre className="err docs">{cur.error}</pre>
         : cur.hasRows ? (
-          json ? <pre className="docs">{cur.docs!.map(pretty).join('\n')}</pre> : <>
+          json && cur.docs ? <pre className="docs">{cur.docs.map(pretty).join('\n')}</pre> : <>
             <Grid ctx="results" columns={cur.columns} rows={cur.cells.map((cells, i): GridRow => ({ key: 'r' + i, cells, state: 'clean' }))} selected={sel} onSelect={setSel} onOpen={setCell} />
             {cell && <CellEditor col={cell.col} readOnly value={cur.cells[Number(cell.row.slice(1))]?.[cur.columns.findIndex((c) => c.name === cell.col)] ?? null} onDone={() => setCell(null)} />}
             <div className="toolbar dim">{cur.cells.length} rows in {cur.durationMs} ms{cur.truncated ? '. Stopped at the row limit.' : ''}</div>
