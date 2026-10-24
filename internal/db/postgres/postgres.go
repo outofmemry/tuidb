@@ -3,13 +3,17 @@
 package postgres
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,18 +22,47 @@ import (
 
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
+	"webtuidb/internal/db/iam"
 )
 
 func init() { db.Register(driver{}) }
 
 const maxConns = 8
 
-type driver struct{}
+// driver is the PostgreSQL driver; its zero value is "postgres". New builds a sibling that speaks
+// the same protocol under another registered name (Redshift, Greenplum, ...), capabilities adjusted.
+type driver struct {
+	name   string
+	adjust func(*db.Capabilities)
+}
 
-func (driver) Name() string { return "postgres" }
+// resetSQL is the statement that clears session state before a connection returns to the pool; "" = none.
+// Vertica has no DISCARD (shortcut: state set with SET then leaks to the next statement), Redshift has RESET.
+func resetSQL(name string) string {
+	switch name {
+	case config.Vertica:
+		return ""
+	case config.Redshift:
+		return "RESET ALL"
+	}
+	return "DISCARD ALL"
+}
 
-func (driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (db.Session, error) {
-	s := &session{c: c, dial: dial, cols: map[string][]string{}}
+// New returns a driver registered under name that reuses this package's session code.
+func New(name string, adjust func(*db.Capabilities)) db.Driver { return driver{name, adjust} }
+
+func (d driver) Name() string {
+	if d.name == "" {
+		return "postgres"
+	}
+	return d.name
+}
+
+func (d driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (db.Session, error) {
+	s := &session{c: c, dial: dial, cols: map[string][]string{}, caps: caps, reset: resetSQL(d.name)}
+	if d.adjust != nil {
+		d.adjust(&s.caps)
+	}
 	p, err := s.connect(ctx, c.Database)
 	if err != nil {
 		return nil, err
@@ -53,14 +86,32 @@ func sslMode(m string) (string, error) {
 func connString(c config.Connection, database string) (string, error) {
 	q := url.Values{}
 	for k, v := range c.Options {
+		if c.IAMAuth && k == "region" { // the IAM token's AWS region, not a server setting
+			continue
+		}
 		q.Set(k, v)
 	}
 	mode, err := sslMode(c.SSLMode)
 	if err != nil {
 		return "", err
 	}
+	if c.IAMAuth { // the 15-minute token is the password: it must not cross the wire in clear
+		switch m := cmp.Or(mode, q.Get("sslmode")); m {
+		case "":
+			mode = "require"
+		case "disable", "prefer", "allow":
+			return "", fmt.Errorf("iam_auth needs TLS: ssl_mode %q would send the IAM token unencrypted (use require, verify-ca or verify-full)", m)
+		}
+	}
 	if mode != "" {
 		q.Set("sslmode", mode)
+	}
+	if c.Encoding != "" {
+		// pgx does no transcoding: any other client_encoding makes the server convert while the client still
+		// treats the bytes as UTF-8, corrupting every non-ASCII value on the way in and out.
+		if e := strings.NewReplacer("-", "", "_", "").Replace(strings.ToLower(c.Encoding)); e != "utf8" {
+			return "", fmt.Errorf("encoding %q is not supported by PostgreSQL connections (only UTF-8; leave it empty)", c.Encoding)
+		}
 	}
 	if c.Host != "" {
 		q.Set("host", c.Host)
@@ -80,9 +131,15 @@ func connString(c config.Connection, database string) (string, error) {
 	return u.String(), nil
 }
 
+var caps = db.Capabilities{Schemas: true, Indexes: true, Triggers: true, ForeignKeys: true, Views: true, MatViews: true,
+	Functions: true, Sequences: true, RenameDB: true, Transactions: true, ProcessList: true, Users: true,
+	Editor: "sql", Dialect: "postgres", DatabaseNoun: "database"}
+
 type session struct {
-	c    config.Connection
-	dial db.DialFunc
+	c     config.Connection
+	dial  db.DialFunc
+	caps  db.Capabilities
+	reset string // see resetSQL
 
 	mu      sync.RWMutex
 	pool    *pool
@@ -107,6 +164,9 @@ func (s *session) connect(ctx context.Context, database string) (*pool, error) {
 	// Unnamed statements, text params of unknown type: "7" against an int column and
 	// "2024-01-02" against a date work, and DDL never trips over a cached plan.
 	cfg.DefaultQueryExecMode = pgx.QueryExecModeExec
+	if s.c.ReadOnly { // enforced by the server too; it survives DISCARD ALL. The client keyword check stays as the first line.
+		cfg.RuntimeParams["default_transaction_read_only"] = "on"
+	}
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 15 * time.Second
 	}
@@ -118,7 +178,11 @@ func (s *session) connect(ctx context.Context, database string) (*pool, error) {
 	cfg.BuildContextWatcherHandler = func(pc *pgconn.PgConn) ctxwatch.Handler {
 		return &pgconn.CancelRequestContextWatcherHandler{Conn: pc, DeadlineDelay: time.Second}
 	}
-	p := &pool{cfg: cfg, bootstrap: s.c.Bootstrap, sem: make(chan struct{}, maxConns)}
+	p := &pool{cfg: cfg, bootstrap: s.c.Bootstrap, resetSQL: s.reset, sem: make(chan struct{}, maxConns)}
+	if s.c.IAMAuth { // a fresh token for every new pooled connection: they expire after 15 minutes
+		c := s.c
+		p.token = func(ctx context.Context) (string, error) { return iam.Token(ctx, c) }
+	}
 	var name, schema, version string
 	err = p.use(ctx, func(c *conn) error {
 		version, _, _ = strings.Cut(c.PgConn().ParameterStatus("server_version"), " ")
@@ -132,11 +196,7 @@ func (s *session) connect(ctx context.Context, database string) (*pool, error) {
 	return p, nil
 }
 
-func (s *session) Caps() db.Capabilities {
-	return db.Capabilities{Schemas: true, Indexes: true, Triggers: true, ForeignKeys: true, Views: true, MatViews: true,
-		Functions: true, Sequences: true, RenameDB: true, Transactions: true, ProcessList: true, Users: true,
-		Editor: "sql", Dialect: "postgres", DatabaseNoun: "database"}
-}
+func (s *session) Caps() db.Capabilities { return s.caps }
 
 func (s *session) ServerInfo() string {
 	s.mu.RLock()
@@ -207,6 +267,8 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 type pool struct {
 	cfg                   *pgx.ConnConfig
 	bootstrap             []string
+	resetSQL              string                                // run before reuse of a dirty connection, "" = nothing
+	token                 func(context.Context) (string, error) // IAM password, nil = the configured one
 	sem                   chan struct{}
 	name, schema, version string   // identity probed by connect, published with the pool swap
 	types                 sync.Map // oid -> type name for types pgx does not know
@@ -222,7 +284,9 @@ type conn struct {
 	nmu     sync.Mutex
 	notices []string
 	bad     bool // must not be reused
+	reused  bool // taken from the idle list, so the server may have dropped it meanwhile
 	dirty   bool // ran user SQL (SET, temp tables, ...): reset the session before reuse
+	pinned  bool // lent out by Pin: holds the user's transaction, so a statement is never cancelled
 }
 
 func (c *conn) addNotice(_ *pgconn.PgConn, n *pgconn.Notice) {
@@ -262,6 +326,7 @@ func (p *pool) get(ctx context.Context) (*conn, error) {
 		p.idle = p.idle[:len(p.idle)-1]
 		if !c.IsClosed() {
 			p.mu.Unlock()
+			c.reused = true
 			return c, nil
 		}
 	}
@@ -278,6 +343,12 @@ func (p *pool) dial(ctx context.Context) (*conn, error) {
 	c := &conn{}
 	cfg := p.cfg.Copy()
 	cfg.OnNotice = c.addNotice
+	if p.token != nil {
+		var err error
+		if cfg.Password, err = p.token(ctx); err != nil {
+			return nil, err
+		}
+	}
 	pc, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -315,8 +386,12 @@ func (p *pool) reset(c *conn) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, q := range append([]string{"DISCARD ALL"}, p.bootstrap...) {
-		if _, err := c.Exec(ctx, q); err != nil {
+	qs := p.bootstrap
+	if p.resetSQL != "" {
+		qs = append([]string{p.resetSQL}, qs...)
+	}
+	for _, q := range qs {
+		if _, err := c.Exec(ctx, q); err != nil { // shortcut: no logger in this package; the connection is closed instead
 			return false
 		}
 	}
@@ -324,13 +399,62 @@ func (p *pool) reset(c *conn) bool {
 	return true
 }
 
+// use runs f on a pooled connection. If a connection that sat idle turns out to have been dropped
+// (server restart, idle timeout, firewall), the idle ones are discarded and f runs once more on a
+// fresh connection.
+// The retry is limited to reused idle connections whose socket died before anything was sent
+// (pgconn.SafeToRetry) or that the server terminated at once (see retryable): an EOF after the write may
+// mean the server committed, and Apply would run twice.
 func (p *pool) use(ctx context.Context, f func(*conn) error) error {
 	c, err := p.get(ctx)
 	if err != nil {
 		return err
 	}
-	defer p.put(c)
-	return f(c)
+	start := time.Now()
+	if err = f(c); err != nil && c.reused && ctx.Err() == nil && c.IsClosed() && retryable(err, time.Since(start)) {
+		p.mu.Lock()
+		idle := p.idle
+		p.idle = nil
+		p.mu.Unlock()
+		for _, ic := range idle {
+			closeConn(ic)
+		}
+		c.bad = true
+		p.put(c)
+		if c, err = p.get(ctx); err != nil {
+			return err
+		}
+		err = f(c)
+	}
+	p.put(c)
+	return err
+}
+
+// retryWindow: a "terminating connection" error this soon after the statement was sent means the backend
+// was already going away while the connection sat idle. Later, it is a running statement that an
+// administrator killed on purpose, which must not be started again.
+const retryWindow = 2 * time.Second
+
+// retryable: no byte of this statement reached the server (pgconn.SafeToRetry), or the server answered with
+// a connection-fatal 57P01 admin_shutdown / 57P02 crash_shutdown / 57P05 idle_session_timeout. A terminated
+// backend never commits, so replaying the one statement on a new connection cannot apply it twice.
+func retryable(err error, took time.Duration) bool {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		switch pe.Code {
+		case "57P01", "57P02", "57P05":
+			return took < retryWindow
+		}
+		return false
+	}
+	return dropped(err) && pgconn.SafeToRetry(err)
+}
+
+// dropped reports a lost socket, as opposed to an error the server answered with.
+func dropped(err error) bool {
+	var pe *pgconn.PgError
+	return !errors.As(err, &pe) && (pgconn.SafeToRetry(err) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, net.ErrClosed))
 }
 
 // close drops idle connections now; busy ones are closed when released.
