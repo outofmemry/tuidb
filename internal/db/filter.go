@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -91,12 +92,14 @@ func splitList(v string) []string {
 	return out
 }
 
+var andSep = regexp.MustCompile(`(?i) and `) // not ToUpper+Index: upper-casing can change the byte length
+
 func splitBetween(v string) (string, string, error) {
-	i := strings.Index(strings.ToUpper(v), " AND ")
-	if i < 0 {
+	loc := andSep.FindStringIndex(v)
+	if loc == nil {
 		return "", "", fmt.Errorf("BETWEEN needs two values: low AND high")
 	}
-	return strings.TrimSpace(v[:i]), strings.TrimSpace(v[i+5:]), nil
+	return strings.TrimSpace(v[:loc[0]]), strings.TrimSpace(v[loc[1]:]), nil
 }
 
 // Where renders the active filters as a WHERE body (without the keyword) plus args.
@@ -153,6 +156,19 @@ func (fs FilterSet) Where(d Dialect, cols []string, startArg int) (string, []any
 		join = " OR "
 	}
 	return strings.Join(parts, join), args, nil
+}
+
+// WhereText renders the active filters as a WHERE body with every value inlined as a literal, for display
+// (the filter bar's SQL popover). Nothing runs it.
+func WhereText(d Dialect, fs FilterSet, cols []string) (string, error) {
+	_, args, err := fs.Where(d, cols, 1)
+	if err != nil {
+		return "", err
+	}
+	lit := d
+	lit.Param = func(n int) string { return d.Literal(args[n-1]) }
+	w, _, err := fs.Where(lit, cols, 1)
+	return w, err
 }
 
 func isLikeOp(op string) bool {
@@ -262,4 +278,41 @@ func BuildCount(d Dialect, q RowQuery, allCols []string) (string, []any, error) 
 		s += " WHERE " + where
 	}
 	return s, args, nil
+}
+
+// BulkUpdate renders UPDATE ref SET set... WHERE <filters> (ALTER TABLE ... UPDATE on ClickHouse), with
+// Display inlining every value. cols feeds Any-column filters. It refuses an empty filter set: updating
+// every row has to be a deliberate statement typed in the editor.
+func BulkUpdate(d Dialect, ref ObjRef, fs FilterSet, set []KeyVal, cols []string) (Statement, error) {
+	if len(set) == 0 {
+		return Statement{}, fmt.Errorf("bulk update without columns to set")
+	}
+	if len(fs.Active()) == 0 {
+		return Statement{}, fmt.Errorf("bulk update needs at least one active filter")
+	}
+	b := &builder{d: d}
+	if d.Mutate {
+		b.raw("ALTER TABLE " + d.QualifiedName(ref) + " UPDATE ")
+	} else {
+		b.raw("UPDATE " + d.QualifiedName(ref) + " SET ")
+	}
+	for i, kv := range set {
+		if i > 0 {
+			b.raw(", ")
+		}
+		b.raw(d.Quote(kv.Col) + " = ")
+		b.val(kv.Val)
+	}
+	start := len(b.args) + 1
+	where, args, err := fs.Where(d, cols, start)
+	if err != nil {
+		return Statement{}, err
+	}
+	lit := d // second pass: placeholders become literals for Display
+	lit.Param = func(n int) string { return d.Literal(args[n-start]) }
+	disp, _, _ := fs.Where(lit, cols, start)
+	b.text.WriteString(" WHERE " + where)
+	b.disp.WriteString(" WHERE " + disp)
+	b.args = append(b.args, args...)
+	return Statement{Text: b.text.String(), Args: b.args, Display: b.disp.String()}, nil
 }
