@@ -543,35 +543,6 @@ func (w *Workspace) userApply(ua db.UserAdmin, done string, chs ...db.UserChange
 
 // ---- backup / restore -------------------------------------------------------------------
 
-func (w *Workspace) runBackup(cmd *exec.Cmd, verb, name string, onFail func() tea.Cmd) tea.Cmd {
-	d := &textViewDlg{title: verb + " " + name, lines: []string{"$ " + backup.Display(cmd), ""},
-		actions: []viewAction{{Key: "x", Label: "x: cancel", Do: func() tea.Cmd {
-			if w.jobCancel != nil {
-				w.jobCancel()
-			}
-			return nil
-		}}}}
-	w.a.push(d)
-	add := func(s string) func() tea.Cmd {
-		return func() tea.Cmd { d.lines, d.top = append(d.lines, s), 1<<30; return nil }
-	}
-	return w.job(strings.ToLower(verb)+" "+name, func(ctx context.Context, _ db.Session, report func(func() tea.Cmd)) error {
-		err := backup.Run(ctx, cmd, func(line string) { report(add(line)) })
-		switch {
-		case ctx.Err() != nil:
-			report(add("-- cancelled"))
-		case err != nil:
-			report(add("✗ " + err.Error()))
-			if onFail != nil {
-				report(onFail)
-			}
-		default:
-			report(add("✓ done"))
-		}
-		return err
-	}, func() (string, tea.Cmd) { return verb + " finished: " + name, nil })
-}
-
 // ---- diagram ----------------------------------------------------------------------------
 
 // paneDlg is a big scrollable text window with its own keys (diagram, metrics board).
