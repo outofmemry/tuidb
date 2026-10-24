@@ -640,6 +640,8 @@ func (a *App) run(action string) tea.Cmd {
 		return a.pickConnection(true)
 	case "switch_session":
 		return a.pickWorkspace()
+	case "lock":
+		return a.lock()
 	case "next_workspace", "prev_workspace":
 		if len(a.wss) > 0 {
 			d := 1
@@ -729,8 +731,12 @@ func (a *App) pickWorkspace() tea.Cmd {
 func (a *App) View() tea.View {
 	v := tea.NewView(a.render())
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion // for the wheel; shift-drag still selects terminal text
+	v.MouseMode = tea.MouseModeCellMotion // for the wheel and clicks; shift-drag still selects terminal text
+	v.ReportFocus = true                  // FocusMsg / BlurMsg: finish signals only fire while unfocused
 	v.WindowTitle = "webtuidb"
+	if c := a.th.pal["window_bg"]; strings.HasPrefix(c, "#") { // theme key window_bg paints the terminal background
+		v.BackgroundColor = lipgloss.Color(c)
+	}
 	return v
 }
 
