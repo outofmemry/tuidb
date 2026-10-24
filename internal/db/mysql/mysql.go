@@ -16,12 +16,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gomysql "github.com/go-sql-driver/mysql"
 
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
+	"webtuidb/internal/db/iam"
 )
 
 func init() { db.Register(drv{}) }
@@ -64,6 +66,8 @@ type session struct {
 
 	info  string
 	maria bool
+
+	pinned bool // set by Pin: the one connection holds a transaction, so it is never cancelled or silently replaced
 }
 
 func (d drv) Open(ctx context.Context, conn config.Connection, dial db.DialFunc) (db.Session, error) {
@@ -126,6 +130,42 @@ func (b bootConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	return c, nil
 }
 
+// onceConnector allows one physical connection: database/sql would otherwise quietly open a new one
+// after the pinned connection dropped, and the next statement would run outside the lost transaction.
+type onceConnector struct {
+	driver.Connector
+	n atomic.Int32
+}
+
+func (o *onceConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	if o.n.Add(1) > 1 {
+		return nil, errors.New("the pinned connection was lost (its transaction is gone); close and pin again")
+	}
+	return o.Connector.Connect(ctx)
+}
+
+// iamConnector signs an RDS IAM token into the password of each new connection.
+type iamConnector struct {
+	cfg  *gomysql.Config
+	conn config.Connection
+}
+
+func (i iamConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	tok, err := iam.Token(ctx, i.conn)
+	if err != nil {
+		return nil, err
+	}
+	cfg := i.cfg.Clone()
+	cfg.Passwd = tok
+	c, err := gomysql.NewConnector(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return c.Connect(ctx)
+}
+
+func (i iamConnector) Driver() driver.Driver { return gomysql.MySQLDriver{} }
+
 func (s *session) openPool(ctx context.Context, dbname string) (*sql.DB, error) {
 	cfg := gomysql.NewConfig()
 	cfg.User, cfg.Passwd = s.conn.User, s.conn.Password
@@ -138,15 +178,39 @@ func (s *session) openPool(ctx context.Context, dbname string) (*sql.DB, error) 
 	// Client-side placeholder interpolation: one round trip per query instead of prepare + execute.
 	// The driver escapes with the connection's charset and NO_BACKSLASH_ESCAPES mode.
 	cfg.InterpolateParams = true
+	if s.conn.Encoding != "" {
+		cfg.Params = map[string]string{"charset": s.conn.Encoding}
+	}
 	var err error
-	if cfg.TLS, cfg.AllowFallbackToPlaintext, err = tlsConfig(s.conn); err != nil {
+	tc := s.conn
+	if tc.IAMAuth {
+		switch tc.SSLMode {
+		case "":
+			tc.SSLMode = "require" // RDS accepts IAM tokens over TLS only
+		case "disable", "prefer":
+			return nil, fmt.Errorf("iam_auth needs TLS: ssl_mode %q would send the IAM token unencrypted (use require, verify-ca or verify-full)", tc.SSLMode)
+		}
+	}
+	if cfg.TLS, cfg.AllowFallbackToPlaintext, err = tlsConfig(tc); err != nil {
 		return nil, err
 	}
 	c, err := gomysql.NewConnector(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("mysql config: %w", err)
 	}
-	pool := sql.OpenDB(bootConnector{c, s.conn.Bootstrap})
+	var base driver.Connector = c
+	if s.conn.IAMAuth { // a fresh token for every new physical connection: they expire after 15 minutes
+		cfg.AllowCleartextPasswords = true
+		base = iamConnector{cfg, s.conn}
+	}
+	if s.pinned {
+		base = &onceConnector{Connector: base}
+	}
+	boot := s.conn.Bootstrap
+	if s.conn.ReadOnly { // the server refuses writes too, not only the client keyword check
+		boot = append([]string{"SET SESSION TRANSACTION READ ONLY"}, boot...)
+	}
+	pool := sql.OpenDB(bootConnector{base, boot})
 	pool.SetMaxOpenConns(8)
 	pool.SetMaxIdleConns(8) // the default of 2 would close and reopen connections under the UI's parallel loads
 	pool.SetConnMaxIdleTime(5 * time.Minute)
@@ -301,7 +365,16 @@ func isDDL(text string) bool {
 	return false
 }
 
+var errReadOnly = errors.New("connection is read_only")
+
 func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
+	if s.conn.ReadOnly {
+		for _, st := range stmts {
+			if !st.ReadOnly && !db.IsReadOnly("mysql", st.Text) {
+				return errReadOnly
+			}
+		}
+	}
 	for _, st := range stmts {
 		if isDDL(st.Text) {
 			return s.applyDDL(ctx, stmts)
@@ -344,16 +417,24 @@ func (s *session) applyDDL(ctx context.Context, stmts []db.Statement) error {
 			args[j] = convertArg(a)
 		}
 		if _, err := s.db().ExecContext(ctx, st.Text, args...); err != nil {
-			return fmt.Errorf("statement %d (%s): %w (%d of %d statements were already applied and stay applied: %s cannot roll back DDL)",
-				i+1, st.Shown(), err, i, len(stmts), s.engine())
+			return ddlFailure(s.engine(), i, len(stmts), st.Shown(), err)
 		}
 	}
 	return nil
 }
 
+// ddlFailure names the failed statement and says that the ones before it are committed for good.
+func ddlFailure(engine string, i, n int, shown string, err error) error {
+	return fmt.Errorf("statement %d (%s): %w (%d of %d statements were already applied and stay applied: %s cannot roll back DDL)",
+		i+1, shown, err, i, n, engine)
+}
+
 var useRe = regexp.MustCompile("(?is)^\\s*use\\s+(?:`([^`]+)`|([^\\s;`]+))\\s*;?\\s*$")
 
 func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result, error) {
+	if s.conn.ReadOnly && !db.IsReadOnly("mysql", stmt) && !useRe.MatchString(stmt) {
+		return nil, errReadOnly
+	}
 	start := time.Now()
 	if m := useRe.FindStringSubmatch(stmt); m != nil {
 		if err := s.UseDatabase(ctx, m[1]+m[2]); err != nil {
@@ -414,7 +495,9 @@ func (s *session) query(ctx context.Context, q string, args []any, limit int) (*
 	for rows.Next() {
 		if limit > 0 && len(res.Rows) == limit {
 			res.Truncated = true
-			cancel() // closing the connection beats draining the rest of a huge result set
+			if !s.pinned { // shortcut: a pinned connection is drained (rows.Close), not cancelled, or its transaction would die
+				cancel() // closing the connection beats draining the rest of a huge result set
+			}
 			return res, nil
 		}
 		if err := rows.Scan(ptrs...); err != nil {
@@ -626,6 +709,9 @@ func (s *session) Processes(ctx context.Context) ([]db.ProcessInfo, error) {
 }
 
 func (s *session) Kill(ctx context.Context, id string) error {
+	if s.conn.ReadOnly {
+		return errReadOnly
+	}
 	n, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
 		return fmt.Errorf("bad process id %q", id)

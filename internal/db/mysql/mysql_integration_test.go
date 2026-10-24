@@ -750,3 +750,10 @@ func TestIntegrationApplyDDLStopsAndReports(t *testing.T) {
 		t.Errorf("columns after partial batch %+v", cols)
 	}
 }
+
+func TestIntegrationUsers(t *testing.T) {
+	us, err := open(t).Users(context.Background())
+	if err != nil || len(us) == 0 {
+		t.Fatalf("users %v %v", us, err)
+	}
+}
