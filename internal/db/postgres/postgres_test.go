@@ -1,11 +1,17 @@
 package postgres
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"webtuidb/internal/config"
@@ -313,5 +319,97 @@ func TestPlanAlterConstraintNames(t *testing.T) {
 	}
 	if strings.Contains(g, `DROP INDEX "public"."t_email_key"`) || strings.Contains(g, "t_pkey") {
 		t.Errorf("wrong drops:\n%s", g)
+	}
+}
+
+func TestReadOnlyRefusesWrites(t *testing.T) {
+	s := &session{c: config.Connection{ReadOnly: true}}
+	if _, err := s.Exec(context.Background(), "DROP TABLE t", 10); !errors.Is(err, errReadOnly) {
+		t.Errorf("Exec: %v", err)
+	}
+	if err := s.Apply(context.Background(), []db.Statement{{Text: "DELETE FROM t"}}); !errors.Is(err, errReadOnly) {
+		t.Errorf("Apply: %v", err)
+	}
+}
+
+func TestDroppedClassification(t *testing.T) {
+	if !dropped(fmt.Errorf("read: %w", io.EOF)) || !dropped(syscall.EPIPE) {
+		t.Error("lost socket not detected")
+	}
+	if dropped(&pgconn.PgError{Code: "42P01"}) || dropped(errors.New("syntax")) {
+		t.Error("server error treated as a dropped connection")
+	}
+}
+
+func TestRetryOnlyWhenNothingWasSent(t *testing.T) {
+	if retryable(fmt.Errorf("read: %w", io.EOF), 0) || retryable(syscall.EPIPE, 0) {
+		t.Error("an EOF after the write must not replay a statement")
+	}
+	if retryable(errors.New("syntax"), 0) {
+		t.Error("classification")
+	}
+}
+
+func TestRetryOnTerminatedBackend(t *testing.T) {
+	kill := fmt.Errorf("query: %w", &pgconn.PgError{Severity: "FATAL", Code: "57P01"})
+	if !retryable(kill, 10*time.Millisecond) {
+		t.Error("a backend terminated while idle must be retried")
+	}
+	if retryable(kill, 5*time.Second) {
+		t.Error("a long-running statement killed by an administrator must not be replayed")
+	}
+	if retryable(&pgconn.PgError{Code: "42P01"}, 0) || retryable(&pgconn.PgError{Code: "40P01"}, 0) {
+		t.Error("an ordinary server error is not a dropped connection")
+	}
+}
+
+func TestEncodingOnlyUTF8(t *testing.T) {
+	for enc, ok := range map[string]bool{"": true, "utf8": true, "UTF-8": true, "latin1": false, "SJIS": false} {
+		_, err := connString(config.Connection{Host: "h", Encoding: enc}, "d")
+		if (err == nil) != ok {
+			t.Errorf("encoding %q: %v", enc, err)
+		}
+	}
+}
+
+func TestWantTx(t *testing.T) {
+	plain := []db.Statement{{Text: "ALTER TABLE t ADD c int"}}
+	if !wantTx(true, plain) || wantTx(false, plain) {
+		t.Error("Transactions capability not honoured")
+	}
+	if wantTx(true, append(plain, db.Statement{Text: "CREATE INDEX CONCURRENTLY i ON t (c)"})) {
+		t.Error("CONCURRENTLY cannot run in a transaction")
+	}
+}
+
+func TestResetSQL(t *testing.T) {
+	for name, want := range map[string]string{"": "DISCARD ALL", "postgres": "DISCARD ALL", "greenplum": "DISCARD ALL", "redshift": "RESET ALL", "vertica": ""} {
+		if got := resetSQL(name); got != want {
+			t.Errorf("%q: %q", name, got)
+		}
+	}
+}
+
+func TestConnStringIAM(t *testing.T) {
+	c := config.Connection{Host: "h", User: "u", IAMAuth: true, Options: map[string]string{"region": "eu-west-1"}}
+	cs, err := connString(c, "d")
+	if err != nil || strings.Contains(cs, "region") || !strings.Contains(cs, "sslmode=require") {
+		t.Errorf("%q %v", cs, err)
+	}
+	for _, m := range []string{"disable", "prefer"} {
+		c.SSLMode = m
+		if _, err := connString(c, "d"); err == nil {
+			t.Errorf("iam + %s accepted", m)
+		}
+	}
+}
+
+func TestReadOnlyGatesKillAndPin(t *testing.T) {
+	s := &session{c: config.Connection{ReadOnly: true}}
+	if err := s.Kill(context.Background(), "1"); !errors.Is(err, errReadOnly) {
+		t.Errorf("Kill: %v", err)
+	}
+	if _, err := (&pinned{session: s, c: &conn{}}).Exec(context.Background(), "DROP TABLE t", 10); !errors.Is(err, errReadOnly) {
+		t.Errorf("pinned Exec: %v", err)
 	}
 }
