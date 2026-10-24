@@ -79,6 +79,18 @@ func (d *cellEditDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		switch k.Keystroke() {
 		case "esc":
 			return nil, nil
+		case "tab", "shift+tab":
+			if d.next == nil || strings.Contains(d.ed.Text(), "\n") {
+				break
+			}
+			if text := d.ed.Text(); text != d.start {
+				d.onSave(text)
+			}
+			dir := 1
+			if k.Keystroke() == "shift+tab" {
+				dir = -1
+			}
+			return nil, d.next(dir)
 		case "ctrl+s":
 			text := d.ed.Text()
 			if text == d.start {
