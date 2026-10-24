@@ -629,3 +629,13 @@ func TestIntegrationCancel(t *testing.T) {
 		t.Errorf("session unusable after cancel: %v", err)
 	}
 }
+
+func TestIntegrationProcesses(t *testing.T) {
+	s, ctx := open(t)
+	if _, err := s.Processes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Kill(ctx, "x"); err == nil {
+		t.Error("bad id accepted")
+	}
+}
