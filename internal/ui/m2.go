@@ -509,7 +509,11 @@ func (w *Workspace) searchInDatabase() tea.Cmd {
 				}
 			}}
 		title := func(state string) {
-			p.title = fmt.Sprintf("Search %q: %d/%d tables · %d with hits%s", o.Value, done, total, len(hits), state)
+			of := fmt.Sprintf("/%d", total)
+			if o.AllSchemas && total == 0 {
+				of = "" // the table count of every schema is not known up front
+			}
+			p.title = fmt.Sprintf("Search %q: %d%s tables · %d with hits%s", o.Value, done, of, len(hits), state)
 		}
 		title("")
 		p.onPick = func(it pickItem, _ bool) tea.Cmd {
