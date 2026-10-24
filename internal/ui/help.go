@@ -255,7 +255,8 @@ func (h *helpDlg) View(th Theme, maxW, maxH int) string {
 	if len(rows) == 0 {
 		body = append(body, th.Dim.Render("  no command matches"))
 	}
-	body = append(body, "", th.Dim.Render("Rebind any key in ~/.config/webtuidb/config.toml under [keys]"))
+	body = append(body, "", th.Dim.Render("Rebind any key in ~/.config/webtuidb/config.toml under [keys], or in Settings"),
+		th.Dim.Render("Open docs: Open Anything ("+h.pre+" "+keymap.Display(firstKey(h.a.d.Keys, "open_anything"))+")  ·  webtuidb -changelog  ·  webtuidb -bugreport"))
 	hint := "/: search   ↑↓: move   Enter: run   Esc: close"
 	if h.searching {
 		hint = "↑↓: move   Enter: run   Esc: clear/stop"
