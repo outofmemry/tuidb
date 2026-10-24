@@ -18,6 +18,15 @@ type helpRow struct {
 	key    string // display form, e.g. "M-Enter"
 	desc   string
 	ctx    string
+	noPref bool // a no-prefix binding: shown without the prefix
+}
+
+// chord is the key as the user types it: prefix then key, or the bare key for a no-prefix binding.
+func (r helpRow) chord(pre string) string {
+	if r.noPref {
+		return r.key
+	}
+	return pre + " " + r.key
 }
 
 // helpDlg lists the key bindings for the focused pane plus the global ones.
