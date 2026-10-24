@@ -211,6 +211,14 @@ func (w *Workspace) m3Action(name string) tea.Cmd {
 		return w.backupAction(name == "restore")
 	case "split_right":
 		return w.splitRight()
+	case "close_pane":
+		return w.closePane()
+	case "assistant_new":
+		return w.assistantNew()
+	case "assistant_clear":
+		return w.assistantClear()
+	case "assistant_history":
+		return w.assistantHistory()
 	case "next_pane", "prev_pane": // two groups: next and previous are the same move
 		return w.cyclePane()
 	case "assistant":
@@ -268,7 +276,7 @@ func (w *Workspace) boot(next func() tea.Cmd) tea.Cmd {
 // ---- users ------------------------------------------------------------------------------
 
 var (
-	pgAttrs    = []string{"SUPERUSER", "CREATEDB", "CREATEROLE", "LOGIN", "REPLICATION"}
+	pgAttrs    = []string{"SUPERUSER", "CREATEDB", "CREATEROLE", "LOGIN", "REPLICATION", "BYPASSRLS"}
 	mysqlPrivs = []string{"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX", "ALL"}
 )
 
