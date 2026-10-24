@@ -930,22 +930,68 @@ func (g *Grid) Find(text string, dir int) bool { return g.FindCase(text, dir, fa
 
 // FindCase is Find with an optional case-sensitive match.
 func (g *Grid) FindCase(text string, dir int, matchCase bool) bool {
-	if text == "" || len(g.Rows) == 0 || len(g.Cols) == 0 {
+	return g.FindSpec(FindSpec{Text: text, Op: FindContains, Case: matchCase}, dir)
+}
+
+// Find operators.
+const (
+	FindContains    = "contains"
+	FindNotContains = "not contains"
+	FindPrefix      = "has prefix"
+	FindSuffix      = "has suffix"
+)
+
+var FindOps = []string{FindContains, FindNotContains, FindPrefix, FindSuffix}
+
+// FindSpec is a result search: text, the column to look in ("" = any), how to compare and case.
+type FindSpec struct {
+	Text string
+	Col  string
+	Op   string
+	Case bool
+}
+
+func (s FindSpec) fold(x string) string {
+	if s.Case {
+		return x
+	}
+	return strings.ToLower(x)
+}
+
+func (s FindSpec) match(cell string) bool {
+	c, t := s.fold(cell), s.fold(s.Text)
+	switch s.Op {
+	case FindNotContains:
+		return !strings.Contains(c, t)
+	case FindPrefix:
+		return strings.HasPrefix(c, t)
+	case FindSuffix:
+		return strings.HasSuffix(c, t)
+	}
+	return strings.Contains(c, t)
+}
+
+// cols is the column indexes the spec looks in.
+func (g *Grid) findCols(s FindSpec) []bool {
+	in := make([]bool, len(g.Cols))
+	for i, c := range g.Cols {
+		in[i] = s.Col == "" || c.Name == s.Col
+	}
+	return in
+}
+
+// FindSpec moves the cursor to the next (dir=1) or previous (dir=-1) cell matching s.
+func (g *Grid) FindSpec(s FindSpec, dir int) bool {
+	if s.Text == "" || len(g.Rows) == 0 || len(g.Cols) == 0 {
 		return false
 	}
-	fold := func(s string) string {
-		if matchCase {
-			return s
-		}
-		return strings.ToLower(s)
-	}
-	text = fold(text)
+	in := g.findCols(s)
 	n := len(g.Rows) * len(g.Cols)
 	pos := g.row*len(g.Cols) + g.col
 	for i := 1; i <= n; i++ {
 		p := ((pos+dir*i)%n + n) % n
 		r, c := p/len(g.Cols), p%len(g.Cols)
-		if strings.Contains(fold(cellText(g.Rows[r].Cur[c])), text) {
+		if in[c] && s.match(cellText(g.Rows[r].Cur[c])) {
 			g.row, g.col, g.selecting = r, c, false
 			g.scroll()
 			return true
