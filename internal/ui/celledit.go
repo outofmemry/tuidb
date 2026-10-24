@@ -115,9 +115,67 @@ func editCellInPopover(ws *Workspace, g *Grid) tea.Cmd {
 	if !ok || g.col >= len(g.Cols) {
 		return nil
 	}
-	ws.a.push(newCellEdit(g.Cols[g.col].Name, v, func(text string) tea.Cmd {
+	dlg := newCellEdit(g.Cols[g.col].Name, v, func(text string) tea.Cmd {
 		g.SetCell(text)
 		return nil
+	})
+	dlg.next = func(dir int) tea.Cmd { // Tab: the neighbouring cell's popover
+		c := g.col + dir
+		if c < 0 || c >= len(g.Cols) {
+			return nil
+		}
+		g.MoveField(dir)
+		if !g.Editable || g.cur() == nil || g.cur().State == rowDeleted {
+			return nil
+		}
+		return editCellInPopover(ws, g)
+	}
+	ws.a.push(dlg)
+	return nil
+}
+
+// editFieldInPopover is the row detail pane's edit: the text lands in the field of every selected row,
+// one pending change per row.
+func editFieldInPopover(ws *Workspace, g *Grid) tea.Cmd {
+	v, ok := g.CursorValue()
+	if !ok || g.col >= len(g.Cols) {
+		return nil
+	}
+	col, rows := g.Cols[g.col].Name, len(g.selectedRows())
+	title := col
+	if rows > 1 {
+		title += fmt.Sprintf(" in %d rows", rows)
+	}
+	ws.a.push(newCellEdit(title, v, func(text string) tea.Cmd {
+		n := g.SetColumn(text) // rows that really changed (not deleted ones, not ones already holding the text)
+		if n == 0 {
+			return nil
+		}
+		return ws.a.say("staged %s in %d row(s); commit to apply", col, n)
 	}))
 	return nil
+}
+
+// reformatJSON is PRETTY (indent=true) or MINIFY for a JSON text; ok is false for anything that is not a
+// JSON object or array, so other cells are left alone.
+func reformatJSON(v any, indent bool) (any, bool) {
+	if isSpecial(v) {
+		return nil, false
+	}
+	s := db.FormatValue(v)
+	t := strings.TrimSpace(s)
+	if len(t) < 2 || (t[0] != '{' && t[0] != '[') || !json.Valid([]byte(t)) {
+		return nil, false
+	}
+	out := ""
+	if indent {
+		out = prettyValue(t)
+	} else {
+		var b bytes.Buffer
+		if json.Compact(&b, []byte(t)) != nil {
+			return nil, false
+		}
+		out = b.String()
+	}
+	return out, out != s
 }
