@@ -358,33 +358,36 @@ func (e *Editor) ToggleFold() {
 }
 
 func (e *Editor) foldsChanged() {
+	e.lastFold = e.Folded()
 	if e.OnFolds != nil {
-		e.OnFolds(e.Folded())
+		e.OnFolds(e.lastFold)
 	}
 }
 
 // Folded lists the folded statement indexes, ascending.
 func (e *Editor) Folded() []int {
 	var out []int
-	for i := range e.folds {
-		out = append(out, i)
+	for i, s := range e.stmts() {
+		if e.folds[stmtKey(s)] {
+			out = append(out, i)
+		}
 	}
-	sort.Ints(out)
 	return out
 }
 
 // SetFolded restores folds (indexes past the last statement are ignored).
 func (e *Editor) SetFolded(idx []int) {
 	e.folds = nil
-	n := len(db.Split(e.Dialect, e.Text()))
+	st := e.stmts()
 	for _, i := range idx {
-		if i >= 0 && i < n {
+		if i >= 0 && i < len(st) {
 			if e.folds == nil {
-				e.folds = map[int]bool{}
+				e.folds = map[uint64]bool{}
 			}
-			e.folds[i] = true
+			e.folds[stmtKey(st[i])] = true
 		}
 	}
+	e.lastFold = e.Folded()
 }
 
 func (e *Editor) move(row, col int, extend bool) {
