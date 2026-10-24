@@ -307,16 +307,170 @@ func TestDisconnectedUnderLock(t *testing.T) {
 	s2 := New(config.Config{General: config.General{RowLimit: 10}}, []config.Connection{{Name: "c", Driver: "fake"}})
 	s2.connect = s.connect
 	call(t, s2, full, "open_connection", map[string]any{"connection": "c"})
+	type outcome struct {
+		out string
+		bad bool
+	}
+	res := make([]outcome, 8)
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			if i == 4 {
-				call(t, s2, full, "disconnect", map[string]any{"connection": "c"})
+				res[i].out, res[i].bad = call(t, s2, full, "disconnect", map[string]any{"connection": "c"})
 				return
 			}
-			call(t, s2, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"})
+			res[i].out, res[i].bad = call(t, s2, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"})
 		}(i)
 	}
 	wg.Wait()
+	for i, r := range res {
+		// a query either ran before the disconnect or was refused as disconnected / not open; nothing else
+		if i != 4 && r.bad && !strings.Contains(r.out, "disconnected") && !strings.Contains(r.out, "not open") {
+			t.Errorf("call %d: unexpected error %q", i, r.out)
+		}
+	}
 }
+
+func TestSideEffectFunc(t *testing.T) {
+	for _, c := range []struct{ sql, want string }{
+		{"SELECT dblink_exec('host=x','DELETE FROM users')", "dblink_exec"},
+		{"SELECT * FROM dblink ('a','b') AS t(x int)", "dblink"},
+		{`SELECT "dblink_exec"('a','b')`, "dblink_exec"},
+		{"SELECT public.lo_import('/x')", "lo_import"},
+		{"SELECT pg_advisory_lock(1)", "pg_advisory_lock"},
+		{"SELECT pg_switch_wal()", "pg_switch_wal"},
+		{"SELECT pg_reload_conf()", "pg_reload_conf"},
+		{"SELECT query_to_xml(concat('select pg_read_','file(''/etc/passwd'')'), true, false, '')", "query_to_xml"},
+		{"SELECT cursor_to_xmlschema('c', true, false, '')", "cursor_to_xmlschema"},
+		{"COPY t TO PROGRAM 'x'", "copy"},
+		{"copy (select 1) to stdout", "copy"},
+		{`SELECT U&"d\0062link_exec"('a','b')`, "a unicode-escaped identifier"},
+		{"SELECT /* ok */ pg_terminate_backend(1)", "pg_terminate_backend"},
+		{"SELECT * FROM audit WHERE action = 'copy'", ""},
+		{"SELECT copy FROM t", ""},
+		{"SELECT 1 -- copy this later\n", ""},
+		{"SELECT 'dblink_exec(' || x FROM t", ""},
+		{"SELECT $q$ nextval( $q$", ""},
+		{`SELECT "copy" FROM "dblink_x"`, ""},
+		{"SELECT * FROM t /* nextval(1) */", ""},
+		{"SELECT 'it''s copy(' , 1", ""},
+	} {
+		if got := sideEffectFunc("postgres", c.sql); got != c.want {
+			t.Errorf("sideEffectFunc(%q) = %q, want %q", c.sql, got, c.want)
+		}
+	}
+	// a literal cannot open a window for what follows it
+	if got := sideEffectFunc("mysql", `SELECT 'a\'', lo_import(1) -- '`); got != "lo_import" {
+		t.Errorf("mysql backslash escape: %q", got)
+	}
+	if got := sideEffectFunc("postgres", `SELECT E'a\'' , nextval('s')`); got != "nextval" {
+		t.Errorf("postgres E string: %q", got)
+	}
+}
+
+func TestReadOnlyNeedsPinner(t *testing.T) {
+	full := &config.MCPToken{Name: "f", Scope: "full"}
+	fs := &fakeSess{}
+	mk := func(roConn bool) *Server {
+		s := New(config.Config{General: config.General{RowLimit: 10}}, []config.Connection{{Name: "c", Driver: "fake", ReadOnly: roConn}})
+		s.connect = func(context.Context, config.Connection) (db.Session, func(), error) {
+			return plainSess{f: fs}, func() {}, nil
+		}
+		call(t, s, full, "open_connection", map[string]any{"connection": "c"})
+		return s
+	}
+	if out, bad := call(t, mk(false), full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); !bad || !strings.Contains(out, "cannot be enforced") {
+		t.Errorf("a postgres session that cannot pin ran a read query: %s", out)
+	}
+	if got := fs.log(); len(got) != 0 {
+		t.Errorf("ran %v", got)
+	}
+	if out, bad := call(t, mk(true), full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); bad {
+		t.Errorf("read_only connection refused: %s", out)
+	}
+}
+
+func TestRunBoardGuards(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	if err := os.MkdirAll(filepath.Join(dir, "webtuidb", "boards"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, q string) {
+		body := "name = \"" + name + "\"\n[[panel]]\ntitle = \"p\"\nkind = \"table\"\nquery = \"" + q + "\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "webtuidb", "boards", name+".toml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("bad", "SELECT dblink_exec('a','b')")
+	write("ok", "SELECT 1")
+	fs := &fakeSess{}
+	s := New(config.Config{General: config.General{RowLimit: 10}}, []config.Connection{{Name: "c", Driver: "fake"}})
+	s.Boards = true
+	s.connect = func(context.Context, config.Connection) (db.Session, func(), error) { return fs, func() {}, nil }
+	full := &config.MCPToken{Name: "f", Scope: "full"}
+	call(t, s, full, "open_connection", map[string]any{"connection": "c"})
+	if out, bad := call(t, s, full, "run_board", map[string]any{"name": "bad", "connection": "c"}); !bad || !strings.Contains(out, "dblink_exec") {
+		t.Errorf("board with dblink_exec: %s", out)
+	}
+	if got := fs.log(); len(got) != 0 {
+		t.Errorf("ran %v", got)
+	}
+	if out, bad := call(t, s, full, "run_board", map[string]any{"name": "ok", "connection": "c"}); bad {
+		t.Errorf("ok board: %s", out)
+	}
+	if got := strings.Join(fs.log(), "|"); got != "BEGIN READ ONLY|SELECT 1|ROLLBACK" {
+		t.Errorf("board panels must run in a read-only transaction, ran %v", got)
+	}
+}
+
+func TestSideEffectReviewCases(t *testing.T) {
+	for _, c := range []struct{ dialect, sql, want string }{
+		{"postgres", `SELECT $a1$ x $$ $a1$ , pg_read_file('/etc/passwd')`, "pg_read_file"},
+		{"postgres", `SELECT $a1$ x $$ $a1$ , dblink_exec('host=h','DELETE FROM users')`, "dblink_exec"},
+		{"postgres", `SELECT $a1$ copy( $a1$`, ""},
+		{"mysql", `SELECT LOAD_FILE('/etc/passwd')`, "load_file"},
+		{"mysql", `SELECT 1 INTO  OUTFILE '/tmp/x'`, "into outfile"},
+		{"mysql", `SELECT get_lock('a', 1)`, "get_lock"},
+		{"clickhouse", `SELECT * FROM file('/etc/passwd')`, "file"},
+		{"clickhouse", `SELECT * FROM url('http://169.254.169.254/')`, "url"},
+		{"clickhouse", `SELECT 1`, ""},
+	} {
+		if got := sideEffectFunc(c.dialect, c.sql); got != c.want {
+			t.Errorf("sideEffectFunc(%s, %q) = %q, want %q", c.dialect, c.sql, got, c.want)
+		}
+	}
+}
+
+func TestExplainAnalyzeDDLGate(t *testing.T) {
+	for _, sql := range []string{"EXPLAIN ANALYZE CREATE TABLE x AS SELECT 1", "explain (analyze, buffers) drop table t", "EXPLAIN ANALYZE VERBOSE ALTER TABLE t ADD c int"} {
+		if w := firstWord("postgres", sql); !ddl[w] {
+			t.Errorf("%q: first word %q passes the DDL gate", sql, w)
+		}
+	}
+	if w := firstWord("postgres", "EXPLAIN SELECT 1"); w != "SELECT" {
+		t.Errorf("EXPLAIN SELECT: %q", w)
+	}
+}
+
+func TestReadOnlyRunnerDialects(t *testing.T) {
+	ctx := context.Background()
+	// ClickHouse read_only is a keyword filter only: it must not be trusted, and it has no read-only transaction.
+	if _, _, err := ReadOnlyTx(ctx, &fakeSess{dialect: "clickhouse"}, "clickhouse", true); err == nil {
+		t.Error("clickhouse read_only connection was trusted")
+	}
+	// A dialect with no transactions (Vertica reports postgres) must not get BEGIN READ ONLY.
+	if _, _, err := ReadOnlyTx(ctx, noTx{&fakeSess{}}, "postgres", false); err == nil {
+		t.Error("BEGIN READ ONLY issued on a session without transactions")
+	}
+	if _, rel, err := ReadOnlyTx(ctx, &fakeSess{}, "postgres", true); err != nil {
+		t.Error(err)
+	} else {
+		rel()
+	}
+}
+
+type noTx struct{ *fakeSess }
+
+func (n noTx) Caps() db.Capabilities { return db.Capabilities{Dialect: "postgres"} }
