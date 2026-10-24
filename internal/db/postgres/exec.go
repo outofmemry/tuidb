@@ -16,7 +16,12 @@ import (
 	"webtuidb/internal/db"
 )
 
+var errReadOnly = errors.New("connection is read_only")
+
 func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result, error) {
+	if s.c.ReadOnly && !db.IsReadOnly("postgres", stmt) {
+		return nil, errReadOnly
+	}
 	res, err := s.run(ctx, stmt, nil, limit, true)
 	if err == nil { // the statement may have changed any table's columns
 		s.colMu.Lock()
@@ -61,7 +66,9 @@ func (c *conn) fetch(ctx context.Context, p *pool, stmt string, args []any, limi
 	for rows.Next() {
 		if limit > 0 && len(res.Rows) == limit {
 			res.Truncated = true
-			stop() // abandon the rest instead of draining it
+			if !c.pinned { // a cancel would abort the transaction the pin holds (25P02 on the next statement): rows.Close drains instead
+				stop() // abandon the rest instead of draining it
+			}
 			break
 		}
 		raw := rows.RawValues()
@@ -72,7 +79,7 @@ func (c *conn) fetch(ctx context.Context, p *pool, stmt string, args []any, limi
 		res.Rows = append(res.Rows, row)
 	}
 	rows.Close()
-	if res.Truncated {
+	if res.Truncated && !c.pinned {
 		c.bad = true // cancelled mid-result: do not reuse
 	} else if err := rows.Err(); err != nil {
 		return nil, err
@@ -313,17 +320,29 @@ func noTx(text string) bool {
 		strings.Contains(t, " CONCURRENTLY") || strings.HasPrefix(t, "VACUUM")
 }
 
+// wantTx: one transaction for the batch, unless the engine has none (Vertica has no BEGIN) or a statement cannot run in one.
+func wantTx(transactions bool, stmts []db.Statement) bool {
+	for _, st := range stmts {
+		transactions = transactions && !noTx(st.Text)
+	}
+	return transactions
+}
+
 func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 	if len(stmts) == 0 {
 		return nil
 	}
+	if s.c.ReadOnly {
+		for _, st := range stmts {
+			if !st.ReadOnly && !db.IsReadOnly("postgres", st.Text) {
+				return errReadOnly
+			}
+		}
+	}
 	s.colMu.Lock()
 	s.cols = map[string][]string{} // structure may change
 	s.colMu.Unlock()
-	useTx := true
-	for _, st := range stmts {
-		useTx = useTx && !noTx(st.Text)
-	}
+	useTx := wantTx(s.caps.Transactions, stmts)
 	return s.use(ctx, func(c *conn) error {
 		var ex execer = c.Conn
 		var tx pgx.Tx
@@ -377,6 +396,9 @@ func (s *session) Processes(ctx context.Context) ([]db.ProcessInfo, error) {
 }
 
 func (s *session) Kill(ctx context.Context, id string) error {
+	if s.c.ReadOnly {
+		return errReadOnly
+	}
 	pid, err := strconv.Atoi(id)
 	if err != nil {
 		return fmt.Errorf("bad process id %q", id)
