@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"tuidb/internal/db"
 )
@@ -64,7 +65,15 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		dst := qualified(ref.Schema, newName)
 		out := stmts("CREATE TABLE " + dst + " LIKE " + name)
 		if opts["with_data"] == "true" {
-			out = append(out, stmts("INSERT INTO "+dst+" SELECT * FROM "+name)...)
+			cols, err := s.copyColumns(ref)
+			if err != nil {
+				return nil, err
+			}
+			ins := "INSERT INTO " + dst + " SELECT * FROM " + name
+			if cols != "" {
+				ins = "INSERT INTO " + dst + " (" + cols + ") SELECT " + cols + " FROM " + name
+			}
+			out = append(out, stmts(ins)...)
 		}
 		return out, nil
 	case db.OpRenameObject:
@@ -92,6 +101,29 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		return nil, fmt.Errorf("%s cannot rename a database: create a new one and move the tables with RENAME TABLE", s.engine())
 	}
 	return nil, fmt.Errorf("unknown admin operation %q", op)
+}
+
+// copyColumns lists the table's columns without the generated ones, which INSERT cannot set.
+func (s *session) copyColumns(ref db.ObjRef) (string, error) {
+	if s.db() == nil { // no connection (unit tests): copy everything
+		return "", nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cols, err := s.loadColumns(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	var names []string
+	for _, c := range cols {
+		if !strings.HasPrefix(strings.ToUpper(c.Extra), "GENERATED ALWAYS AS") {
+			names = append(names, c.Name)
+		}
+	}
+	if len(names) == 0 {
+		return "", errors.New("clone: the table has no copyable columns")
+	}
+	return colList(names), nil
 }
 
 func stmts(texts ...string) []db.Statement {
@@ -148,6 +180,8 @@ func colList(cols []string) string {
 	return strings.Join(qs, ", ")
 }
 
+var keyPart = regexp.MustCompile(`^(.*?)(\(\d+\))?( DESC)?$`)
+
 func indexSQL(ix db.Index) (string, error) {
 	if len(ix.Columns) == 0 {
 		return "", fmt.Errorf("index %q has no columns", ix.Name)
@@ -169,7 +203,8 @@ func indexSQL(ix db.Index) (string, error) {
 	parts := make([]string, len(ix.Columns))
 	for i, c := range ix.Columns {
 		if parts[i] = c; !strings.HasPrefix(c, "(") { // "(expr)" is a functional key part, emitted raw
-			parts[i] = q(c)
+			m := keyPart.FindStringSubmatch(c) // "col", "col(10)", "col DESC"
+			parts[i] = q(m[1]) + m[2] + m[3]
 		}
 	}
 	return kw + " (" + strings.Join(parts, ", ") + ")", nil

@@ -393,3 +393,26 @@ func TestIsDDL(t *testing.T) {
 		}
 	}
 }
+
+func TestColumnDefaultBinaryAndExpr(t *testing.T) {
+	ns := func(v string) sql.NullString { return sql.NullString{String: v, Valid: true} }
+	cases := []struct{ typ, def, extra, want string }{
+		{"varbinary", "0x01FF", "", "0x01FF"}, // MY-01: hex literal stays raw
+		{"binary", "0x01FF", "", "0x01FF"},
+		{"varchar", "0x01FF", "", "'0x01FF'"},                         // a text default that merely looks like hex
+		{"text", `_utf8mb4\'x\'`, "DEFAULT_GENERATED", `_utf8mb4'x'`}, // MY-02
+	}
+	for _, c := range cases {
+		if got, _ := columnDefault(c.typ, ns(c.def), c.extra, false); got != c.want {
+			t.Errorf("%s %q: got %q want %q", c.typ, c.def, got, c.want)
+		}
+	}
+}
+
+func TestIndexSQLKeyParts(t *testing.T) {
+	got, err := indexSQL(db.Index{Name: "i", Unique: true, Columns: []string{"title(10)", "created DESC", "plain", "(lower(x)) DESC"}})
+	want := "UNIQUE INDEX `i` (`title`(10), `created` DESC, `plain`, (lower(x)) DESC)"
+	if err != nil || got != want {
+		t.Errorf("got %q (%v) want %q", got, err, want)
+	}
+}

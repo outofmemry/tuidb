@@ -265,6 +265,15 @@ func (s *session) indexDefs(ctx context.Context, ref db.ObjRef) ([]string, error
 }
 
 func (s *session) tableDDL(ctx context.Context, ref db.ObjRef, qn string) (string, error) {
+	// a plain CREATE TABLE would silently describe a different object
+	odd, err := s.strings(ctx, `SELECT CASE WHEN c.relkind = 'f' THEN 'foreign table' ELSE 'partition' END FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2 AND (c.relkind = 'f' OR c.relispartition)`, ref.Schema, ref.Name)
+	if err != nil {
+		return "", err
+	}
+	if len(odd) > 0 {
+		return "", fmt.Errorf("%s is a %s: a create script is not supported for it", ref.Name, odd[0])
+	}
 	cols, err := s.columns(ctx, ref)
 	if err != nil {
 		return "", err

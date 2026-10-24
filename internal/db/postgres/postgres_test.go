@@ -162,7 +162,7 @@ func TestPlanAdmin(t *testing.T) {
 		{db.OpDropObject, db.ObjRef{Name: "f", Kind: db.KindFunction}, nil, []string{`DROP FUNCTION "public"."f"`}},
 		{db.OpDropObject, db.ObjRef{Name: "v", Kind: db.KindMatView}, nil, []string{`DROP MATERIALIZED VIEW "public"."v"`}},
 		{db.OpTruncate, tbl, map[string]string{"restart_identity": "true", "cascade": "1"}, []string{`TRUNCATE TABLE "public"."t" RESTART IDENTITY CASCADE`}},
-		{db.OpClone, tbl, map[string]string{"new_name": "t2", "with_data": "true"}, []string{`CREATE TABLE "public"."t2" (LIKE "public"."t" INCLUDING ALL)`, `INSERT INTO "public"."t2" SELECT * FROM "public"."t"`}},
+		{db.OpClone, tbl, map[string]string{"new_name": "t2", "with_data": "true"}, []string{`CREATE TABLE "public"."t2" (LIKE "public"."t" INCLUDING ALL)`, `INSERT INTO "public"."t2" OVERRIDING SYSTEM VALUE SELECT * FROM "public"."t"`, resyncSequences("public", "t2", `"public"."t2"`)}},
 		{db.OpClone, tbl, map[string]string{"new_name": "t2"}, []string{`CREATE TABLE "public"."t2" (LIKE "public"."t" INCLUDING ALL)`}},
 		{db.OpRenameObject, tbl, map[string]string{"new_name": "t3"}, []string{`ALTER TABLE "public"."t" RENAME TO "t3"`}},
 		{db.OpCreateDatabase, db.ObjRef{Name: "d"}, map[string]string{"encoding": "UTF8", "collation": "C"}, []string{`CREATE DATABASE "d" ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE template0`}},
@@ -292,5 +292,26 @@ func TestPlanAlterRefusesExtraEdits(t *testing.T) {
 	same := &db.TableDef{Name: "t", Columns: []db.Column{{Name: "id", OrigName: "id", Type: "integer", Extra: "generated always as identity "}}}
 	if st, err := s.PlanTable(old, same); err != nil || len(st) != 0 {
 		t.Errorf("unchanged extra: %v %v", st, err)
+	}
+}
+
+func TestPlanAlterConstraintNames(t *testing.T) {
+	old := &db.TableDef{Schema: "public", Name: "t", PrimaryKey: []string{"id"},
+		Columns: []db.Column{{Name: "id", Type: "int", PK: true}, {Name: "email", Type: "text", Nullable: true}},
+		Indexes: []db.Index{{Name: "t_email_key", Unique: true, Columns: []string{"email"}}, {Name: "plain", Columns: []string{"email"}}}}
+	nw := &db.TableDef{Schema: "public", Name: "t", PrimaryKey: []string{"email"},
+		Columns: []db.Column{{Name: "id", OrigName: "id", Type: "int"}, {Name: "email", OrigName: "email", Type: "text", Nullable: true}}}
+	got, err := planAlter(old, nw, map[string]string{"t_email_key": "email_uniq"}, "my_pk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := strings.Join(texts(got), "\n")
+	for _, w := range []string{`DROP CONSTRAINT "my_pk"`, `DROP CONSTRAINT "email_uniq"`, `DROP INDEX "public"."plain"`} {
+		if !strings.Contains(g, w) {
+			t.Errorf("missing %s in:\n%s", w, g)
+		}
+	}
+	if strings.Contains(g, `DROP INDEX "public"."t_email_key"`) || strings.Contains(g, "t_pkey") {
+		t.Errorf("wrong drops:\n%s", g)
 	}
 }

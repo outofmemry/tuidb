@@ -3,7 +3,9 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -100,6 +102,7 @@ func (s *session) loadColumns(ctx context.Context, ref db.ObjRef) ([]db.Column, 
 	}
 	defer rows.Close()
 	var out []db.Column
+	var binDefs map[string]string // MariaDB binary defaults, which information_schema mangles
 	for rows.Next() {
 		var name, typ, nullable, extra, key, dataType, comment, tableType string
 		var def, coll, gen sql.NullString
@@ -113,6 +116,16 @@ func (s *session) loadColumns(ctx context.Context, ref db.ObjRef) ([]db.Column, 
 		}
 		c := db.Column{Name: name, OrigName: name, Type: typ, Nullable: nullable == "YES", PK: key == "PRI"}
 		c.Default, c.HasDef = columnDefault(dataType, def, extra, s.maria)
+		if s.maria && c.HasDef && (dataType == "binary" || dataType == "varbinary") {
+			if binDefs == nil {
+				if binDefs, err = s.binaryDefaults(ctx, ref); err != nil {
+					return nil, err
+				}
+			}
+			if h, ok := binDefs[name]; ok {
+				c.Default = h
+			}
+		}
 		c.Extra = columnExtra(extra, gen.String, comment, s.maria)
 		if coll.Valid { // part of the type so it stays right after it, where generated columns need it
 			c.Type += " COLLATE " + coll.String
@@ -120,6 +133,40 @@ func (s *session) loadColumns(ctx context.Context, ref db.ObjRef) ([]db.Column, 
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// binaryDefaults reads DEFAULT literals of binary columns from SHOW CREATE TABLE with binary results:
+// information_schema.COLUMN_DEFAULT has already pushed them through utf8 (0xFF -> '?'). Returns column -> 0x... literal.
+func (s *session) binaryDefaults(ctx context.Context, ref db.ObjRef) (map[string]string, error) {
+	conn, err := s.db().Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("binary defaults: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "SET character_set_results = NULL"); err != nil {
+		return nil, fmt.Errorf("binary defaults: %w", err)
+	}
+	var tbl string
+	var ddl []byte
+	if err := conn.QueryRowContext(ctx, "SHOW CREATE TABLE "+qualified(s.schemaOf(ref), ref.Name)).Scan(&tbl, &ddl); err != nil {
+		return nil, fmt.Errorf("binary defaults: %w", err)
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(string(ddl), "\n") {
+		m := binDefaultLine.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		out[strings.ReplaceAll(m[1], "``", "`")] = "0x" + strings.ToUpper(hex.EncodeToString([]byte(unquoteBytes(m[2]))))
+	}
+	return out, nil
+}
+
+var binDefaultLine = regexp.MustCompile("^  `((?:[^`]|``)+)` (?:var)?binary\\(\\d+\\).* DEFAULT '((?:[^'\\\\]|\\\\.|'')*)'")
+
+// unquoteBytes undoes the escaping of a SQL string literal body.
+func unquoteBytes(s string) string {
+	return strings.NewReplacer("''", "'", `\\`, `\`, `\n`, "\n", `\r`, "\r", `\0`, "\x00", `\Z`, "\x1a", `\t`, "\t", `\'`, "'").Replace(s)
 }
 
 func (s *session) Columns(ctx context.Context, ref db.ObjRef) ([]db.Column, error) {
@@ -186,10 +233,21 @@ func columnDefault(dataType string, def sql.NullString, extra string, maria bool
 		}
 		return def.String, true
 	}
-	if strings.Contains(extra, "DEFAULT_GENERATED") || rawDefault[strings.ToLower(dataType)] {
+	if strings.Contains(extra, "DEFAULT_GENERATED") {
+		return unescapeExpr(def.String), true
+	}
+	if rawDefault[strings.ToLower(dataType)] || binaryDefault(dataType, def.String) {
 		return def.String, true
 	}
 	return quote(def.String), true
+}
+
+var hexLiteral = regexp.MustCompile(`^0x[0-9A-Fa-f]+$`)
+
+// binaryDefault: MySQL 8 reports a BINARY/VARBINARY default as the hex literal 0x..., which must stay unquoted.
+func binaryDefault(dataType, def string) bool {
+	t := strings.ToLower(dataType)
+	return (t == "binary" || t == "varbinary") && hexLiteral.MatchString(def)
 }
 
 func quote(s string) string {
@@ -201,7 +259,7 @@ func (s *session) Indexes(ctx context.Context, ref db.ObjRef) ([]db.Index, error
 	if hasIndexExpr(s.info) {
 		expr = "EXPRESSION"
 	}
-	rows, err := s.db().QueryContext(ctx, `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME, INDEX_TYPE, `+expr+` FROM information_schema.statistics
+	rows, err := s.db().QueryContext(ctx, `SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME, INDEX_TYPE, `+expr+`, SUB_PART, COLLATION FROM information_schema.statistics
 		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY INDEX_NAME = 'PRIMARY' DESC, INDEX_NAME, SEQ_IN_INDEX`, s.schemaOf(ref), ref.Name)
 	if err != nil {
 		return nil, fmt.Errorf("list indexes: %w", err)
@@ -211,8 +269,9 @@ func (s *session) Indexes(ctx context.Context, ref db.ObjRef) ([]db.Index, error
 	for rows.Next() {
 		var name, algo string
 		var nonUnique int
-		var col, ex sql.NullString
-		if err := rows.Scan(&name, &nonUnique, &col, &algo, &ex); err != nil {
+		var col, ex, collation sql.NullString
+		var sub sql.NullInt64
+		if err := rows.Scan(&name, &nonUnique, &col, &algo, &ex, &sub, &collation); err != nil {
 			return nil, err
 		}
 		if len(out) == 0 || out[len(out)-1].Name != name {
@@ -221,6 +280,12 @@ func (s *session) Indexes(ctx context.Context, ref db.ObjRef) ([]db.Index, error
 		c := col.String
 		if !col.Valid { // functional key part: kept as "(expr)", which indexSQL emits raw
 			c = "(" + unescapeExpr(ex.String) + ")"
+		}
+		if sub.Valid && col.Valid { // prefix length, written back by indexSQL as "col(10)"
+			c += "(" + strconv.FormatInt(sub.Int64, 10) + ")"
+		}
+		if collation.String == "D" {
+			c += " DESC"
 		}
 		last := &out[len(out)-1]
 		last.Columns = append(last.Columns, c)

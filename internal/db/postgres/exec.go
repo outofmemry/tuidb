@@ -17,13 +17,20 @@ import (
 )
 
 func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result, error) {
-	return s.run(ctx, stmt, nil, limit)
+	res, err := s.run(ctx, stmt, nil, limit, true)
+	if err == nil { // the statement may have changed any table's columns
+		s.colMu.Lock()
+		s.cols = map[string][]string{}
+		s.colMu.Unlock()
+	}
+	return res, err
 }
 
-func (s *session) run(ctx context.Context, stmt string, args []any, limit int) (*db.Result, error) {
+func (s *session) run(ctx context.Context, stmt string, args []any, limit int, dirty bool) (*db.Result, error) {
 	start := time.Now()
 	var res *db.Result
 	err := s.use(ctx, func(c *conn) (err error) {
+		c.dirty = c.dirty || dirty
 		res, err = c.fetch(ctx, s.p(), stmt, args, limit)
 		return err
 	})
@@ -253,7 +260,7 @@ func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.run(ctx, sql, args, 0)
+	return s.run(ctx, sql, args, 0, false)
 }
 
 func (s *session) Count(ctx context.Context, q db.RowQuery, estimate bool) (db.Count, error) {

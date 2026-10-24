@@ -34,7 +34,7 @@ func (driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (
 	if err != nil {
 		return nil, err
 	}
-	s.pool = p
+	s.pool, s.dbName, s.schema, s.version = p, p.name, p.schema, p.version
 	return s, nil
 }
 
@@ -128,9 +128,7 @@ func (s *session) connect(ctx context.Context, database string) (*pool, error) {
 		p.close()
 		return nil, fmt.Errorf("connect to postgres: %w", err)
 	}
-	s.mu.Lock()
-	s.dbName, s.schema, s.version = name, schema, version
-	s.mu.Unlock()
+	p.name, p.schema, p.version = name, schema, version
 	return p, nil
 }
 
@@ -196,7 +194,7 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 		return err
 	}
 	s.mu.Lock()
-	s.pool = np
+	s.pool, s.dbName, s.schema, s.version = np, np.name, np.schema, np.version
 	s.mu.Unlock()
 	s.colMu.Lock()
 	s.cols = map[string][]string{}
@@ -207,10 +205,11 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 
 // pool is a minimal connection pool: at most maxConns open, idle ones reused.
 type pool struct {
-	cfg       *pgx.ConnConfig
-	bootstrap []string
-	sem       chan struct{}
-	types     sync.Map // oid -> type name for types pgx does not know
+	cfg                   *pgx.ConnConfig
+	bootstrap             []string
+	sem                   chan struct{}
+	name, schema, version string   // identity probed by connect, published with the pool swap
+	types                 sync.Map // oid -> type name for types pgx does not know
 
 	mu     sync.Mutex
 	idle   []*conn
@@ -223,6 +222,7 @@ type conn struct {
 	nmu     sync.Mutex
 	notices []string
 	bad     bool // must not be reused
+	dirty   bool // ran user SQL (SET, temp tables, ...): reset the session before reuse
 }
 
 func (c *conn) addNotice(_ *pgconn.PgConn, n *pgconn.Notice) {
@@ -295,8 +295,9 @@ func (p *pool) dial(ctx context.Context) (*conn, error) {
 
 func (p *pool) put(c *conn) {
 	defer func() { <-p.sem }()
+	ok := !c.bad && !c.IsClosed() && c.PgConn().TxStatus() == 'I' && p.reset(c) // not under p.mu: it round-trips
 	p.mu.Lock()
-	if !p.closed && !c.bad && !c.IsClosed() && c.PgConn().TxStatus() == 'I' {
+	if !p.closed && ok {
 		c.takeNotices()
 		p.idle = append(p.idle, c)
 		p.mu.Unlock()
@@ -304,6 +305,23 @@ func (p *pool) put(c *conn) {
 	}
 	p.mu.Unlock()
 	closeConn(c)
+}
+
+// reset undoes session state left by user SQL (SET search_path, SET ROLE, temp tables, ...) and replays the
+// bootstrap; false means the connection must be closed.
+func (p *pool) reset(c *conn) bool {
+	if !c.dirty {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, q := range append([]string{"DISCARD ALL"}, p.bootstrap...) {
+		if _, err := c.Exec(ctx, q); err != nil {
+			return false
+		}
+	}
+	c.dirty = false
+	return true
 }
 
 func (p *pool) use(ctx context.Context, f func(*conn) error) error {

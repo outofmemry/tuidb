@@ -1,9 +1,13 @@
 package postgres
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"tuidb/internal/db"
 )
@@ -99,7 +103,7 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		nq := qname(ref.Schema, newName)
 		out := []db.Statement{stmt("CREATE TABLE " + nq + " (LIKE " + qn + " INCLUDING ALL)")}
 		if opt(opts, "with_data") {
-			out = append(out, stmt("INSERT INTO "+nq+" SELECT * FROM "+qn))
+			out = append(out, stmt("INSERT INTO "+nq+" OVERRIDING SYSTEM VALUE SELECT * FROM "+qn), stmt(resyncSequences(ref.Schema, newName, nq)))
 		}
 		return out, nil
 	case db.OpRenameObject:
@@ -109,6 +113,26 @@ func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string
 		return []db.Statement{stmt("ALTER " + word + " " + qn + " RENAME TO " + ident(newName))}, nil
 	}
 	return nil, fmt.Errorf("unsupported operation %q", op)
+}
+
+// resyncSequences gives a clone its own sequence for every serial column (LIKE copies the source's
+// nextval default) and moves each identity/serial sequence past the copied rows.
+func resyncSequences(schema, name, nq string) string {
+	return `DO $$ DECLARE r record; sq text; BEGIN
+FOR r IN SELECT a.attname AS n, a.attidentity AS i, pg_get_expr(d.adbin, d.adrelid) AS e
+  FROM pg_attribute a LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+  WHERE a.attrelid = ` + lit(nq) + `::regclass AND a.attnum > 0 AND NOT a.attisdropped LOOP
+  sq := NULL;
+  IF r.i <> '' THEN sq := pg_get_serial_sequence(` + lit(nq) + `, r.n);
+  ELSIF r.e LIKE 'nextval(%' THEN
+    sq := format('%I.%I', ` + lit(schema) + `, ` + lit(name) + ` || '_' || r.n || '_seq');
+    EXECUTE format('CREATE SEQUENCE %s OWNED BY %s.%I', sq, ` + lit(nq) + `::regclass, r.n);
+    EXECUTE format('ALTER TABLE %s ALTER COLUMN %I SET DEFAULT nextval(%L)', ` + lit(nq) + `::regclass, r.n, sq);
+  END IF;
+  IF sq IS NOT NULL THEN
+    EXECUTE format('SELECT setval(%L, coalesce(max(%I), 1), max(%I) IS NOT NULL) FROM %s', sq, r.n, r.n, ` + lit(nq) + `::regclass);
+  END IF;
+END LOOP; END $$`
 }
 
 func lit(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
@@ -212,7 +236,39 @@ func (s *session) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
 	if o.Schema == "" {
 		o.Schema = n.Schema
 	}
-	return planAlter(&o, &n)
+	cons, pk, err := s.constraintNames(&o)
+	if err != nil {
+		return nil, err
+	}
+	return planAlter(&o, &n, cons, pk)
+}
+
+// constraintNames maps the indexes behind UNIQUE/EXCLUDE constraints to the constraint name and returns
+// the real primary key constraint name; they are not droppable (or named) the way a plain index is.
+func (s *session) constraintNames(t *db.TableDef) (map[string]string, string, error) {
+	cons, pk := map[string]string{}, ""
+	if s.p() == nil { // no connection (unit tests): fall back to the default names
+		return cons, pk, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := s.query(ctx, `SELECT ic.relname::text, k.conname::text, k.contype::text FROM pg_constraint k JOIN pg_class ic ON ic.oid = k.conindid
+		WHERE k.conrelid = $1::regclass AND k.contype IN ('p','u','x')`, []any{qname(t.Schema, t.Name)}, func(r pgx.Rows) error {
+		var ix, con, typ string
+		if err := r.Scan(&ix, &con, &typ); err != nil {
+			return err
+		}
+		if typ == "p" {
+			pk = con
+		} else {
+			cons[ix] = con
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("list constraints of %s: %w", t.Name, err)
+	}
+	return cons, pk, nil
 }
 
 func planCreate(t *db.TableDef) ([]db.Statement, error) {
@@ -287,7 +343,7 @@ func defOf(c db.Column) string {
 
 // planAlter orders statements so dependents go first: FKs/PK/indexes drop, columns drop/rename/alter/add,
 // then PK/indexes/FKs are added and the table is renamed last (everything before uses the old name).
-func planAlter(old, new *db.TableDef) ([]db.Statement, error) {
+func planAlter(old, new *db.TableDef, cons map[string]string, pkName string) ([]db.Statement, error) {
 	var out []db.Statement
 	tbl := qname(old.Schema, old.Name)
 	alter := func(clause string) { out = append(out, stmt("ALTER TABLE "+tbl+" "+clause)) }
@@ -334,6 +390,9 @@ func planAlter(old, new *db.TableDef) ([]db.Statement, error) {
 				name = ix.Name
 			}
 		}
+		if pkName != "" {
+			name = pkName
+		}
 		alter("DROP CONSTRAINT " + ident(name))
 	}
 
@@ -344,7 +403,11 @@ func planAlter(old, new *db.TableDef) ([]db.Statement, error) {
 	dropped := map[string]bool{}
 	for _, ix := range old.Indexes {
 		if nx, ok := newIx[ix.Name]; !ix.Primary && (!ok || !indexEqual(ix, nx)) {
-			out = append(out, stmt("DROP INDEX "+qname(old.Schema, ix.Name)))
+			if con, ok := cons[ix.Name]; ok { // backing index of a UNIQUE/EXCLUDE constraint
+				alter("DROP CONSTRAINT " + ident(con))
+			} else {
+				out = append(out, stmt("DROP INDEX "+qname(old.Schema, ix.Name)))
+			}
 			dropped[ix.Name] = true
 		}
 	}
