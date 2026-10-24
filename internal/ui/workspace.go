@@ -30,8 +30,13 @@ type tabber interface {
 	View(th Theme, w, h int) string
 }
 
-// detailer is implemented by tabs that can show the row-detail pane.
-type detailer interface{ Detail() []string }
+// detailer is implemented by tabs that can show the row-detail pane; DetailKey lets the pane take
+// focus and edit the field under its cursor (the grid's current column).
+type detailer interface {
+	Detail() []string
+	DetailCol() int
+	DetailKey(key string) tea.Cmd
+}
 
 type consoleLine struct {
 	at  time.Time
@@ -54,6 +59,7 @@ type Workspace struct {
 	nextTab int
 
 	focusSB     bool
+	focusDetail bool // the row-detail pane has the keyboard (focus_right from the grid)
 	showSB      bool
 	showDetail  bool
 	showConsole bool
@@ -493,6 +499,16 @@ func (w *Workspace) input(msg tea.Msg) tea.Cmd {
 	if w.applying {
 		return nil
 	}
+	if d, ok := w.tab().(detailer); ok && w.focusDetail && w.showDetail {
+		if k, ok := msg.(tea.KeyPressMsg); ok {
+			if k.Keystroke() == "esc" {
+				w.focusDetail = false
+				return nil
+			}
+			return d.DetailKey(k.Keystroke())
+		}
+		return nil
+	}
 	return w.tab().Input(msg)
 }
 
@@ -570,16 +586,23 @@ func (w *Workspace) action(name string) tea.Cmd {
 		}
 	case "toggle_row_detail":
 		w.showDetail = !w.showDetail
+		w.focusDetail = w.focusDetail && w.showDetail
 	case "toggle_console":
 		w.showConsole = !w.showConsole
 	case "focus_left":
-		if w.showSB {
+		if w.focusDetail {
+			w.focusDetail = false
+		} else if w.showSB {
 			w.focusSB = true
 		}
 	case "focus_right":
-		if w.tab() != nil {
-			w.focusSB = false
+		if w.tab() == nil {
+			break
 		}
+		if _, ok := w.tab().(detailer); ok && !w.focusSB && w.showDetail {
+			w.focusDetail = true
+		}
+		w.focusSB = false
 	case "commit":
 		return w.commit()
 	case "preview":
@@ -970,9 +993,13 @@ func (w *Workspace) view(th Theme, W, H int) string {
 			mainHint = h.Hint(th)
 		}
 	}
-	cols = append(cols, frame(th, mainTitle, mainHint, w.mainView(th, mainW-4, mainH-2), mainW, mainH, !w.focusSB))
+	cols = append(cols, frame(th, mainTitle, mainHint, w.mainView(th, mainW-4, mainH-2), mainW, mainH, !w.focusSB && !w.focusDetail))
 	if detW > 0 {
-		cols = append(cols, " ", frame(th, "Row details", "", w.detailView(th, detW-4, mainH-2), detW, mainH, false))
+		var hint string
+		if w.focusDetail {
+			hint = th.chips("↵", "edit", "jk", "field", "Esc", "back")
+		}
+		cols = append(cols, " ", frame(th, "Row details", hint, w.detailView(th, detW-4, mainH-2), detW, mainH, w.focusDetail))
 	}
 	out := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	if conH > 0 {
@@ -1070,6 +1097,7 @@ func (w *Workspace) detailView(th Theme, W, H int) string {
 		lines = append(lines, "", th.Dim.Render("  select a row"))
 	}
 	if ok {
+		field := 0
 		for _, l := range d.Detail() {
 			if l == "" {
 				continue
@@ -1079,6 +1107,10 @@ func (w *Workspace) detailView(th Theme, W, H int) string {
 			if strings.HasPrefix(name, "*") {
 				mark, name = th.Warn.Render("*"), name[1:]
 			}
+			if w.focusDetail && field == d.DetailCol() { // the pane's cursor is the grid's column
+				mark = th.Accent.Render("▸")
+			}
+			field++
 			lines = append(lines, mark+th.Accent.Render(strings.TrimSpace(name)))
 			if val == "NULL" {
 				lines = append(lines, "  "+th.Null.Render("NULL"))

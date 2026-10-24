@@ -920,6 +920,42 @@ func (t *tableTab) keylessWrites() bool {
 	return false
 }
 
+// DetailCol is the field the detail pane's cursor is on: the grid's current column.
+func (t *tableTab) DetailCol() int { return t.grid.col }
+
+// DetailKey handles a key while the detail pane has focus: j/k move between fields, Enter edits
+// the field in the popover (or quick-looks it when the table is read-only).
+func (t *tableTab) DetailKey(key string) tea.Cmd {
+	g := t.grid
+	if detailMove(g, key) {
+		return nil
+	}
+	if key == "enter" {
+		if !g.Editable || g.cur() == nil || g.cur().State == rowDeleted {
+			return t.quickLook()
+		}
+		return editCellInPopover(t.ws, g)
+	}
+	return nil
+}
+
+// detailMove moves the grid cursor one field for the detail pane's keys; it reports whether key was one.
+func detailMove(g *Grid, key string) bool {
+	switch key {
+	case "j", "down", "tab":
+		g.Move(0, 1, false)
+	case "k", "up", "shift+tab":
+		g.Move(0, -1, false)
+	case "home", "g":
+		g.GoCol(0, false)
+	case "end", "G":
+		g.GoCol(len(g.Cols)-1, false)
+	default:
+		return false
+	}
+	return true
+}
+
 func (t *tableTab) Detail() []string {
 	r := t.grid.cur()
 	if r == nil {

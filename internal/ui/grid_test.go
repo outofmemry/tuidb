@@ -349,3 +349,24 @@ func benchMoves(b *testing.B, dr, dc int) {
 
 func BenchmarkGridDown(b *testing.B)  { benchMoves(b, 1, 0) }
 func BenchmarkGridRight(b *testing.B) { benchMoves(b, 0, 1) }
+
+func TestDetailMove(t *testing.T) {
+	g := &Grid{}
+	g.SetData([]gridCol{{Name: "a"}, {Name: "b"}, {Name: "c"}}, [][]any{{1, 2, 3}})
+	for _, k := range []string{"j", "down", "tab"} {
+		if !detailMove(g, k) {
+			t.Fatalf("%s should move", k)
+		}
+	}
+	if g.col != 2 {
+		t.Fatalf("col = %d, want 2 after three moves down", g.col)
+	}
+	detailMove(g, "j") // clamps at the last field
+	if g.col != 2 {
+		t.Fatalf("col = %d, want 2 at the end", g.col)
+	}
+	detailMove(g, "home")
+	if g.col != 0 || detailMove(g, "enter") {
+		t.Fatalf("home should go to 0 and enter is not a move (col=%d)", g.col)
+	}
+}
