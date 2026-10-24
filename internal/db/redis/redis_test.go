@@ -280,3 +280,14 @@ func TestParseClientList(t *testing.T) {
 		t.Errorf("%+v", ps)
 	}
 }
+
+func TestStreamFromIgnoresStaleMarks(t *testing.T) {
+	s := &session{}
+	s.markStream("k", streamMark{0, "-", "a|"}, streamMark{10, "(1-0", "a|"})
+	if from, pos := s.streamFrom("k", 15, "a|"); from != "(1-0" || pos != 10 {
+		t.Errorf("fresh mark: %q %d", from, pos)
+	}
+	if from, pos := s.streamFrom("k", 15, "b|5-0"); from != "-" || pos != 0 {
+		t.Errorf("stale mark used: %q %d", from, pos)
+	}
+}
