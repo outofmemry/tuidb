@@ -252,14 +252,29 @@ func (a *App) newQuickLookValue(title string, v any, onSave func([]byte) tea.Cmd
 	} else if s, ok := v.(string); ok {
 		raw = []byte(s)
 	}
+	if isBytes && a.d.Cfg.Table.DecodeSpatial {
+		if w, ok := db.WKT(raw); ok {
+			text, enc = w, "WKT" // a geometry shows as WKT; v switches back to the bytes
+		}
+	}
 	q := newQuickLook(title, text)
 	q.a, q.rawBytes, q.isBytes, q.onSave, q.enc = a, raw, isBytes, onSave, enc
+	if isBytes {
+		q.info = binaryInfo(raw, a.d.Cfg.Table.ImagePreview)
+		if strings.Contains(q.info, "image/") {
+			q.note = "terminal shows the image size only; the web UI previews the picture"
+		}
+	}
 	return q
 }
 
 func (q *quickLookDlg) pickEncoding() tea.Cmd {
 	var items []pickItem
-	for _, e := range encodings {
+	encs := encodings
+	if _, ok := db.WKT(q.rawBytes); ok {
+		encs = append([]string{"WKT"}, encs...)
+	}
+	for _, e := range encs {
 		d := ""
 		if e == q.enc {
 			d = "current"
