@@ -87,19 +87,32 @@ func (h *History) MigrateLegacy(connNames []string) {
 	}
 }
 
-func (h *History) Append(conn string, e HistoryEntry) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if e.Time.IsZero() {
-		e.Time = time.Now()
-	}
+// entryID is the one ID scheme for every entry: a hash of the connection and everything that identifies the
+// statement, taken before the SQL is cut to maxSQLBytes so long statements sharing a prefix stay distinct.
+func entryID(conn string, e HistoryEntry) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{conn, e.Database, e.SQL, e.Original,
+		e.Time.UTC().Format(time.RFC3339Nano), e.Duration.String()}, "\x00")))
+	return hex.EncodeToString(sum[:12])
+}
+
+// clip cuts the logged text to maxSQLBytes.
+func clip(e *HistoryEntry) {
 	if len(e.SQL) > maxSQLBytes {
 		e.SQL = strings.ToValidUTF8(e.SQL[:maxSQLBytes], "") + "\n-- (truncated)"
 	}
 	if len(e.Original) > maxSQLBytes {
 		e.Original = strings.ToValidUTF8(e.Original[:maxSQLBytes], "")
 	}
-	e.ID = fmt.Sprintf("%d", e.Time.UnixNano())
+}
+
+func (h *History) Append(conn string, e HistoryEntry) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if e.Time.IsZero() {
+		e.Time = time.Now()
+	}
+	e.ID = entryID(conn, e)
+	clip(&e)
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
