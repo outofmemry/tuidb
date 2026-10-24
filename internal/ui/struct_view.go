@@ -114,8 +114,11 @@ func fkText(fk db.ForeignKey, col string) string {
 }
 
 // typeChoices are the common column types offered by the Set Value menu, per engine.
-func typeChoices(dialect string) []string {
-	switch dialect {
+func typeChoices(caps db.Capabilities) []string {
+	if len(caps.Types) > 0 {
+		return caps.Types
+	}
+	switch caps.Dialect {
 	case "mysql":
 		return strings.Fields("int bigint smallint tinyint varchar(255) char(36) text longtext decimal(10,2) double float date datetime timestamp time boolean json blob")
 	case "clickhouse":
@@ -154,7 +157,7 @@ func (t *tableTab) buildStructure(m structureLoadedMsg) {
 	for i, c := range m.cols {
 		sg.Rows[i].Meta = colMeta{orig: c.Name}
 	}
-	types := typeChoices(t.ws.caps.Dialect)
+	types := typeChoices(t.ws.caps)
 	sg.NewRow = func() []any {
 		return []any{int64(len(sg.Rows) + 1), "new_column", types[0], "YES", nil, "NO", "", nil}
 	}
@@ -591,7 +594,7 @@ func (t *tableTab) structSetValue() tea.Cmd {
 		switch g.col {
 		case scType:
 			var items []pickItem
-			for _, ty := range typeChoices(t.ws.caps.Dialect) {
+			for _, ty := range typeChoices(t.ws.caps) {
 				items = append(items, pickItem{Label: strings.ReplaceAll(ty, `\ `, " "), Value: strings.ReplaceAll(ty, `\ `, " ")})
 			}
 			t.ws.a.push(&pickerDlg{title: "Data type", filter: true, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
@@ -746,7 +749,7 @@ func (ws *Workspace) newTableDialog() tea.Cmd {
 		t.buildStructure(t.loaded)
 		t.structGrid.Editable = true
 		t.structGrid.AddRow() // a first column to start from
-		t.structGrid.Rows[0].Cur[scName], t.structGrid.Rows[0].Cur[scType], t.structGrid.Rows[0].Cur[scNull], t.structGrid.Rows[0].Cur[scPK] = "id", typeChoices(ws.caps.Dialect)[0], "NO", "YES"
+		t.structGrid.Rows[0].Cur[scName], t.structGrid.Rows[0].Cur[scType], t.structGrid.Rows[0].Cur[scNull], t.structGrid.Rows[0].Cur[scPK] = "id", typeChoices(ws.caps)[0], "NO", "YES"
 		return ws.addTab(t)
 	}))
 	return nil

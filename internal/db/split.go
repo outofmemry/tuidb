@@ -23,6 +23,8 @@ func Split(dialect, text string) []Stmt {
 		return splitLines(text)
 	}
 	var out []Stmt
+	r := rulesFor(dialect)
+	pg := r.pg
 	start, i, n := 0, 0, len(text)
 	term := ";" // MySQL scripts switch it with DELIMITER so routine bodies can contain ';'
 	flush := func(end int) {
@@ -45,7 +47,8 @@ func Split(dialect, text string) []Stmt {
 				i++
 			}
 		case dialect != "mongo" && c == '-' && i+1 < n && text[i+1] == '-' && (dialect != "mysql" || i+2 >= n || text[i+2] == ' ' || text[i+2] == '\t' || text[i+2] == '\n' || text[i+2] == '\r'),
-			c == '#' && (dialect == "mysql" || dialect == "clickhouse"):
+			c == '#' && (dialect == "mysql" || dialect == "clickhouse"),
+			r.slashes && c == '/' && i+1 < n && text[i+1] == '/':
 			for i < n && text[i] != '\n' {
 				i++
 			}
@@ -54,7 +57,7 @@ func Split(dialect, text string) []Stmt {
 			i += 2
 			for i < n && depth > 0 {
 				switch {
-				case dialect == "postgres" && text[i] == '/' && i+1 < n && text[i+1] == '*':
+				case pg && text[i] == '/' && i+1 < n && text[i+1] == '*':
 					depth++
 					i += 2
 				case text[i] == '*' && i+1 < n && text[i+1] == '/':
@@ -65,16 +68,22 @@ func Split(dialect, text string) []Stmt {
 				}
 			}
 		case c == '\'' || c == '"' || c == '`':
-			backslash := dialect != "postgres" || dialect == "clickhouse"
-			if dialect == "postgres" && c == '\'' && i > 0 && (text[i-1] == 'E' || text[i-1] == 'e') && (i < 2 || !isWord(text[i-2])) {
+			backslash := r.backslash
+			if pg && c == '\'' && i > 0 && (text[i-1] == 'E' || text[i-1] == 'e') && (i < 2 || !isWord(text[i-2])) {
 				backslash = true // E'...' strings treat backslash as an escape
 			}
 			i = skipQuoted(text, i, backslash)
-		case dialect == "postgres" && (isWord(c) || c > 127):
+		case c == '[' && r.bracket: // SQLite [identifier]
+			if j := strings.IndexByte(text[i:], ']'); j >= 0 {
+				i += j + 1
+			} else {
+				i = n
+			}
+		case pg && (isWord(c) || c > 127):
 			for i < n && (isWord(text[i]) || text[i] > 127 || text[i] == '$') { // a$$b$$ is one identifier, not a dollar quote
 				i++
 			}
-		case c == '$' && dialect == "postgres":
+		case c == '$' && r.dollar:
 			if tag := dollarTag(text, i); tag != "" {
 				if j := strings.Index(text[i+len(tag):], tag); j >= 0 {
 					i += len(tag) + j + len(tag)

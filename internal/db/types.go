@@ -34,10 +34,11 @@ type Capabilities struct {
 	Transactions   bool // Apply() is atomic
 	ProcessList    bool
 	Users          bool
-	Document       bool   // grid also offers Json/Tree views (MongoDB, Redis)
-	Editor         string // "sql" | "redis" | "mongo"
-	Dialect        string // "postgres" | "mysql" | "clickhouse" | "redis" | "mongo"
-	DatabaseNoun   string // "database" (SQL, Mongo) or "db index" (Redis)
+	Document       bool     // grid also offers Json/Tree views (MongoDB, Redis)
+	Editor         string   // "sql" | "redis" | "mongo"
+	Dialect        string   // "postgres" | "mysql" | "clickhouse" | "redis" | "mongo" | "sqlite" | "duckdb" | "cql" | "partiql"
+	DatabaseNoun   string   // "database" (SQL, Mongo) or "db index" (Redis)
+	Types          []string // column types offered by the structure editor / Set Value; empty = the PostgreSQL list
 }
 
 type Kind string

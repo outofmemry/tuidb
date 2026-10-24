@@ -268,7 +268,8 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 	if c.Port != 0 {
 		port = strconv.Itoa(c.Port)
 	}
-	showSSH := func(v map[string]string) bool { return v["ssh"] == "true" }
+	server := func(v map[string]string) bool { return !config.FileBased(v["driver"]) } // file engines: only Database (the path)
+	showSSH := func(v map[string]string) bool { return server(v) && v["ssh"] == "true" }
 	showSSL := func(v map[string]string) bool { return v["ssl_mode"] != "" && v["ssl_mode"] != "disable" }
 	title := "New connection"
 	if idx >= 0 {
@@ -278,11 +279,11 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		{Kind: fHeading, Value: "Server"},
 		{Key: "name", Label: "Name", Kind: fText, Value: c.Name},
 		{Key: "driver", Label: "Driver", Kind: fChoice, Value: c.Driver, Options: config.Drivers},
-		{Key: "host", Label: "Host", Kind: fText, Value: orDefault(c.Host, "127.0.0.1")},
-		{Key: "port", Label: "Port", Kind: fText, Value: port},
-		{Key: "user", Label: "User", Kind: fText, Value: c.User},
-		{Key: "password", Label: "Password", Kind: fSecret, Value: c.Password},
-		{Key: "password_cmd", Label: "Password cmd", Kind: fText, Value: c.PasswordCmd},
+		{Key: "host", Label: "Host", Kind: fText, Value: orDefault(c.Host, "127.0.0.1"), Show: server},
+		{Key: "port", Label: "Port", Kind: fText, Value: port, Show: server},
+		{Key: "user", Label: "User", Kind: fText, Value: c.User, Show: server},
+		{Key: "password", Label: "Password", Kind: fSecret, Value: c.Password, Show: server},
+		{Key: "password_cmd", Label: "Password cmd", Kind: fText, Value: c.PasswordCmd, Show: server},
 		{Key: "database", Label: "Database", Kind: fText, Value: c.Database},
 		{Kind: fHeading, Value: "Workspace"},
 		{Key: "tag", Label: "Tag", Kind: fChoice, Value: c.Tag, Options: tags},
@@ -294,13 +295,15 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		{Key: "ssl_ca", Label: "  CA cert", Kind: fText, Value: c.SSLCA, Show: showSSL},
 		{Key: "ssl_cert", Label: "  Client cert", Kind: fText, Value: c.SSLCert, Show: showSSL},
 		{Key: "ssl_key", Label: "  Client key", Kind: fText, Value: c.SSLKey, Show: showSSL},
-		{Key: "ssh", Label: "Over SSH", Kind: fBool, Value: sshOn},
+		{Key: "ssh", Label: "Over SSH", Kind: fBool, Value: sshOn, Show: server},
 		{Key: "ssh_host", Label: "  SSH host", Kind: fText, Value: ssh.Host, Show: showSSH},
 		{Key: "ssh_port", Label: "  SSH port", Kind: fText, Value: strconv.Itoa(orInt(ssh.Port, 22)), Show: showSSH},
 		{Key: "ssh_user", Label: "  SSH user", Kind: fText, Value: ssh.User, Show: showSSH},
 		{Key: "ssh_key", Label: "  SSH key file", Kind: fText, Value: ssh.Key, Show: showSSH},
 		{Key: "ssh_password", Label: "  SSH password", Kind: fSecret, Value: ssh.Password, Show: showSSH},
 		{Kind: fHeading, Value: "After connecting"},
+		{Key: "options", Label: "Options", Kind: fText, Value: optionsText(c.Options)},
+		{Key: "options_note", Label: "", Kind: fLabel, Value: "driver extras as key=value, separated by ' ;; ' (D1: account via host; DynamoDB: region=..., Cassandra: keyspace=...)"},
 		{Key: "bootstrap", Label: "Bootstrap SQL", Kind: fText, Value: strings.Join(c.Bootstrap, " ;; ")},
 		{Key: "note", Label: "", Kind: fLabel, Value: "statements run on every new connection, separated by ' ;; '"},
 	}, func(v map[string]string) tea.Cmd { return w.save(v, idx) })
@@ -334,7 +337,7 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 			if fl.Key == "port" {
 				old := fl.edit.Value()
 				if old == "" || old == strconv.Itoa(config.DefaultPort(c.Driver)) || isDefaultPort(old) {
-					fl.edit.Set(strconv.Itoa(config.DefaultPort(v["driver"])))
+					fl.edit.Set(portText(config.DefaultPort(v["driver"])))
 				}
 			}
 		}
@@ -421,11 +424,39 @@ func (w *welcome) build(v map[string]string, idx int) (config.Connection, error)
 			return c, fmt.Errorf("a connection named %q already exists", c.Name)
 		}
 	}
-	// keep driver-specific options (authSource...) that the form does not expose
-	if idx >= 0 {
-		c.Options = w.a.d.Conns[idx].Options
+	for _, o := range strings.Split(v["options"], ";;") {
+		if k, val, ok := strings.Cut(o, "="); ok && strings.TrimSpace(k) != "" {
+			if c.Options == nil {
+				c.Options = map[string]string{}
+			}
+			c.Options[strings.TrimSpace(k)] = strings.TrimSpace(val)
+		}
+	}
+	if config.FileBased(c.Driver) { // hidden fields must not carry stale values from another driver
+		c.Host, c.Port, c.User, c.Password, c.PasswordCmd, c.SSH = "", 0, "", "", "", nil
 	}
 	return c, nil
+}
+
+// optionsText renders Options as "k=v ;; k=v" in key order.
+func optionsText(o map[string]string) string {
+	keys := make([]string, 0, len(o))
+	for k := range o {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + o[k]
+	}
+	return strings.Join(parts, " ;; ")
+}
+
+func portText(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 func (w *welcome) save(v map[string]string, idx int) tea.Cmd {

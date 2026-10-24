@@ -26,11 +26,22 @@ const (
 	ClickHouse = "clickhouse"
 	Redis      = "redis"
 	Mongo      = "mongodb"
+	MariaDB    = "mariadb"
+	Cockroach  = "cockroachdb"
+	SQLite     = "sqlite"
+	DuckDB     = "duckdb"
+	Cassandra  = "cassandra"
+	DynamoDB   = "dynamodb"
+	D1         = "d1" // Cloudflare D1 over the REST API: Host = account id, Password = API token, Database = database name or id
 )
 
-var Drivers = []string{Postgres, MySQL, ClickHouse, Redis, Mongo}
+var Drivers = []string{Postgres, MySQL, MariaDB, Cockroach, SQLite, DuckDB, ClickHouse, Cassandra, DynamoDB, D1, Redis, Mongo}
 
-var defaultPorts = map[string]int{Postgres: 5432, MySQL: 3306, ClickHouse: 9000, Redis: 6379, Mongo: 27017}
+// 0 means "no port": file engines, D1 (https) and DynamoDB (AWS endpoint unless host is set).
+var defaultPorts = map[string]int{Postgres: 5432, MySQL: 3306, MariaDB: 3306, Cockroach: 26257, ClickHouse: 9000, Cassandra: 9042, Redis: 6379, Mongo: 27017}
+
+// FileBased engines open a local file named by Connection.Database; they have no host, login or SSH tunnel.
+func FileBased(driver string) bool { return driver == SQLite || driver == DuckDB }
 
 func DefaultPort(driver string) int { return defaultPorts[driver] }
 
@@ -237,8 +248,10 @@ func WriteFileAtomic(path string, data []byte) error {
 }
 
 var urlSchemes = map[string]string{
-	"postgres": Postgres, "postgresql": Postgres, "mysql": MySQL, "mariadb": MySQL,
-	"clickhouse": ClickHouse, "redis": Redis, "rediss": Redis, "mongodb": Mongo,
+	"postgres": Postgres, "postgresql": Postgres, "mysql": MySQL, "mariadb": MariaDB,
+	"cockroachdb": Cockroach, "cockroach": Cockroach, "sqlite": SQLite, "sqlite3": SQLite, "duckdb": DuckDB,
+	"clickhouse": ClickHouse, "cassandra": Cassandra, "dynamodb": DynamoDB, "d1": D1,
+	"redis": Redis, "rediss": Redis, "mongodb": Mongo,
 }
 
 // SSLModes are the values of Connection.SSLMode.
@@ -253,7 +266,7 @@ func sslFromQuery(driver string, q url.Values) (string, []string) {
 		return strings.ToLower(v), []string{"sslmode"}
 	}
 	switch driver {
-	case MySQL:
+	case MySQL, MariaDB:
 		if v := q.Get("ssl-mode"); v != "" {
 			return map[string]string{"DISABLED": "disable", "PREFERRED": "prefer", "REQUIRED": "require", "VERIFY_CA": "verify-ca", "VERIFY_IDENTITY": "verify-identity"}[strings.ToUpper(v)], []string{"ssl-mode"}
 		}
@@ -298,6 +311,9 @@ func ParseURL(raw string) (Connection, error) {
 		return Connection{}, fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
 	c := Connection{Driver: driver, Host: u.Hostname(), Database: strings.TrimPrefix(u.Path, "/")}
+	if FileBased(driver) { // sqlite:///abs/x.db and sqlite://rel/x.db: the whole thing after // is the path
+		c.Host, c.Database = "", u.Host+u.Path
+	}
 	if p := u.Port(); p != "" {
 		if c.Port, err = strconv.Atoi(p); err != nil {
 			return c, fmt.Errorf("bad port %q", p)
@@ -345,7 +361,9 @@ func ParseURL(raw string) (Connection, error) {
 	}
 	if c.Name == "" {
 		c.Name = c.Host
-		if c.Database != "" {
+		if FileBased(driver) {
+			c.Name = filepath.Base(c.Database)
+		} else if c.Database != "" {
 			c.Name += "/" + c.Database
 		}
 		if c.Name == "" {
@@ -386,6 +404,9 @@ func (c Connection) FormatURL() string {
 		q.Set("statusColor", strings.TrimPrefix(c.Color, "#"))
 	}
 	u.RawQuery = q.Encode()
+	if FileBased(c.Driver) { // no host: the path follows // as typed
+		return scheme + "://" + c.Database + "?" + u.RawQuery
+	}
 	return u.String()
 }
 

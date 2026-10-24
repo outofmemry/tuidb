@@ -39,6 +39,8 @@ var darkPalette = map[string]string{
 	"status_bg": "#292e42", "status_fg": "#c0caf5", "prefix_bg": "#e0af68", "prefix_fg": "#1a1b26", "popup_bg": "#24283b",
 	"tag.local": "#9ece6a", "tag.testing": "#7dcfff", "tag.development": "#7aa2f7", "tag.staging": "#e0af68", "tag.production": "#f7768e",
 	"driver.postgres": "#7aa2f7", "driver.mysql": "#e0af68", "driver.clickhouse": "#f7c948", "driver.redis": "#f7768e", "driver.mongodb": "#9ece6a",
+	"driver.mariadb": "#c49a6c", "driver.cockroachdb": "#bb9af7", "driver.sqlite": "#7dcfff", "driver.duckdb": "#ffd43b",
+	"driver.cassandra": "#73daca", "driver.dynamodb": "#ff9e64", "driver.d1": "#ff966c",
 }
 
 var lightPalette = map[string]string{
@@ -49,6 +51,8 @@ var lightPalette = map[string]string{
 	"status_bg": "#dfe3f0", "status_fg": "#2c3250", "prefix_bg": "#a8680a", "prefix_fg": "#ffffff", "popup_bg": "#eceff8",
 	"tag.local": "#3a7d0a", "tag.testing": "#007c91", "tag.development": "#2e5cb8", "tag.staging": "#a8680a", "tag.production": "#c4264a",
 	"driver.postgres": "#2e5cb8", "driver.mysql": "#a8680a", "driver.clickhouse": "#8a6d00", "driver.redis": "#c4264a", "driver.mongodb": "#3a7d0a",
+	"driver.mariadb": "#7a5a2e", "driver.cockroachdb": "#7b3fc4", "driver.sqlite": "#007c91", "driver.duckdb": "#8a6d00",
+	"driver.cassandra": "#1a7a66", "driver.dynamodb": "#b25000", "driver.d1": "#b24a1a",
 }
 
 func NewTheme(t config.Theme) Theme {

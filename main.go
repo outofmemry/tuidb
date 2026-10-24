@@ -1,4 +1,4 @@
-// tuidb is a terminal TablePlus: connect to PostgreSQL, MySQL, ClickHouse, Redis and MongoDB,
+// tuidb is a terminal TablePlus: connect to PostgreSQL, MySQL, MariaDB, CockroachDB, SQLite, DuckDB, ClickHouse, Cassandra, DynamoDB, Cloudflare D1, Redis and MongoDB,
 // browse and edit data, and run queries, with tmux-style prefix key bindings.
 package main
 
@@ -17,11 +17,18 @@ import (
 	"tuidb/internal/store"
 	"tuidb/internal/ui"
 
+	_ "tuidb/internal/db/cassandra"
 	_ "tuidb/internal/db/clickhouse"
+	_ "tuidb/internal/db/cockroach"
+	_ "tuidb/internal/db/d1"
+	_ "tuidb/internal/db/duckdb"
+	_ "tuidb/internal/db/dynamodb"
+	_ "tuidb/internal/db/mariadb"
 	_ "tuidb/internal/db/mongo"
 	_ "tuidb/internal/db/mysql"
 	_ "tuidb/internal/db/postgres"
 	_ "tuidb/internal/db/redis"
+	_ "tuidb/internal/db/sqlite"
 )
 
 func main() {
@@ -35,7 +42,7 @@ func run() error {
 	cfgPath := flag.String("config", filepath.Join(config.ConfigDir(), "config.toml"), "path to config.toml")
 	keys := flag.Bool("keys", false, "print the key bindings (after config overrides) and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: tuidb [flags] [connection-name | URL]\n\n  URL: postgresql:// mysql:// clickhouse:// redis:// mongodb://\n\nflags:\n")
+		fmt.Fprintf(os.Stderr, "usage: tuidb [flags] [connection-name | URL]\n\n  URL: postgresql:// mysql:// mariadb:// cockroachdb:// sqlite:// duckdb:// clickhouse:// cassandra:// dynamodb:// d1:// redis:// mongodb://\n\nflags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()

@@ -22,7 +22,8 @@ type tok struct {
 func scan(dialect, s string) []tok {
 	var out []tok
 	n := len(s)
-	pg, my, js := dialect == "postgres", dialect == "mysql", dialect == "mongo"
+	r := rulesFor(dialect)
+	pg, my, js := r.pg, dialect == "mysql", dialect == "mongo"
 	execComment := 0 // inside /*! ... */: the text is code, only the delimiters are skipped
 	for i := 0; i < n; {
 		c := s[i]
@@ -33,11 +34,15 @@ func scan(dialect, s string) []tok {
 			for i < n && s[i] != '\n' {
 				i++
 			}
+		case r.slashes && c == '/' && i+1 < n && s[i+1] == '/': // CQL
+			for i < n && s[i] != '\n' {
+				i++
+			}
 		case !js && c == '-' && i+1 < n && s[i+1] == '-' && (!my || i+2 >= n || s[i+2] == ' ' || s[i+2] == '\t' || s[i+2] == '\n' || s[i+2] == '\r'):
 			for i < n && s[i] != '\n' {
 				i++
 			}
-		case c == '#' && !pg && !js:
+		case c == '#' && r.hash:
 			for i < n && s[i] != '\n' {
 				i++
 			}
@@ -68,7 +73,7 @@ func scan(dialect, s string) []tok {
 			execComment--
 			i += 2
 		case c == '\'' || c == '"' || c == '`':
-			backslash := !pg
+			backslash := r.backslash
 			if pg && c == '\'' && i > 0 && (s[i-1] == 'E' || s[i-1] == 'e') && (i < 2 || !isWord(s[i-2])) {
 				backslash = true // E'...' strings
 			}
@@ -77,7 +82,14 @@ func scan(dialect, s string) []tok {
 			}
 			i = skipQuoted(s, i, backslash)
 			out = append(out, tok{s: string(c)})
-		case c == '$' && pg:
+		case c == '[' && r.bracket: // SQLite [identifier]: no escapes, ends at the first ]
+			if j := strings.IndexByte(s[i:], ']'); j >= 0 {
+				i += j + 1
+			} else {
+				i = n
+			}
+			out = append(out, tok{s: "\""})
+		case c == '$' && r.dollar:
 			if tag := dollarTag(s, i); tag != "" {
 				if j := strings.Index(s[i+len(tag):], tag); j >= 0 {
 					i += len(tag) + j + len(tag)
@@ -219,6 +231,9 @@ func mongoReadOnly(stmt string) bool {
 // function still counts as read-only. When in doubt it answers false (the user is asked once more).
 // shortcut: no real parser; replace with one if Safe Mode 2 bypasses show up in practice.
 func IsReadOnly(dialect, stmt string) bool {
+	if f, ok := readOnlyExtra[dialect]; ok {
+		return f(stmt)
+	}
 	switch dialect {
 	case "redis":
 		f := strings.Fields(strings.TrimSpace(stmt))
@@ -271,3 +286,32 @@ func hasAny(toks []string, words ...string) bool {
 
 // hasCode reports whether text has anything besides whitespace and comments (used by Split).
 func hasCode(dialect, text string) bool { return len(scan(dialect, text)) > 0 }
+
+// readOnlyExtra lets a driver's own file replace the classifier for its dialect (register from init()).
+var readOnlyExtra = map[string]func(stmt string) bool{}
+
+// lexRules are the lexical facts about a dialect that Split and scan must agree with the server on:
+// a classifier that thinks a string or comment is open when the server has closed it can be talked
+// into hiding a write, so every dialect states each flag explicitly.
+type lexRules struct {
+	pg        bool // nested /* */, E'..' strings, identifiers may contain $
+	dollar    bool // $tag$..$tag$ quoted strings
+	backslash bool // \ escapes inside '..' "..": MySQL, ClickHouse, Mongo shell
+	hash      bool // # starts a line comment
+	slashes   bool // // starts a line comment (CQL)
+	bracket   bool // [ident] quoting (SQLite)
+}
+
+func rulesFor(dialect string) lexRules {
+	switch dialect {
+	case "postgres", "duckdb": // DuckDB parses with libpg_query: same comments, E'' and $$ rules
+		return lexRules{pg: true, dollar: true}
+	case "sqlite":
+		return lexRules{bracket: true}
+	case "cql":
+		return lexRules{dollar: true, slashes: true}
+	case "partiql":
+		return lexRules{}
+	}
+	return lexRules{backslash: true, hash: dialect != "mongo"} // mysql, clickhouse, redis, mongo, unknown: the cautious superset
+}
