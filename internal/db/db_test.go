@@ -245,6 +245,18 @@ func TestIsReadOnlyAdversarial(t *testing.T) {
 		{"mysql", `SELECT 1 --1 INTO @x`, false}, // --1 is arithmetic in MySQL, so INTO is real code
 		{"mysql", "SELECT 1 # INTO @x", true},
 		{"mysql", `SELECT 'it\'s INTO' AS x`, true},
+		// MariaDB: reading a sequence's next value changes it
+		{"mysql", `SELECT NEXTVAL(s)`, false},
+		{"mysql", "select nextval(`s`), 1", false},
+		{"mysql", `SELECT NEXT VALUE FOR s`, false},
+		{"mysql", `SELECT SETVAL(s, 100)`, false},
+		{"mysql", `WITH x AS (SELECT 1) SELECT NEXTVAL(s) FROM x`, false},
+		{"mysql", `SELECT LASTVAL(s)`, true},
+		{"mysql", `SELECT 'NEXTVAL(s)' AS x /* NEXTVAL */ -- NEXTVAL`, true},
+		{"mysql", `SELECT 1 /*M!100100 INTO @tuidb_x */`, false}, // MariaDB executable comment
+		{"mysql", `SET STATEMENT max_statement_time=1 FOR DELETE FROM t`, false},
+		{"mysql", `ANALYZE DELETE FROM t`, false},
+		{"mysql", `DELETE FROM t RETURNING id`, false},
 		// ClickHouse: replace() is a function
 		{"clickhouse", `WITH 1 AS x SELECT replace('abc','a','b')`, true},
 		{"clickhouse", `WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x`, false},

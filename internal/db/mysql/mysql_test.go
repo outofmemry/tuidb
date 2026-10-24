@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"context"
 	"crypto/tls"
 	"database/sql"
 	"reflect"
@@ -343,8 +344,49 @@ func TestHasIndexExpr(t *testing.T) {
 	}
 }
 
+func TestMariaDBSequencesAndVersionedTables(t *testing.T) {
+	s := &session{maria: true, info: "MariaDB 11.4.2"}
+	seq := db.ObjRef{Name: "s1", Kind: db.KindSequence}
+	if got, _ := s.Script(context.Background(), db.ScriptDrop, seq); got != "DROP SEQUENCE `s1`;" {
+		t.Errorf("drop script: %q", got)
+	}
+	if st, err := s.PlanAdmin(db.OpDropObject, seq, nil); err != nil || st[0].Text != "DROP SEQUENCE `s1`" {
+		t.Errorf("drop: %v %v", st, err)
+	}
+	if st, err := s.PlanAdmin(db.OpRenameObject, seq, map[string]string{"new_name": "s2"}); err != nil || st[0].Text != "RENAME TABLE `s1` TO `s2`" {
+		t.Errorf("rename: %v %v", st, err)
+	}
+	if _, err := s.PlanAdmin(db.OpRenameObject, db.ObjRef{Name: "f", Kind: db.KindFunction}, map[string]string{"new_name": "g"}); err == nil || !strings.Contains(err.Error(), "MariaDB") {
+		t.Errorf("rename function: %v", err)
+	}
+
+	tbl := db.ObjRef{Name: "v", Kind: db.KindTable}
+	if st, _ := s.PlanAdmin(db.OpTruncate, tbl, nil); len(st) != 1 || st[0].Text != "TRUNCATE TABLE `v`" {
+		t.Errorf("plain truncate: %v", st)
+	}
+	s.noteVersioned("", "v", true)
+	if st, _ := s.PlanAdmin(db.OpTruncate, tbl, nil); len(st) != 2 || st[0].Text != "DELETE FROM `v`" || st[1].Text != "DELETE HISTORY FROM `v`" {
+		t.Errorf("versioned truncate: %v", st)
+	}
+	old := &db.TableDef{Name: "v", Columns: []db.Column{{Name: "a", OrigName: "a", Type: "int", Nullable: true}}}
+	next := &db.TableDef{Name: "v", Columns: []db.Column{{Name: "a", OrigName: "a", Type: "bigint", Nullable: true}}}
+	st, err := s.PlanTable(old, next)
+	if err != nil || len(st) != 1 || !strings.HasPrefix(st[0].Text, "SET STATEMENT system_versioning_alter_history=KEEP FOR ALTER TABLE `v`") {
+		t.Errorf("versioned alter: %v %v", st, err)
+	}
+	if st, _ := s.PlanTable(nil, next); strings.Contains(st[0].Text, "SET STATEMENT") {
+		t.Errorf("create must not be wrapped: %v", st)
+	}
+	old.Name, next.Name = "other", "other"
+	if st, _ := s.PlanTable(old, next); strings.Contains(st[0].Text, "SET STATEMENT") {
+		t.Errorf("plain table alter must not be wrapped: %v", st)
+	}
+}
+
 func TestIsDDL(t *testing.T) {
 	for text, want := range map[string]bool{"ALTER TABLE `t` DROP FOREIGN KEY `f`": true, "\n  create table x (a int)": true, "rename table a to b": true, "TRUNCATE TABLE t": true,
+		"SET STATEMENT system_versioning_alter_history=KEEP FOR ALTER TABLE t ADD COLUMN a INT": true, "set statement a=1 for update t set a=2": false,
+		"SET STATEMENT a=1": false, "SET @a = 1": false,
 		"INSERT INTO t VALUES (1)": false, "UPDATE t SET a = 1": false, "": false} {
 		if got := isDDL(text); got != want {
 			t.Errorf("%q: %v", text, got)
