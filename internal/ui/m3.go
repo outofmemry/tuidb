@@ -619,8 +619,13 @@ var clusterColors = []string{"39", "208", "41", "170", "220", "203"}
 
 var headerRe = regexp.MustCompile(`\| [^|]+ +\|`)
 
-// colorHeaders tints each table's header row (the line after a box's top rule) by its FK cluster.
-func colorHeaders(text string, byName map[string]int) []string {
+// colorHeaders tints each table's header row (the line after a box's top rule) by its FK cluster, or by the
+// colour override (ANSI code per table name) when there is one.
+func colorHeaders(text string, byName map[string]int, override ...map[string]string) []string {
+	var ov map[string]string
+	if len(override) > 0 {
+		ov = override[0]
+	}
 	lines := strings.Split(text, "\n")
 	start, hdr := true, -1
 	for i, l := range lines {
