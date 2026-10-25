@@ -179,7 +179,7 @@ func (t *tableTab) buildStructure(m structureLoadedMsg) {
 	for i, c := range m.cols {
 		sg.Rows[i].Meta = colMeta{orig: c.Name}
 	}
-	types := typeChoices(t.ws.caps)
+	types := t.ws.dataTypes()
 	sg.NewRow = func() []any {
 		return []any{int64(len(sg.Rows) + 1), "new_column", types[0], "YES", nil, "NO", "", nil}
 	}
@@ -462,11 +462,11 @@ func railView(th Theme, g *Grid, W, H int, pk func(r *gridRow) bool) string {
 				state, key := " ", " "
 				switch {
 				case r.State == rowNew:
-					state = th.OK.Render("+")
+					state = th.New.Render("+") // new_row / deleted_row / modified_row colour the marks, as in the data grid
 				case r.State == rowDeleted:
-					state = th.Err.Render("✗")
+					state = th.Deleted.Strikethrough(false).Render("✗")
 				case len(r.Dirty) > 0:
-					state = th.Warn.Render("●")
+					state = th.Modified.Render("●")
 				}
 				if pk != nil && pk(r) {
 					key = th.Warn.Render("⚷")
