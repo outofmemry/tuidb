@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -223,5 +224,82 @@ func TestQueriesSaveRefusesNameCollision(t *testing.T) {
 	}
 	if _, err := s.Save("", "a b", nil, "select 3"); err != nil {
 		t.Errorf("re-saving the same query overwrites: %v", err)
+	}
+}
+
+func TestQueriesRejectInjectionAndRootDelete(t *testing.T) {
+	s := &Queries{Root: filepath.Join(t.TempDir(), "q")}
+	if _, err := s.Save("", "a\nDROP TABLE t;", nil, "select 1"); err == nil {
+		t.Error("a name with a line break must be refused")
+	}
+	if _, err := s.Save("", "ok", []string{"x\ny"}, "select 1"); err == nil {
+		t.Error("keywords with a line break must be refused")
+	}
+	s.Save("", "keep", nil, "select 1")
+	for _, p := range []string{"", ".", "a/.."} {
+		if err := s.Delete(p); err == nil {
+			t.Errorf("Delete(%q) must not remove the root", p)
+		}
+	}
+	if got, _ := s.List(); len(got) != 1 {
+		t.Errorf("queries lost: %v", got)
+	}
+}
+
+func TestQueriesSaveIfAbsent(t *testing.T) {
+	s := &Queries{Root: t.TempDir()}
+	if _, err := s.SaveIfAbsent("", "daily", nil, "select 1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveIfAbsent("", "daily", nil, "select 2"); !errors.Is(err, ErrExists) {
+		t.Errorf("want ErrExists, got %v", err)
+	}
+	if q, _ := s.Read("daily.sql"); !strings.Contains(q.SQL, "select 1") {
+		t.Errorf("the file must be untouched: %q", q.SQL)
+	}
+}
+
+func TestStateM678(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.json")
+	s, _ := LoadState(p)
+	s.SetBackupOptions("c", map[string]string{"gzip": "1"})
+	s.AddRecentFile("a", 2)
+	s.AddRecentFile("b", 2)
+	s.AddRecentFile("a", 2)
+	s.AddRecentFile("c", 2)
+	s.SetConnectionSort("tag")
+	s.SetGroups("c", []ItemGroup{{"G", []string{"public.t"}}})
+	s, _ = LoadState(p)
+	if s.BackupOptions("c")["gzip"] != "1" || strings.Join(s.RecentFiles(), ",") != "c,a" || s.ConnectionSort() != "tag" || s.Groups("c")[0].Items[0] != "public.t" {
+		t.Fatalf("%v %v %v %v", s.BackupOptions("c"), s.RecentFiles(), s.ConnectionSort(), s.Groups("c"))
+	}
+	s.AddRecentFile("x", 0)
+	if len(s.RecentFiles()) != 0 {
+		t.Fatal("max 0 should forget")
+	}
+}
+
+func TestHistoryFileNamesAreDistinct(t *testing.T) {
+	h := &History{Dir: t.TempDir()}
+	if h.path("a b") == h.path("a_b") || h.path("c") != filepath.Join(h.Dir, "c.jsonl") {
+		t.Fatalf("%s %s", h.path("a b"), h.path("a_b"))
+	}
+	os.WriteFile(filepath.Join(h.Dir, "a_b.jsonl"), []byte("x\n"), 0o600) // a file from before the encoding is adopted at startup, not by path()
+	if _, err := os.Stat(h.path("a b")); err == nil {
+		t.Error("path() must be pure")
+	}
+	h.MigrateLegacy([]string{"a b"})
+	if _, err := os.Stat(h.path("a b")); err != nil {
+		t.Error("legacy file not adopted")
+	}
+}
+
+func TestSharedQueryReadNeedsSQLSuffix(t *testing.T) {
+	shared := t.TempDir()
+	os.WriteFile(filepath.Join(shared, ".env"), []byte("SECRET=1"), 0o600)
+	s := &Queries{Root: t.TempDir()}
+	s.AddDir(shared)
+	if _, err := s.Read(filepath.Join(shared, ".env")); err == nil {
+		t.Fatal("a non-.sql file under a shared dir was read")
 	}
 }
