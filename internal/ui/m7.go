@@ -374,24 +374,36 @@ func (w *Workspace) backupAction(restore bool) tea.Cmd {
 		if cur == nil {
 			cur = map[string]string{}
 		}
-		for _, k := range []string{"file", "gzip", "format", "data", "schema"} {
+		for _, k := range []string{"file", "pattern", "extra", "gzip", "format", "data", "schema"} {
 			cur[pre+k] = v[k]
+		}
+		if !restore && strings.TrimSpace(v["file"]) == w.backupDefaultFile(dbName, false) {
+			cur[pre+"file"] = "" // the default is a dated pattern expanded for today: remember the pattern, not the file
 		}
 		w.a.d.State.SetBackupOptions(w.conn.Name, cur)
 		conn := w.conn
 		conn.Password = w.o.Password
 		newDB := strings.TrimSpace(v["newdb"])
 		o := backup.Options{Conn: conn, Database: dbName, File: strings.TrimSpace(v["file"]), Gzip: v["gzip"] == "true", Format: v["format"],
-			DataOnly: v["data"] == "true", SchemaOnly: v["schema"] == "true", NewDatabase: newDB}
+			DataOnly: v["data"] == "true", SchemaOnly: v["schema"] == "true", NewDatabase: newDB,
+			Extra: strings.Fields(v["extra"]), Filename: strings.TrimSpace(v["pattern"]), Tag: conn.Tag}
+		if restore {
+			o.Filename = ""
+		}
 		cmd, err := backup.Plan(o, restore)
 		if err != nil {
 			return w.a.fail(err)
 		}
 		shown := backup.Display(cmd)
 		var onFail func() tea.Cmd
-		run := func() tea.Cmd { return w.runBackup(cmd, verb, filepath.Base(o.File), onFail) }
-		yes := run
-		if restore { // a restore overwrites data: same gate as DROP, with the command line as the statement
+		run := func() tea.Cmd {
+			out := backup.OutputPath(o) // the file actually written, after the name pattern is expanded
+			w.jobFile = out
+			return w.runBackup(cmd, verb, filepath.Base(out), out, restore, onFail)
+		}
+		yes := func() tea.Cmd { return w.a.ifFree(run, backup.OutputPath(o)) } // a backup never replaces an older dump silently
+		if restore {
+			// a restore overwrites data: same gate as DROP, with the command line as the statement
 			yes = func() tea.Cmd { return w.gate([]db.Statement{{Text: shown}}, run) }
 		}
 		lines := []string{shown}
