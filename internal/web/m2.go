@@ -631,10 +631,15 @@ func (s *Server) importStart(ss *session, r *http.Request) (any, error) {
 // ---- search in database --------------------------------------------------------------------
 
 func (s *Server) searchStart(ss *session, r *http.Request) (any, error) {
-	var req db.SearchOptions
-	if err := decode(r, &req); err != nil {
+	var in struct {
+		db.SearchOptions
+		AllSchemasSnake bool `json:"all_schemas"`
+	}
+	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
+	req := in.SearchOptions
+	req.AllSchemas = req.AllSchemas || in.AllSchemasSnake
 	switch req.Op {
 	case "Contains", "Not contains", "=", "Has prefix", "Has suffix":
 	default:
