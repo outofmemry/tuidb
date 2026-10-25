@@ -340,6 +340,12 @@ func (v *boardView) activate() tea.Cmd {
 			return v.w.a.say("the import panel %q names no table", p.Title)
 		}
 		return v.w.importWizard(ref, true)
+	case "input":
+		return v.activateInput(p)
+	case "dropdown":
+		return v.activateDropdown(p)
+	case "exporter":
+		return v.activateExporter(p)
 	case "button":
 		target, ok := v.panel(p.Target)
 		if !ok {
@@ -371,7 +377,7 @@ func (v *boardView) runPanels(ps []board.Panel) tea.Cmd {
 		seen := map[string]bool{}
 		var out []board.PanelResult
 		for _, p := range ps {
-			if seen[p.Title] || p.Kind == "button" || p.Kind == "import" {
+			if seen[p.Title] || interactivePanel(p.Kind) {
 				continue
 			}
 			seen[p.Title] = true
