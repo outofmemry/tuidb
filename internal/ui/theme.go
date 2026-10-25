@@ -60,6 +60,8 @@ var lightPalette = map[string]string{
 	"modified_row": "#fff3c4", "new_row": "#d8f2e0", "deleted_row": "#f9d6dd", "alt_row": "#f1f3fa",
 	"keyword": "#7b3fc4", "string": "#3a7d0a", "comment": "#8a8fa8", "number": "#b25000",
 	"status_bg": "#dfe3f0", "status_fg": "#2c3250", "prefix_bg": "#a8680a", "prefix_fg": "#ffffff", "popup_bg": "#eceff8",
+	"editor_bg": "#fafbff", "window_bg": "#fafbff", "sidebar_bg": "#f1f3fa", "tabs_bg": "#dfe3f0", "tab_active_bg": "#2e5cb8",
+	"notification_bg": "#dfe3f0", "grid_line": "#b8bdd1", "cell_selection": "#2e5cb8",
 	"tag.local": "#3a7d0a", "tag.testing": "#007c91", "tag.development": "#2e5cb8", "tag.staging": "#a8680a", "tag.production": "#c4264a",
 	"driver.postgres": "#2e5cb8", "driver.mysql": "#a8680a", "driver.clickhouse": "#8a6d00", "driver.redis": "#c4264a", "driver.mongodb": "#3a7d0a",
 	"driver.mariadb":   "#7a5a2e",
