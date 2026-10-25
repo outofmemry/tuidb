@@ -231,12 +231,13 @@ func (j *job) snapshot() map[string]any {
 	if hits == nil {
 		hits = []hitJSON{}
 	}
-	return map[string]any{"done": j.done, "error": j.err, "rows": j.rows, "batches": j.batches, "total": j.total, "checked": j.checked, "hits": hits, "lines": append([]string{}, j.lines...), "download": j.done && j.err == "" && j.file != ""}
+	return map[string]any{"done": j.done, "error": j.err, "rows": j.rows, "batches": j.batches, "total": j.total, "checked": j.checked, "hits": hits, "lines": append([]string{}, j.lines...), "paused": j.paused != nil && j.paused.Load(), "kind": j.kind, "title": j.title, "file": snapFile(j), "download": j.done && j.err == "" && j.file != ""}
 }
 
 const (
-	maxRunningJobs = 4 // per session
-	maxKeptExports = 3 // finished, not yet downloaded export files
+	maxRunningJobs = 4  // per session
+	maxKeptExports = 3  // finished, not yet downloaded export files
+	maxKeptJobs    = 30 // finished jobs without a file that the jobs centre can still show
 )
 
 // defaultJobDisk is the per-session byte budget for import spools and kept exports.
