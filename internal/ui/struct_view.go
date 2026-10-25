@@ -614,10 +614,20 @@ func (t *tableTab) structSetValue() tea.Cmd {
 		switch g.col {
 		case scType:
 			var items []pickItem
-			for _, ty := range typeChoices(t.ws.caps) {
+			for _, ty := range t.ws.dataTypes() {
 				items = append(items, pickItem{Label: strings.ReplaceAll(ty, `\ `, " "), Value: strings.ReplaceAll(ty, `\ `, " ")})
 			}
+			items = append(items, pickItem{Label: "Other…", Value: setValueExpr{}}) // free text stays possible
 			t.ws.a.push(&pickerDlg{title: "Data type", filter: true, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
+				if _, ok := it.Value.(setValueExpr); ok {
+					t.ws.a.push(newForm("Data type", []formField{{Key: "t", Label: "Type", Kind: fText, Hint: "e.g. varchar(64), numeric(12,4)"}}, func(m map[string]string) tea.Cmd {
+						if ty := strings.TrimSpace(m["t"]); ty != "" {
+							g.SetCell(ty)
+						}
+						return nil
+					}))
+					return nil
+				}
 				g.SetCell(it.Value.(string))
 				return nil
 			}})
