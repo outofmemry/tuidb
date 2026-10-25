@@ -1163,6 +1163,28 @@ func borderCol(th Theme, h int) string {
 // highlighted, dimmed while the sidebar has focus.
 func (w *Workspace) tabBar(th Theme, g, active int, focused bool) string {
 	var bar []string
+	for _, l := range w.tabLabels(g) {
+		switch {
+		case l.idx == active && focused:
+			bar = append(bar, th.TabActive.Render(l.text))
+		case l.idx == active:
+			bar = append(bar, th.TabActive.Faint(true).Render(l.text))
+		default:
+			bar = append(bar, th.TabIdle.Render(l.text))
+		}
+	}
+	return strings.Join(bar, " ")
+}
+
+// tabLabel is one entry of the tab bar: the tab's index in w.tabs and its text.
+type tabLabel struct {
+	idx  int
+	text string
+}
+
+// tabLabels are the labels of group g in bar order; the mouse maps a click on the bar back to a tab with them.
+func (w *Workspace) tabLabels(g int) []tabLabel {
+	var out []tabLabel
 	n := 0
 	for i, t := range w.tabs {
 		if w.pane(t) != g {
