@@ -58,7 +58,7 @@ type tableTab struct {
 	seq         int
 	loadedRows  int
 	paste       string // "rows" or "cells" while the clipboard read is pending
-	findText    string
+	find        FindSpec
 	cancels     []context.CancelFunc // stop every in-flight load: rows, count and columns
 	committing  bool                 // a commit was sent and its reload has not landed yet
 	closed      bool
@@ -95,7 +95,7 @@ type tableTab struct {
 func newTableTab(ws *Workspace, id int, ref db.ObjRef) *tableTab {
 	t := &tableTab{ws: ws, id: id, ref: ref, grid: &Grid{}, limit: ws.a.d.Cfg.General.RowLimit, hidden: map[string]bool{}}
 	t.grid.Editable = ref.Kind == db.KindTable
-	t.grid.NoStripes = !ws.a.d.Cfg.Table.AlternatingRows
+	t.grid.NoStripes, t.grid.DecodeSpatial = !ws.a.d.Cfg.Table.AlternatingRows, ws.a.d.Cfg.Table.DecodeSpatial
 	cfg := ws.a.d.Cfg.Table
 	if ts := ws.a.d.State.Table(t.stateKey()); ts.Sort != nil || len(ts.Filters.Filters) > 0 || len(ts.Hidden) > 0 {
 		t.sort, t.filters, t.showFilters = ts.Sort, ts.Filters, ts.ShowBar
