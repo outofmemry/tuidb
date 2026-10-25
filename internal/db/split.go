@@ -17,7 +17,7 @@ var labelRe = regexp.MustCompile(`(?im)^\s*(?:--|#)\s*(?:name|label|tab)\s*:\s*(
 
 // Split cuts text into statements for the given dialect name (postgres, mysql, clickhouse, redis, mongo).
 // ';' inside quotes, comments and (postgres) dollar quotes does not split. Redis splits on lines.
-// shortcut: no DELIMITER support for MySQL stored-program bodies, add if someone pastes mysqldump files.
+// MySQL scripts may switch the terminator with DELIMITER lines, which are dropped.
 func Split(dialect, text string) []Stmt {
 	if dialect == "redis" {
 		return splitLines(text)
