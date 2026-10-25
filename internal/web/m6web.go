@@ -45,7 +45,7 @@ func (s *Server) metaExtra() map[string]any {
 	return map[string]any{
 		"fileBased": fb, "tags": tags, "queriesDir": dir,
 		"mcp":        map[string]any{"enabled": c.MCP.Enabled, "listen": s.mcpAddr(), "tls": c.MCP.TLSCert != ""},
-		"export":     map[string]any{"filename": c.Export.Filename},
+		"export":     map[string]any{"filename": c.Export.Filename, "header": c.Export.Header},
 		"ai":         map[string]any{"provider": c.AI.Provider, "model": c.AI.Model, "providers": config.AIProviderNames(c.AI)},
 		"csvWarning": export.CheckCSV(c.CSV),
 	}
