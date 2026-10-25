@@ -295,7 +295,11 @@ func (s *Server) diagram(ss *session, r *http.Request) (any, error) {
 		}
 		out[i] = o
 	}
-	return map[string]any{"schema": schema, "tables": out}, nil
+	schemas, err := diagram.Schemas(ctx, ss.o.Sess)
+	if err != nil {
+		return nil, bad("%v", err)
+	}
+	return map[string]any{"schema": schema, "schemas": nonNil(schemas), "tables": out}, nil
 }
 
 // ---- metrics boards -------------------------------------------------------------------------------
@@ -418,7 +422,7 @@ func (s *Server) plugins(r *http.Request) (any, error) {
 		if p.Err != nil {
 			e = p.Err.Error()
 		}
-		out = append(out, map[string]any{"name": p.Name, "contexts": nonNil(p.Contexts), "output": p.Output, "error": e})
+		out = append(out, map[string]any{"name": p.Name, "contexts": nonNil(p.Contexts), "output": p.Output, "key": p.Key, "js": p.JS, "error": e})
 	}
 	return out, nil
 }
