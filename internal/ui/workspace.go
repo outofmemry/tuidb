@@ -1221,7 +1221,7 @@ func (w *Workspace) paneFrame(th Theme, t tabber, g, W, H int, focused, barLit b
 	} else {
 		body = w.emptyView(th, W-4, H-2)
 	}
-	return frame(th, title, hint, strings.Join(padLines(strings.Split(body, "\n"), W-4, H-2), "\n"), W, H, focused)
+	return w.frame(th, title, hint, strings.Join(padLines(strings.Split(body, "\n"), W-4, H-2), "\n"), W, H, focused)
 }
 
 // emptyView is shown in a workspace with no tabs: where you are and what to do next.
@@ -1268,6 +1268,11 @@ func (w *Workspace) detailView(th Theme, W, H int) string {
 	d, ok := w.tab().(detailer)
 	if !ok || len(d.Detail()) == 0 {
 		lines = append(lines, "", th.Dim.Render("  select a row"))
+	}
+	if i, has := w.tab().(interface{ DetailInfo() string }); has && ok {
+		if info := i.DetailInfo(); info != "" { // the current column's type · nullable · default · key
+			lines = append(lines, th.Dim.Render(" "+fit(info, max(1, W-2))), "")
+		}
 	}
 	if ok {
 		field := 0
