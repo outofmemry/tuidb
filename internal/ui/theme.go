@@ -45,6 +45,8 @@ var darkPalette = map[string]string{
 	"modified_row": "#3d3a1f", "new_row": "#1f3d2a", "deleted_row": "#4a2430", "alt_row": "#1f2335",
 	"keyword": "#bb9af7", "string": "#9ece6a", "comment": "#565f89", "number": "#ff9e64",
 	"status_bg": "#292e42", "status_fg": "#c0caf5", "prefix_bg": "#e0af68", "prefix_fg": "#1a1b26", "popup_bg": "#24283b",
+	"editor_bg": "#1a1b26", "window_bg": "#1a1b26", "sidebar_bg": "#16161e", "tabs_bg": "#292e42", "tab_active_bg": "#7aa2f7",
+	"notification_bg": "#292e42", "grid_line": "#3b4261", "cell_selection": "#7aa2f7",
 	"tag.local": "#9ece6a", "tag.testing": "#7dcfff", "tag.development": "#7aa2f7", "tag.staging": "#e0af68", "tag.production": "#f7768e",
 	"driver.postgres": "#7aa2f7", "driver.mysql": "#e0af68", "driver.clickhouse": "#f7c948", "driver.redis": "#f7768e", "driver.mongodb": "#9ece6a",
 	"driver.mariadb":   "#c49a6c",
