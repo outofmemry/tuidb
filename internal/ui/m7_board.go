@@ -206,24 +206,8 @@ func (w *Workspace) openBoard(b board.Board) tea.Cmd {
 		"tab":       step(1),
 		"shift+tab": step(-1),
 		"enter":     v.activate,
-		"e": func() tea.Cmd {
-			if len(b.Vars) == 0 {
-				return w.a.say("this board has no variables")
-			}
-			var fs []formField
-			for _, x := range b.Vars {
-				f := formField{Key: x.Name, Label: orDefault(x.Label, x.Name), Kind: fText, Value: v.vals[x.Name]}
-				if len(x.Options) > 0 {
-					f.Kind, f.Options = fChoice, x.Options
-				}
-				fs = append(fs, f)
-			}
-			w.a.push(newForm("Variables of "+b.Name, fs, func(m map[string]string) tea.Cmd {
-				v.vals = m
-				return v.run()
-			}))
-			return nil
-		},
+		"v":         v.variablesForm,
+		"e":         v.showErrors,
 	}
 	w.a.push(d)
 	return tea.Batch(v.run(), v.tick())
