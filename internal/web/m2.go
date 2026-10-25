@@ -8,10 +8,13 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"webtuidb/internal/crashlog"
 	"webtuidb/internal/db"
 	"webtuidb/internal/export"
 	"webtuidb/internal/importer"
@@ -43,7 +46,9 @@ type exportReq struct {
 	Job       bool    // table mode: run in the background, see exportJob
 	NullAs    *string // CSV: text written for NULL (default [csv] null_as)
 	LineBreak *string // CSV: line break in the file (default [csv] line_break)
-	FileName  string  // "" = the [export] filename pattern
+	FileName  string  // a [export] filename pattern ({table} {date} ...); "" = the configured one. JSON "filename" (any case)
+	Header    *bool   // CSV: header row; nil = [export] header
+	NullAsS   *string `json:"null_as"` // same as NullAs, the M9 spelling
 }
 
 // export writes the file into the response as it is produced (a whole table is paged through
