@@ -403,6 +403,9 @@ func (v *boardView) lines(th Theme, W int) []string {
 	if v.b.RefreshSecs > 0 {
 		state += fmt.Sprintf(" · refresh every %ds", v.b.RefreshSecs)
 	}
+	if n := v.errorCount(); n > 0 {
+		state += fmt.Sprintf(" · %s (e: list)", plural(n, "error"))
+	}
 	head := th.Dim.Render(" " + state)
 	for _, x := range v.b.Vars {
 		head += "  " + th.Accent.Render(x.Name+"=") + v.vals[x.Name]
@@ -423,6 +426,9 @@ func (v *boardView) lines(th Theme, W int) []string {
 			r, ran := v.res[ps[j].Title]
 			if !ran {
 				r = board.PanelResult{Panel: ps[j]}
+			}
+			if ps[j].Var != "" { // input / dropdown tiles show the current value
+				r.Number = v.vals[ps[j].Var]
 			}
 			tiles = append(tiles, tile(th, &r, tw-1, j == v.sel))
 		}
