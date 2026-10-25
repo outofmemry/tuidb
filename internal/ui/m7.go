@@ -64,15 +64,30 @@ func (w *Workspace) processList() tea.Cmd {
 	if _, ok := w.sess.(db.ProcessLister); !w.caps.ProcessList || !ok {
 		return w.a.say("the process list is not supported by %s", w.conn.Driver)
 	}
-	p := &pickerDlg{title: "Processes", empty: "loading…", hint: "Enter: show query   s: sort   c: copy   e: export   r: refresh   k: kill   Esc: close"}
+	p := &pickerDlg{title: "Processes", empty: "loading…", hint: "Enter: show query   Space: mark   k: kill   s: sort   c: copy as   e: export   m: menu   r: refresh   Esc: dismiss"}
 	var procs []db.ProcessInfo
-	sortBy := 0 // index into procColumns; the slowest first for Elapsed
+	sortBy := 0                 // index into procColumns; the slowest first for Elapsed
+	rev := false                // the opposite of the column's natural order
+	marked := map[string]bool{} // process ids ticked with Space
 	show := func() {
 		sortProcesses(procs, sortBy)
-		p.title = "Processes · sorted by " + procColumns[sortBy]
+		if rev {
+			for i, j := 0, len(procs)-1; i < j; i, j = i+1, j-1 {
+				procs[i], procs[j] = procs[j], procs[i]
+			}
+		}
+		arrow := map[bool]string{false: "↓", true: "↑"}[rev != (procColumns[sortBy] != "elapsed")]
+		p.title = "Processes · sorted by " + procColumns[sortBy] + " " + arrow
+		if n := len(marked); n > 0 {
+			p.title += fmt.Sprintf(" · %d marked", n)
+		}
 		p.items = nil
 		for _, x := range procs {
-			p.items = append(p.items, pickItem{Label: fmt.Sprintf("%-6s %-10s %-10s %-8s %s", x.ID, x.User, x.DB, x.State, x.Elapsed.Round(time.Millisecond)),
+			mark := "  "
+			if marked[x.ID] {
+				mark = "✓ "
+			}
+			p.items = append(p.items, pickItem{Label: mark + fmt.Sprintf("%-6s %-10s %-10s %-8s %s", x.ID, x.User, x.DB, x.State, x.Elapsed.Round(time.Millisecond)),
 				Detail: oneLine(strings.Join(strings.Fields(x.Query), " ")), Value: x})
 		}
 	}
