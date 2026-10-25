@@ -33,12 +33,55 @@ type History struct {
 	mu  sync.Mutex
 }
 
-const maxEntries = 5000
+const (
+	maxEntries  = 5000
+	maxSQLBytes = 64 << 10 // longer statements are cut when logged
+	maxFileSize = 16 << 20 // the file is trimmed to half of this once it grows past it
+)
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
+// path names the connection's file: the name itself when it is plain, else percent-encoded so "a b" and "a_b" differ.
 func (h *History) path(conn string) string {
-	return filepath.Join(h.Dir, unsafeName.ReplaceAllString(conn, "_")+".jsonl")
+	if !unsafeName.MatchString(conn) {
+		return filepath.Join(h.Dir, conn+".jsonl")
+	}
+	var b strings.Builder
+	for i := 0; i < len(conn); i++ {
+		if c := conn[i]; c != '%' && !unsafeName.MatchString(string(c)) {
+			b.WriteByte(c)
+		} else {
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return filepath.Join(h.Dir, b.String()+".jsonl")
+}
+
+// MigrateLegacy adopts history files written before the percent-encoding ("a b" was stored as "a_b.jsonl"),
+// once, at startup. A legacy name that another live connection owns (or that two connections would share)
+// is left alone.
+func (h *History) MigrateLegacy(connNames []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	owners := map[string]int{} // legacy file name -> number of live connections that map to it
+	for _, n := range connNames {
+		owners[unsafeName.ReplaceAllString(n, "_")+".jsonl"]++
+		owners[filepath.Base(h.path(n))]++ // a plain-named connection owns its own file
+	}
+	for _, n := range connNames {
+		if !unsafeName.MatchString(n) {
+			continue
+		}
+		legacy := unsafeName.ReplaceAllString(n, "_") + ".jsonl"
+		if owners[legacy] != 1 {
+			continue
+		}
+		p := h.path(n)
+		if _, err := os.Stat(p); err == nil {
+			continue
+		}
+		os.Rename(filepath.Join(h.Dir, legacy), p)
+	}
 }
 
 func (h *History) Append(conn string, e HistoryEntry) error {
@@ -46,6 +89,12 @@ func (h *History) Append(conn string, e HistoryEntry) error {
 	defer h.mu.Unlock()
 	if e.Time.IsZero() {
 		e.Time = time.Now()
+	}
+	if len(e.SQL) > maxSQLBytes {
+		e.SQL = strings.ToValidUTF8(e.SQL[:maxSQLBytes], "") + "\n-- (truncated)"
+	}
+	if len(e.Original) > maxSQLBytes {
+		e.Original = strings.ToValidUTF8(e.Original[:maxSQLBytes], "")
 	}
 	e.ID = fmt.Sprintf("%d", e.Time.UnixNano())
 	line, err := json.Marshal(e)
@@ -77,10 +126,21 @@ func (h *History) Append(conn string, e HistoryEntry) error {
 		return werr
 	}
 	// The file only ever grows, so trim it now and then: keep the newest maxEntries.
-	if st, err := os.Stat(h.path(conn)); err == nil && st.Size() > int64(n)*maxEntries*2 && st.Size() > 1<<20 {
+	if st, err := os.Stat(h.path(conn)); err == nil && (st.Size() > maxFileSize || st.Size() > int64(n)*maxEntries*2 && st.Size() > 1<<20) {
 		all, err := h.readAll(conn)
-		if err == nil && len(all) > maxEntries {
-			drop := len(all) - maxEntries
+		if err != nil {
+			return nil
+		}
+		// keep the newest entries: at most maxEntries, and at most half the byte cap
+		keep, size := 0, 0
+		for i := len(all) - 1; i >= 0 && keep < maxEntries; i-- {
+			size += len(all[i].SQL) + len(all[i].Original) + 128
+			if size > maxFileSize/2 && keep > 0 {
+				break
+			}
+			keep++
+		}
+		if drop := len(all) - keep; drop > 0 {
 			return h.rewrite(conn, func(e HistoryEntry) bool { drop--; return drop < 0 })
 		}
 	}
