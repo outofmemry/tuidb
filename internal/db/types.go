@@ -39,6 +39,15 @@ type Capabilities struct {
 	Dialect        string   // "postgres" | "mysql" | "clickhouse" | "redis" | "mongo" | "sqlite" | "duckdb" | "cql" | "partiql"
 	DatabaseNoun   string   // "database" (SQL, Mongo) or "db index" (Redis)
 	Types          []string // column types offered by the structure editor / Set Value; empty = the PostgreSQL list
+	Explain        string   // plan format: "" = by Dialect, "text" = plain EXPLAIN, "none" = unsupported
+}
+
+// ExplainMode is the key ExplainStatement and ExplainTree take: the Dialect unless the profile says otherwise.
+func (c Capabilities) ExplainMode() string {
+	if c.Explain != "" {
+		return c.Explain
+	}
+	return c.Dialect
 }
 
 type Kind string
@@ -210,6 +219,8 @@ const (
 	OpCreateDatabase AdminOp = "create_database" // ref.Name; opts: encoding, collation
 	OpDropDatabase   AdminOp = "drop_database"
 	OpRenameDatabase AdminOp = "rename_database" // opts: new_name
+	OpCreateSchema   AdminOp = "create_schema"   // ref.Schema (or ref.Name); PostgreSQL. MySQL / ClickHouse: schema = database, use OpCreateDatabase
+	OpDropSchema     AdminOp = "drop_schema"     // opts: cascade
 )
 
 type ScriptKind string
@@ -269,4 +280,36 @@ type ProcessInfo struct {
 type ProcessLister interface {
 	Processes(ctx context.Context) ([]ProcessInfo, error)
 	Kill(ctx context.Context, id string) error
+}
+
+// User is a database role (PostgreSQL) or account (MySQL).
+type User struct {
+	Name   string
+	Host   string   // MySQL only ("%", "localhost"); "" for PostgreSQL
+	Attrs  []string // PG: SUPERUSER, CREATEDB, CREATEROLE, LOGIN, REPLICATION...; MySQL: global privileges (SELECT, INSERT, ..., ALL)
+	Grants []Grant  // table/database privileges
+}
+
+// Grant is a set of privileges on one object: "schema.table" (PG) or "db.*" / "db.table" (MySQL).
+type Grant struct {
+	Object  string
+	Privs   []string
+	Columns []string // column-level privilege (SELECT, INSERT, UPDATE, REFERENCES) on just these columns; empty = whole object
+}
+
+// UserChange is one administrative edit. Kind: create | drop | password | attrs | grant | revoke.
+// attrs on PostgreSQL is ALTER ROLE ... WITH <Attrs> (NOSUPERUSER etc. turn a flag off); on MySQL it
+// grants User.Attrs globally (GRANT ... ON *.*).
+type UserChange struct {
+	Kind     string
+	User     User
+	Password string
+	Grant    Grant
+}
+
+// UserAdmin is implemented by sessions that can list and edit users; PlanUser returns statements for
+// Apply, so safe mode and Preview see them. Statement.Display hides the password.
+type UserAdmin interface {
+	Users(ctx context.Context) ([]User, error)
+	PlanUser(c UserChange) ([]Statement, error)
 }
