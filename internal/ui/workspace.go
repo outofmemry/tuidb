@@ -960,6 +960,8 @@ func (w *Workspace) openAnything() tea.Cmd {
 		{"Cancel running queries", "cancel_queries"}, {"Close other tabs", "close_other_tabs"}, {"Close tabs to the right", "close_tabs_right"},
 		{"Close all tabs", "close_all_tabs"}, {"Pin connection to this tab", "pin_connection"}, {"Schema diff", "schema_diff"}, {"Data diff", "data_diff"}, {"Fake data", "fake_rows"}, {"Connection details", "connection_details"}, {"Item overview", "item_overview"}, {"Rename tab", "rename_tab"}, {"Clear console", "clear_console"},
 		{"Open a SQL file", "open_file"}, {"Open a recent file", "open_recent"}, {"Settings", "settings"}, {"Close other connections", "close_other_connections"},
+		{"Background jobs", "jobs"}, {"Lock", "lock"}, {"Zen: hide panels", "toggle_panels"}, {"Move tab left", "move_tab_left"}, {"Move tab right", "move_tab_right"},
+		{"New… (table, view, function, schema, database, group)", "new_menu"}, {"Tab menu", "tab_menu"}, {"Open docs", "open_docs"}, {sshLogLabel(), "ssh_log"},
 	} {
 		all = append(all, pickItem{Label: f.label, Detail: "feature", Value: target{kind: "action", name: f.act}})
 	}
