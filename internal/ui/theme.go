@@ -167,12 +167,21 @@ func palette(t config.Theme) map[string]string {
 		base = darkPalette
 	}
 	pal := variant(base, nil)
+	over := map[string]string{}
 	if t.File != "" {
 		if c, err := themeFileColors(t.File); err == nil { // a bad file is reported once at startup (themeError)
-			pal = variant(pal, c)
+			over = variant(over, c)
 		}
 	}
-	return variant(pal, t.Colors)
+	over = variant(over, t.Colors)
+	for k, src := range derivedKeys { // overriding sel_cell alone also recolors cell_selection
+		if _, set := over[k]; !set {
+			if v, ok := over[src]; ok {
+				pal[k] = v
+			}
+		}
+	}
+	return variant(pal, over)
 }
 
 // themeError is the problem with theme.file, "" when there is none.
