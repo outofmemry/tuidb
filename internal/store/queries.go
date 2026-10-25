@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"webtuidb/internal/config"
 )
@@ -22,9 +23,65 @@ type Query struct {
 	Name     string
 	Keywords []string
 	SQL      string
+	Shared   bool      // from a [queries] shared_dirs folder: read-only, Path is absolute
+	Modified time.Time // shortcut: Created is not tracked (no portable birth time), SortQueries "created" uses Modified too
 }
 
-type Queries struct{ Root string }
+type Queries struct {
+	Root   string
+	shared []string
+}
+
+// AddDir lists the .sql files under path beside the main folder, read-only ([queries] shared_dirs).
+// A relative path or "~" is made absolute, since shared queries are addressed by absolute path.
+func (s *Queries) AddDir(path string) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[1:])
+		}
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	s.shared = append(s.shared, path)
+}
+
+// sharedAbs reports whether p is an absolute path inside one of the shared folders.
+func (s *Queries) sharedAbs(p string) bool {
+	for _, d := range s.shared {
+		if r, err := filepath.Rel(d, p); err == nil && filepath.IsAbs(p) && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// SortQueries orders qs by "name", "created" or "modified" (newest first); folders stay grouped.
+func SortQueries(qs []Query, by string) {
+	sort.SliceStable(qs, func(i, j int) bool {
+		a, b := qs[i], qs[j]
+		if a.Folder != b.Folder {
+			return a.Folder < b.Folder
+		}
+		if by == "created" || by == "modified" {
+			if !a.Modified.Equal(b.Modified) {
+				return a.Modified.After(b.Modified)
+			}
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+}
+
+// ImportSQLFile reads a .sql file as a query: its `-- name:` header, else the file name. Save it to keep it.
+func ImportSQLFile(path string) (Query, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return Query{}, err
+	}
+	q := parse(filepath.Base(path), string(b))
+	q.Path = "" // not in a store yet
+	return q, nil
+}
 
 func header(name string, keywords []string) string {
 	s := "-- name: " + name + "\n"
@@ -67,7 +124,7 @@ func parse(path, raw string) Query {
 // safe keeps a user-typed name from escaping Root.
 func (s *Queries) abs(rel string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(rel))
-	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if filepath.IsAbs(clean) || clean == ".." || clean == "." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid query path %q", rel)
 	}
 	return filepath.Join(s.Root, clean), nil
@@ -77,10 +134,25 @@ func fileName(name string) string {
 	return unsafeName.ReplaceAllString(strings.TrimSpace(name), "_") + ".sql"
 }
 
+// ErrExists is what SaveIfAbsent returns when the query's file is already there.
+var ErrExists = errors.New("exists")
+
 // Save writes (or overwrites) a query and returns it. folder may be "" or "a/b".
 func (s *Queries) Save(folder, name string, keywords []string, sql string) (Query, error) {
+	return s.save(folder, name, keywords, sql, true)
+}
+
+// SaveIfAbsent is Save that returns ErrExists instead of replacing a file (imports, "save as").
+func (s *Queries) SaveIfAbsent(folder, name string, keywords []string, sql string) (Query, error) {
+	return s.save(folder, name, keywords, sql, false)
+}
+
+func (s *Queries) save(folder, name string, keywords []string, sql string, overwrite bool) (Query, error) {
 	if strings.TrimSpace(name) == "" {
 		return Query{}, errors.New("a saved query needs a name")
+	}
+	if strings.ContainsAny(name+strings.Join(keywords, ","), "\r\n") { // a newline would end the "-- name:" comment and leave live SQL
+		return Query{}, errors.New("a query name and its keywords cannot contain a line break")
 	}
 	rel := filepath.Join(filepath.FromSlash(folder), fileName(name))
 	p, err := s.abs(rel)
@@ -90,36 +162,76 @@ func (s *Queries) Save(folder, name string, keywords []string, sql string) (Quer
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return Query{}, err
 	}
-	if b, err := os.ReadFile(p); err == nil { // same file name, different query: refuse instead of clobbering
+	if !overwrite { // create-exclusive, so two tabs saving the same new name cannot both succeed
+		unlock, err := config.LockFile(p)
+		if err != nil {
+			return Query{}, err
+		}
+		defer unlock()
+		if _, err := os.Stat(p); err == nil {
+			return Query{}, ErrExists
+		}
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, os.ErrExist) {
+			return Query{}, ErrExists
+		}
+		if err != nil {
+			return Query{}, err
+		}
+		f.Close()
+	} else if b, err := os.ReadFile(p); err == nil { // same file name, different query: refuse instead of clobbering
 		if old := parse(rel, string(b)); old.Name != strings.TrimSpace(name) && old.Name != name {
 			return Query{}, fmt.Errorf("a different saved query %q already uses the file name %s", old.Name, filepath.Base(p))
 		}
 	}
 	if err := config.WriteFileAtomic(p, []byte(header(name, keywords)+sql)); err != nil {
+		if !overwrite {
+			os.Remove(p) // the empty placeholder
+		}
 		return Query{}, err
 	}
 	return parse(rel, header(name, keywords)+sql), nil
 }
 
 func (s *Queries) Read(path string) (Query, error) {
-	p, err := s.abs(path)
-	if err != nil {
-		return Query{}, err
+	shared := s.sharedAbs(filepath.FromSlash(path))
+	p := filepath.FromSlash(path)
+	if !shared {
+		var err error
+		if p, err = s.abs(path); err != nil {
+			return Query{}, err
+		}
+	}
+	if shared && !strings.HasSuffix(p, ".sql") { // a shared directory is the user's own tree: only .sql files leave it
+		return Query{}, fmt.Errorf("%s is not a .sql file", path)
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
 		return Query{}, err
 	}
-	return parse(path, string(b)), nil
+	q := parse(path, string(b))
+	q.Shared = shared
+	return q, nil
 }
 
 // Update rewrites the SQL of an existing query in place, keeping name and keywords (editor auto-save).
 func (s *Queries) Update(path, sql string) error {
+	p, err := s.abs(path)
+	if err != nil {
+		if s.sharedAbs(filepath.FromSlash(path)) {
+			return errors.New("shared queries are read-only")
+		}
+		return err
+	}
+	unlock, err := config.LockFile(p) // read the header and rewrite as one step: the other UI may be saving too
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	q, err := s.Read(path)
 	if err != nil {
 		return err
 	}
-	p, _ := s.abs(path)
 	return config.WriteFileAtomic(p, []byte(header(q.Name, q.Keywords)+sql))
 }
 
@@ -157,30 +269,41 @@ func (s *Queries) MkFolder(folder string) error {
 // List returns every saved query, folders first-class via Folder, sorted by folder then name.
 func (s *Queries) List() ([]Query, error) {
 	var out []Query
-	err := filepath.WalkDir(s.Root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+	walk := func(root string, shared bool) error {
+		return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return nil
+				}
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(p, ".sql") {
 				return nil
 			}
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(p, ".sql") {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			rel, _ := filepath.Rel(root, p)
+			q := parse(rel, string(b))
+			if shared { // read-only: addressed by absolute path, grouped under the folder's own name
+				q.Path, q.Shared = filepath.ToSlash(p), true
+				q.Folder = strings.Trim(filepath.ToSlash(filepath.Join(filepath.Base(root), filepath.Dir(rel))), "./")
+			}
+			if info, err := d.Info(); err == nil {
+				q.Modified = info.ModTime()
+			}
+			out = append(out, q)
 			return nil
+		})
+	}
+	err := walk(s.Root, false)
+	for _, d := range s.shared {
+		if err == nil {
+			err = walk(d, true)
 		}
-		b, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(s.Root, p)
-		out = append(out, parse(rel, string(b)))
-		return nil
-	})
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Folder != out[j].Folder {
-			return out[i].Folder < out[j].Folder
-		}
-		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
-	})
+	}
+	SortQueries(out, "name")
 	return out, err
 }
 
