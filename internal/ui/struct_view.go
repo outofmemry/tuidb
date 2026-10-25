@@ -128,7 +128,17 @@ func typeChoices(caps db.Capabilities) []string {
 	case "clickhouse":
 		return strings.Fields("UInt8 UInt16 UInt32 UInt64 Int8 Int16 Int32 Int64 Float32 Float64 String Date DateTime Bool UUID Nullable(String) Array(String)")
 	}
-	return strings.Fields("integer bigint smallint serial bigserial text varchar(255) boolean numeric(10,2) real double\\ precision date time timestamp timestamptz uuid json jsonb bytea")
+	return []string{"integer", "bigint", "smallint", "serial", "bigserial", "text", "varchar(255)", "boolean", "numeric(10,2)", "real", "double precision", "date", "time", "timestamp", "timestamptz", "uuid", "json", "jsonb", "bytea"}
+}
+
+// dataTypes is the engine's own type list (db.DataTypesOf) with the static per-dialect list as fallback.
+func (ws *Workspace) dataTypes() []string {
+	if ws.sess != nil {
+		if ty := db.DataTypesOf(ws.sess); len(ty) > 0 {
+			return ty
+		}
+	}
+	return typeChoices(ws.caps)
 }
 
 func (t *tableTab) buildStructure(m structureLoadedMsg) {
