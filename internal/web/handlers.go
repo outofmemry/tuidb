@@ -60,10 +60,23 @@ func (s *Server) getConns(r *http.Request) (any, error) {
 	defer s.connMu.Unlock()
 	s.reloadConns()
 	s.setStamp(r)
-	if s.o.Conns == nil {
-		return []config.Connection{}, nil
+	type connOut struct {
+		config.Connection
+		LastConnected string `json:"lastConnected"` // RFC3339 or ""
 	}
-	return s.o.Conns, nil
+	var last map[string]time.Time
+	if s.o.State != nil {
+		last = s.o.State.LastConnected()
+	}
+	out := make([]connOut, 0, len(s.o.Conns))
+	for _, c := range s.o.Conns {
+		o := connOut{Connection: c}
+		if t, ok := last[c.Name]; ok && !t.IsZero() {
+			o.LastConnected = t.Format(time.RFC3339)
+		}
+		out = append(out, o)
+	}
+	return out, nil
 }
 
 // setStamp puts the connection files' version in the ETag header. shortcut: it is a header, not a body
@@ -236,6 +249,9 @@ func (s *Server) openSession(r *http.Request) (any, error) {
 	ss, err := s.newSession(r.Context(), c)
 	if err != nil {
 		return nil, bad("%v", err)
+	}
+	if s.o.State != nil { // sort "recent" in both UIs
+		_ = s.o.State.TouchConnected(c.Name)
 	}
 	if c.Open != nil { // a URL's open target applies to this connect only
 		s.connMu.Lock()
