@@ -767,7 +767,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			"",
 			"  "+th.Dim.Render("or start with one:  webtuidb postgresql://user:pw@host:5432/db"))
 	} else {
-		list = append(list, "   "+th.Section.Render(fit("NAME", 26)+fit("DRIVER", 12)+fit("HOST", addrW)+"TAG"))
+		list = append(list, "   "+th.Section.Render(fit("NAME", 26)+fit("DRIVER", 12)+fit("HOST", addrW)+fit("LAST", lastW)+"TAG"))
 	}
 	listH := max(1, bodyH-2-len(list))
 	w.sel = clamp(w.sel, 0, max(0, len(rows)-1))
@@ -816,7 +816,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			name = th.Bold.Render(name)
 		}
 		// a stripe in the driver color leads each row, so a mixed list scans by engine
-		line := th.DriverStyle(c.Driver).Render("▎") + cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, addrW)) + tagS
+		line := th.DriverStyle(c.Driver).Render("▎") + cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, addrW)) + th.Dim.Render(fit(ago(last[c.Name]), lastW)) + tagS
 		if i == w.sel {
 			line = th.SelRow.Render(fit(line, listW-4))
 		}
