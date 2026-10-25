@@ -343,12 +343,21 @@ func (ss *session) startJob(j *job, fn func(ctx context.Context) error) string {
 	j.cancel = cancel
 	j.created = time.Now()
 	ss.mu.Lock()
-	for k, o := range ss.jobs { // finished jobs have been polled to the end by now
+	// Finished jobs stay for the jobs centre until dismissed; past maxKeptJobs the oldest go. An export file
+	// stays until it is downloaded or the session closes.
+	var fin []string
+	for k, o := range ss.jobs {
 		o.mu.Lock()
-		if o.done && o.file == "" { // an export file stays until it is downloaded or the session closes
-			delete(ss.jobs, k)
+		if o.done && o.file == "" {
+			fin = append(fin, k)
 		}
 		o.mu.Unlock()
+	}
+	if len(fin) >= maxKeptJobs {
+		sort.Slice(fin, func(a, b int) bool { return ss.jobs[fin[a]].created.Before(ss.jobs[fin[b]].created) })
+		for _, k := range fin[:len(fin)-maxKeptJobs+1] {
+			delete(ss.jobs, k)
+		}
 	}
 	ss.jobs[id] = j
 	ss.mu.Unlock()
