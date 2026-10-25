@@ -738,6 +738,8 @@ func (w *welcome) view(th Theme, W, H int) string {
 		head = append(head, "")
 	}
 	// ---- body: connections frame (+ quick start frame when wide enough)
+	const lastW = 9
+	last := w.a.d.State.LastConnected()
 	bodyH := max(6, H-len(head)-2)
 	sideW := 0
 	if W >= 118 {
@@ -747,7 +749,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 	if sideW > 0 {
 		listW--
 	}
-	addrW := clamp(listW-4-41-12, 4, 26) // host column shrinks first so the TAG badge (up to 12 cells) stays visible
+	addrW := clamp(listW-4-41-12-lastW, 4, 26) // host column shrinks first so the TAG badge (up to 12 cells) stays visible
 	var list []string
 	if w.searching || w.search.Value() != "" {
 		list = append(list, th.Accent.Render(" / ")+w.search.View(listW-6, th, w.searching), "")
