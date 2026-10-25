@@ -141,44 +141,136 @@ func (w *Workspace) processList() tea.Cmd {
 			}
 		})
 	}
+	// kill ends the marked processes, or the one under the cursor when none is marked
 	kill := func(it pickItem, ok bool) tea.Cmd {
-		if !ok {
-			return nil
+		var victims []db.ProcessInfo
+		for _, x := range procs {
+			if marked[x.ID] {
+				victims = append(victims, x)
+			}
 		}
-		x := it.Value.(db.ProcessInfo)
+		if len(victims) == 0 {
+			if !ok {
+				return nil
+			}
+			victims = []db.ProcessInfo{it.Value.(db.ProcessInfo)}
+		}
+		var stmts []db.Statement
+		var lines []string
+		for _, x := range victims {
+			stmts = append(stmts, db.Statement{Text: "KILL " + x.ID})
+			lines = append(lines, x.ID+"  "+x.User+"@"+x.DB+"  "+oneLine(x.Query))
+		}
 		do := func() tea.Cmd {
-			return w.gate([]db.Statement{{Text: "KILL " + x.ID}}, func() tea.Cmd {
+			return w.gate(stmts, func() tea.Cmd {
 				return withLister(func(ctx context.Context, pl db.ProcessLister) func() tea.Cmd {
-					err := pl.Kill(ctx, x.ID)
-					w.log("KILL "+x.ID, 0, err)
-					return func() tea.Cmd {
+					var failed []string
+					for _, x := range victims {
+						err := pl.Kill(ctx, x.ID)
+						w.log("KILL "+x.ID, 0, err)
 						if err != nil {
-							return w.a.fail(err)
+							failed = append(failed, x.ID+": "+err.Error())
 						}
-						return tea.Batch(w.a.say("killed process %s", x.ID), refresh())
+					}
+					return func() tea.Cmd {
+						for _, x := range victims {
+							delete(marked, x.ID)
+						}
+						if len(failed) > 0 {
+							return tea.Batch(w.a.fail(fmt.Errorf("%s", strings.Join(failed, "\n"))), refresh())
+						}
+						return tea.Batch(w.a.say("killed %s", plural(len(victims), "process")), refresh())
 					}
 				})
 			})
 		}
-		w.a.push(&confirmDlg{title: "Kill process " + x.ID + "?", lines: []string{x.User + "@" + x.DB, oneLine(x.Query)}, yes: "Kill", danger: true, onYes: do})
+		title := "Kill process " + victims[0].ID + "?"
+		if len(victims) > 1 {
+			title = fmt.Sprintf("Kill %d processes?", len(victims))
+		}
+		w.a.push(&confirmDlg{title: title, lines: lines, yes: "Kill", danger: true, onYes: do})
 		return nil
 	}
-	p.keys = map[string]func(pickItem, bool) tea.Cmd{
-		"r": func(pickItem, bool) tea.Cmd { return refresh() },
-		"s": func(pickItem, bool) tea.Cmd { sortBy = (sortBy + 1) % len(procColumns); show(); return nil },
-		"c": func(pickItem, bool) tea.Cmd {
-			return w.a.copyText(processText(procs, "\t"), plural(len(procs), "process"))
-		},
-		"e":      func(pickItem, bool) tea.Cmd { return w.exportProcesses(procs) },
-		"k":      kill,
-		"delete": kill,
+	// scope is what copy and export act on: the marked rows, else every row
+	scope := func() []db.ProcessInfo {
+		var m []db.ProcessInfo
+		for _, x := range procs {
+			if marked[x.ID] {
+				m = append(m, x)
+			}
+		}
+		if len(m) == 0 {
+			return procs
+		}
+		return m
 	}
-	p.onPick = func(it pickItem, _ bool) tea.Cmd {
+	sortMenu := func(pickItem, bool) tea.Cmd {
+		var items []pickItem
+		for i, c := range procColumns {
+			items = append(items, pickItem{Label: c, Value: i})
+		}
+		w.a.push(&pickerDlg{title: "Sort processes by (again: reverse)", items: items, sel: sortBy, onPick: func(it pickItem, _ bool) tea.Cmd {
+			if i := it.Value.(int); i == sortBy {
+				rev = !rev
+			} else {
+				sortBy, rev = i, false
+			}
+			show()
+			return nil
+		}})
+		return nil
+	}
+	copyAs := func(pickItem, bool) tea.Cmd { return w.copyProcessesAs(scope()) }
+	quickLook := func(it pickItem, ok bool) tea.Cmd {
+		if !ok {
+			return nil
+		}
 		x := it.Value.(db.ProcessInfo)
 		w.a.push(w.a.newQuickLookValue("Process "+x.ID, x.Query, nil))
 		return nil
 	}
-	w.a.push(p)
+	p.keys = map[string]func(pickItem, bool) tea.Cmd{
+		"r": func(pickItem, bool) tea.Cmd { return refresh() },
+		"s": sortMenu,
+		"space": func(it pickItem, ok bool) tea.Cmd {
+			if !ok {
+				return nil
+			}
+			id := it.Value.(db.ProcessInfo).ID
+			if marked[id] {
+				delete(marked, id)
+			} else {
+				marked[id] = true
+			}
+			sel := p.sel
+			show()
+			p.sel = min(sel+1, max(0, len(p.items)-1))
+			return nil
+		},
+		"c":      copyAs,
+		"e":      func(pickItem, bool) tea.Cmd { return w.exportProcesses(scope()) },
+		"k":      kill,
+		"delete": kill,
+		"m": func(it pickItem, ok bool) tea.Cmd {
+			// the labels and their order come from menus.ProcessList, shared with the web UI
+			w.a.pushMenu("Process menu", menus.ProcessList, menus.Env{}, func(m menus.Item) tea.Cmd {
+				switch m.Action {
+				case "kill":
+					return kill(it, ok)
+				case "quick_look":
+					return quickLook(it, ok)
+				case "copy_rows_as":
+					return copyAs(it, ok)
+				case "export":
+					return w.exportProcesses(scope())
+				}
+				return nil
+			})
+			return nil
+		},
+	}
+	p.onPick = func(it pickItem, _ bool) tea.Cmd { return quickLook(it, true) }
+	w.a.push(dismissOnQ{p}) // Esc and q both dismiss the list
 	return refresh()
 }
 
