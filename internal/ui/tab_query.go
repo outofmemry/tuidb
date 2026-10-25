@@ -767,7 +767,7 @@ func (t *queryTab) Action(name string) (bool, tea.Cmd) {
 		return true, nil
 	case "variables":
 		return true, t.editVars()
-	case "chart", "load_more", "copy_rows", "copy_cells", "copy_rows_as":
+	case "chart", "load_more", "copy_rows", "copy_cells", "copy_rows_as", "copy_cells_as", "copy_column", "column_menu":
 		return true, t.resultOnly(name)
 	case "select_next_occurrence", "select_all_occurrences", "vim_mode", "invisibles":
 		return true, t.ws.a.say("%s", t.ed.extra(name))
@@ -789,6 +789,20 @@ func (t *queryTab) Action(name string) (bool, tea.Cmd) {
 			return true, t.ws.a.say("%s", m)
 		}
 		return true, t.afterEdit()
+	case "select_word":
+		if t.focusResults {
+			return false, nil
+		}
+		if t.ed.wordAtCursor() == "" {
+			return true, t.ws.a.say("put the cursor on a word first")
+		}
+		return true, nil // the selection feeds use_selection_find and jump_to_selection
+	case "select_all":
+		if t.focusResults {
+			return false, nil
+		}
+		t.ed.SelectAll()
+		return true, nil
 	case "use_selection_find":
 		q := t.ed.Selection()
 		if q == "" {
