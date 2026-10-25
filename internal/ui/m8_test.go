@@ -83,7 +83,7 @@ func TestM8MultiSelectDeleteAndExport(t *testing.T) {
 
 func TestM8MarkedTablesExportOneFileEach(t *testing.T) {
 	dir := t.TempDir()
-	h := newHarness(t, nil)
+	h := newHarness(t, func(_ *config.Connection, c *config.Config) { c.Export.Filename = "{table}" })
 	h.connect()
 	h.run("mark")
 	h.run("mark")
