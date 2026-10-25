@@ -616,6 +616,23 @@ func (w *Workspace) action(name string) tea.Cmd {
 		}
 		return tea.Batch(cmds...)
 	}
+	switch name { // the console pane is below the tabs: focus_down reaches it, the other focus moves leave it
+	case "focus_down":
+		if q, ok := w.tab().(*queryTab); w.showConsole && !w.focusConsole && !(ok && len(q.res) > 0 && !q.hideResults && !q.focusResults && !w.focusSB) {
+			w.focusConsole, w.focusSB, w.focusDetail = true, false, false
+			return nil
+		}
+	case "focus_up", "focus_left", "focus_right":
+		if w.focusConsole {
+			w.focusConsole = false
+			if name == "focus_up" {
+				return nil
+			}
+		}
+	}
+	if strings.HasPrefix(name, "console_") { // P2-72: the console keys resolve through the keymap (bare, or after the prefix)
+		return w.consoleKeyAction(name)
+	}
 	// tab-level first: it knows its own focus (grid vs editor vs structure)
 	if t := w.tab(); t != nil && !w.focusSB {
 		if ok, cmd := t.Action(name); ok {
