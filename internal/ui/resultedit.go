@@ -59,7 +59,7 @@ type resultColsMsg struct {
 // makeEditable looks up the table behind result idx and, when its key is in the result, unlocks editing.
 func (t *queryTab) makeEditable(idx int) tea.Cmd {
 	rv := t.res[idx]
-	schema, table, ok := singleTable(rv.stmt)
+	schema, table, ok := editableTable(rv.stmt, t.ws.caps.Dialect)
 	if !ok || !rv.hasRows || t.ws.caps.Editor != "sql" {
 		return nil
 	}
@@ -146,17 +146,7 @@ func (t *queryTab) resultEditKeys(g *Grid, msg tea.Msg) bool {
 	if !ok {
 		return true
 	}
-	switch k.Keystroke() {
-	case "enter":
-		g.FinishEdit(true)
-	case "tab":
-		g.FinishEdit(true)
-		g.Move(0, 1, false)
-	case "esc":
-		g.FinishEdit(false)
-	default:
-		g.edit.Handle(k)
-	}
+	g.EditKey(k)
 	return true
 }
 
