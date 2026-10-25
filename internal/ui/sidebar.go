@@ -1105,5 +1105,75 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 		}
 		body = append(body, line)
 	}
-	return strings.Join(padLines(append(head, body...), W, H), "\n")
+	return th.SidebarBG.Render(strings.Join(padLines(append(head, body...), W, H), "\n")) // sidebar_bg theme key
+}
+
+// insertIntoEditor types sql at the cursor of the current SQL editor; with none open it opens one holding sql.
+func (w *Workspace) insertIntoEditor(sql string) tea.Cmd {
+	t, ok := w.tab().(*queryTab)
+	if !ok {
+		return w.newQueryTab(sql)
+	}
+	t.ed.Insert(sql)
+	w.focusSB = false
+	return t.afterEdit()
+}
+
+// renameQuery renames a saved query: written under the new name, then the old file goes
+// (shortcut: store.Queries has no Rename, so this is not atomic; a crash between the two leaves both files).
+func (s *sidebar) renameQuery(q store.Query) tea.Cmd {
+	s.w.a.push(newForm("Rename "+q.Name, []formField{{Key: "name", Label: "New name", Kind: fText, Value: q.Name}}, func(v map[string]string) tea.Cmd {
+		name := strings.TrimSpace(v["name"])
+		if name == "" || name == q.Name {
+			return nil
+		}
+		cur, err := s.w.a.d.Queries.Read(q.Path) // the tab may have auto-saved since the list was read
+		if err != nil {
+			return s.w.a.fail(err)
+		}
+		nq, err := s.w.a.d.Queries.SaveIfAbsent(cur.Folder, name, cur.Keywords, cur.SQL)
+		if errors.Is(err, store.ErrExists) {
+			return s.w.a.fail(fmt.Errorf("a saved query named %q already exists", name))
+		}
+		if err != nil {
+			return s.w.a.fail(err)
+		}
+		if err := s.w.a.d.Queries.Delete(q.Path); err != nil {
+			return s.w.a.fail(err)
+		}
+		for _, tb := range s.w.tabs { // open editors keep auto-saving into the renamed file
+			if qt, ok := tb.(*queryTab); ok && qt.savedAs == q.Path {
+				qt.savedAs = nq.Path
+			}
+		}
+		s.queries, _ = s.w.a.d.Queries.List()
+		return s.w.a.say("renamed to %s", nq.Name)
+	}))
+	return nil
+}
+
+// addHistoryToQueries is the save-query dialog of the editor, pre-filled with a history entry's SQL.
+func (s *sidebar) addHistoryToQueries(sql string) tea.Cmd {
+	s.w.a.push(newForm("Add to saved queries", []formField{
+		{Key: "name", Label: "Name", Kind: fText},
+		{Key: "keywords", Label: "Keywords", Kind: fText},
+		{Key: "folder", Label: "Folder", Kind: fText},
+	}, func(v map[string]string) tea.Cmd {
+		var kws []string
+		for _, k := range strings.Split(v["keywords"], ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				kws = append(kws, k)
+			}
+		}
+		folder := strings.Trim(v["folder"], "/ ")
+		return s.w.a.ifNoQuery(folder, v["name"], func() tea.Cmd {
+			q, err := s.w.a.d.Queries.Save(folder, v["name"], kws, sql)
+			if err != nil {
+				return s.w.a.fail(err)
+			}
+			s.queries, _ = s.w.a.d.Queries.List()
+			return s.w.a.say("saved %s", q.Name)
+		})
+	}))
+	return nil
 }
