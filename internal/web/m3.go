@@ -93,6 +93,13 @@ func (s *Server) restore(ss *session, r *http.Request) (any, error) {
 	return s.backupRestore(ss, r, true)
 }
 
+// backupOptions lists the flags the backup (or, with ?restore=1, restore) dialog may offer for this driver:
+// the common ones with a description, and every extra flag the server accepts.
+func (s *Server) backupOptions(ss *session, r *http.Request) (any, error) {
+	restore := r.URL.Query().Get("restore") == "1"
+	return map[string]any{"options": nonNil(backup.CommonOptions(ss.conn.Driver, restore)), "extra": nonNil(backup.AllowedExtra(ss.conn.Driver, restore))}, nil
+}
+
 // backupFile confines a backup/restore file to <DataDir>/backups: no subdirectories, no "..", no symlinks.
 func backupFile(f string) (path string, exists bool, err error) {
 	dir := filepath.Join(config.DataDir(), "backups")
