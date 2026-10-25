@@ -266,12 +266,16 @@ func (t *tableTab) searchField() tea.Cmd {
 
 // exportName expands [export] filename ({connection} {database} {table} {tag} {date} {time}) plus the extension.
 func (w *Workspace) exportName(table, ext string) string {
-	now := time.Now()
-	clean := strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace
-	pat := orDefault(w.a.d.Cfg.Export.Filename, "{table}")
-	name := strings.NewReplacer("{connection}", clean(w.conn.Name), "{database}", clean(w.sess.CurrentDatabase()), "{table}", clean(table),
-		"{tag}", clean(w.conn.Tag), "{date}", now.Format("2006-01-02"), "{time}", now.Format("15-04-05")).Replace(pat)
+	name := export.Filename(orDefault(w.a.d.Cfg.Export.Filename, "{table}-{date}"), w.exportVars(table))
+	if strings.HasSuffix(strings.ToLower(name), "."+strings.ToLower(ext)) { // "{table}.csv" already names the extension
+		return name
+	}
 	return name + "." + ext
+}
+
+// exportVars are the {tokens} a file-name pattern can use.
+func (w *Workspace) exportVars(table string) map[string]string {
+	return map[string]string{"connection": w.conn.Name, "database": w.sess.CurrentDatabase(), "table": table, "tag": w.conn.Tag}
 }
 
 // ---- process list: sort, copy, export (M4 item 11) ----------------------------------------------
