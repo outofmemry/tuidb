@@ -262,7 +262,29 @@ func (s *Server) openSession(r *http.Request) (any, error) {
 		}
 		s.connMu.Unlock()
 	}
-	return ss.info(), nil
+	out := ss.info()
+	if bad := ss.runBootstrap(r.Context()); len(bad) > 0 { // the terminal shows "Bootstrap command failed (the connection is still open)"
+		out["bootstrapErrors"] = bad
+	}
+	return out, nil
+}
+
+// runBootstrap runs the connection's bootstrap statements once the session is open, as the terminal's workspace does; it
+// returns "statement\n  error" for each failure (the connection stays open), and logs every statement to the console.
+// shortcut: statements run one after another on the pool, a driver that bootstraps per physical connection does that itself.
+func (ss *session) runBootstrap(ctx context.Context) []string {
+	var bad []string
+	for _, st := range ss.conn.Bootstrap {
+		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		start := time.Now()
+		_, err := ss.o.Sess.Exec(cctx, st, 1)
+		cancel()
+		ss.record(st, "bootstrap", time.Since(start), "")
+		if err != nil {
+			bad = append(bad, st+"\n  "+err.Error())
+		}
+	}
+	return bad
 }
 
 // closeSession is not wrapped in withSession: close waits for in-flight handlers, which would include itself.
