@@ -445,11 +445,11 @@ func (s *Server) pluginRun(ss *session, r *http.Request) (any, error) {
 		}
 		ctx, cancel := ss.ctx(r)
 		defer cancel()
-		txt, err := p.Run(ctx, plugin.Context{Connection: ss.conn.Name, Driver: ss.conn.Driver, Database: ss.o.Sess.CurrentDatabase(), Context: req.Context, Object: req.Object, Selection: req.Selection, Cell: req.Cell})
+		out, err := p.Run(ctx, plugin.Context{Connection: ss.conn.Name, Driver: ss.conn.Driver, Database: ss.o.Sess.CurrentDatabase(), Context: req.Context, Object: req.Object, Selection: req.Selection, Cell: req.Cell}, pluginHost{ss})
 		if err != nil {
 			return nil, bad("%v", err)
 		}
-		return map[string]any{"output": p.Output, "text": txt}, nil
+		return map[string]any{"output": p.Output, "text": out.Text, "effects": effectsJSON(out.Effects)}, nil
 	}
 	return nil, bad("no plugin named %q", req.Name)
 }
