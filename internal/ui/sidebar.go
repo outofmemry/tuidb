@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -690,6 +691,8 @@ func (s *sidebar) key(k string) tea.Cmd {
 		return s.activate(true)
 	case "m":
 		return s.menu()
+	case "+":
+		return s.newMenu()
 	case "p":
 		return s.togglePin()
 	case "N":
