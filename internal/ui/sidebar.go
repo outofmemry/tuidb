@@ -845,41 +845,6 @@ func (s *sidebar) newDatabase() tea.Cmd {
 	return nil
 }
 
-func (s *sidebar) databaseMenu(name string) tea.Cmd {
-	items := []pickItem{{Label: "Open", Value: "open"}, {Label: "Rename…", Value: "rename"}, {Label: "Drop…", Value: "drop"}}
-	s.w.a.push(&pickerDlg{title: name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
-		switch it.Value.(string) {
-		case "open":
-			return s.w.openDatabase(name)
-		case "rename":
-			if name == s.w.sess.CurrentDatabase() {
-				return s.w.a.say("the open database cannot be renamed; open another one first")
-			}
-			s.w.a.push(newForm("Rename "+name, []formField{{Key: "new_name", Label: "New name", Kind: fText, Value: name}}, func(v map[string]string) tea.Cmd {
-				return s.databaseAdmin(db.OpRenameDatabase, name, map[string]string{"new_name": strings.TrimSpace(v["new_name"])}, "renamed")
-			}))
-		case "drop":
-			if name == s.w.sess.CurrentDatabase() {
-				return s.w.a.say("the open database cannot be dropped; open another one first")
-			}
-			f := newForm("Drop "+name+"?", []formField{
-				{Key: "warn", Label: "", Kind: fLabel, Value: "This deletes the database and everything in it."},
-				{Key: "confirm", Label: "Type its name", Kind: fText},
-			}, func(map[string]string) tea.Cmd { return s.databaseAdmin(db.OpDropDatabase, name, nil, "dropped") })
-			f.validate = func(v map[string]string) error {
-				if v["confirm"] != name {
-					return fmt.Errorf("type %q to confirm", name)
-				}
-				return nil
-			}
-			f.submit = "Enter: drop"
-			s.w.a.push(f)
-		}
-		return nil
-	}})
-	return nil
-}
-
 func (s *sidebar) databaseAdmin(op db.AdminOp, name string, opts map[string]string, done string) tea.Cmd {
 	stmts, err := s.w.sess.PlanAdmin(op, db.ObjRef{Name: name}, opts)
 	if err != nil {
