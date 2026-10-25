@@ -863,37 +863,6 @@ type scriptMsg struct {
 	err  error
 }
 
-func (s *sidebar) queryMenu(q store.Query) tea.Cmd {
-	items := []pickItem{{Label: "Open in new tab", Value: "open"}, {Label: "Run", Value: "run"}, {Label: "Copy", Value: "copy"}, {Label: "Delete…", Value: "delete"}}
-	if q.Shared { // a shared folder is read-only
-		items = items[:3]
-	}
-	s.w.a.push(&pickerDlg{title: q.Name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
-		switch it.Value.(string) {
-		case "open":
-			return s.w.openSaved(q)
-		case "run":
-			cmd := s.w.openSaved(q)
-			if t, ok := s.w.tab().(*queryTab); ok {
-				return tea.Batch(cmd, t.runAll())
-			}
-			return cmd
-		case "copy":
-			return setClip(q.SQL)
-		case "delete":
-			s.w.a.push(&confirmDlg{title: "Delete saved query " + q.Name + "?", yes: "Delete", danger: true, onYes: func() tea.Cmd {
-				if err := s.w.a.d.Queries.Delete(q.Path); err != nil {
-					return s.w.a.fail(err)
-				}
-				s.queries, _ = s.w.a.d.Queries.List()
-				return nil
-			}})
-		}
-		return nil
-	}})
-	return nil
-}
-
 func (s *sidebar) adminOp(op db.AdminOp) tea.Cmd {
 	if refs := s.markedRefs(); len(refs) > 0 { // marked tables win over the one under the cursor
 		return s.adminMany(op, refs)
