@@ -302,7 +302,7 @@ func TestM6CustomGroups(t *testing.T) {
 	}
 	h.a.ws().sb.sel = indexOfRow(h.a.ws().sb.rows(), "Core")
 	h.press("m")
-	h.pickLabel("Remove from group Core")
+	h.pickLabel("Remove from group")
 	if gs := h.a.d.State.Groups("shop"); len(gs) != 0 {
 		t.Fatalf("an empty group goes away: %+v", gs)
 	}
@@ -335,7 +335,7 @@ func TestM6NewDatabaseSendsEncodingAndCollation(t *testing.T) {
 
 func TestM6ExportSeveralTablesAcrossSchemas(t *testing.T) {
 	dir := t.TempDir()
-	h := newHarness(t, nil)
+	h := newHarness(t, func(_ *config.Connection, c *config.Config) { c.Export.Filename = "{table}" })
 	h.connect()
 	h.run("export")
 	setChoice(t, h, "many", "true")
