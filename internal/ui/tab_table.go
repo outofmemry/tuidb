@@ -1022,14 +1022,23 @@ func (t *tableTab) DetailKey(key string) tea.Cmd {
 	if detailMove(g, key) {
 		return nil
 	}
-	if key == "/" {
+	switch key {
+	case "/":
 		return t.searchField()
-	}
-	if key == "enter" {
+	case "enter":
 		if !g.Editable || g.cur() == nil || g.cur().State == rowDeleted {
 			return t.quickLook()
 		}
-		return editCellInPopover(t.ws, g)
+		return editFieldInPopover(t.ws, g)
+	case "p", "m": // PRETTY / MINIFY the JSON field in every selected row
+		if !g.Editable {
+			return t.ws.a.say("read-only: PRETTY / MINIFY stage an edit")
+		}
+		n := g.MapColumn(func(v any) (any, bool) { return reformatJSON(v, key == "p") })
+		if n == 0 {
+			return t.ws.a.say("nothing to %s: the field is not JSON (or already is)", map[string]string{"p": "pretty-print", "m": "minify"}[key])
+		}
+		return t.ws.a.say("%s %d row(s); commit to apply", map[string]string{"p": "pretty-printed", "m": "minified"}[key], n)
 	}
 	return nil
 }
