@@ -458,6 +458,10 @@ func tile(th Theme, r *board.PanelResult, tw int, sel bool) []string {
 		body = centered("[ ↵ ] run " + r.Panel.Target)
 	case r.Panel.Kind == "import":
 		body = centered("[ ↵ ] import into " + r.Panel.Table)
+	case r.Panel.Kind == "input" || r.Panel.Kind == "dropdown":
+		body = append(centered("$"+r.Panel.Var+" = "+oneLine(r.Number)), "", th.Dim.Render(fit("  ↵ "+map[string]string{"input": "edit", "dropdown": "pick"}[r.Panel.Kind], iw)))
+	case r.Panel.Kind == "exporter":
+		body = centered("[ ↵ ] export " + orDefault(r.Panel.Format, "csv"))
 	case r.Err != nil:
 		body = wrapText(r.Err.Error(), iw)
 		for i := range body {
