@@ -765,13 +765,13 @@ func (t *tableTab) Action(name string) (bool, tea.Cmd) {
 	case "copy_cells":
 		return true, t.copy(g.CopyCells(FmtPlain, t.ref.Name), "cells")
 	case "copy_rows_as":
-		var items []pickItem
-		for _, f := range CopyFormats {
-			items = append(items, pickItem{Label: string(f), Value: f})
-		}
-		t.ws.a.push(&pickerDlg{title: "Copy rows as", items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
-			return t.copy(g.CopyRows(it.Value.(CopyFormat), t.ref.Name), "rows")
-		}})
+		t.ws.a.pushCopyAs("Copy rows as", CopyFormats, func(f CopyFormat) tea.Cmd { return t.copy(g.CopyRows(f, t.ref.Name), "rows") })
+	case "copy_cells_as":
+		t.ws.a.pushCopyAs("Copy selected cells as", CopyFormats, func(f CopyFormat) tea.Cmd { return t.copy(g.CopyCells(f, t.ref.Name), "cells") })
+	case "copy_column":
+		return true, t.copy(g.CopyColumn(), "column")
+	case "column_menu":
+		return true, t.columnMenu()
 	case "set_value":
 		return true, t.setValueMenu()
 	case "paste_rows", "paste_cells":
