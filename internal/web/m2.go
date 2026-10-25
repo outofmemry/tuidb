@@ -202,15 +202,26 @@ type job struct {
 	rows, batches  int64
 	total, checked int
 	hits           []hitJSON
-	lines          []string  // backup / restore output
-	file, fileName string    // export job: the finished temp file and the name to download it as
-	created        time.Time // when the job started; kept exports are evicted oldest first
+	lines          []string     // backup / restore output
+	paused         *atomic.Bool // search job: set by .../search/{job}/pause
+	file, fileName string       // export job: the finished temp file and the name to download it as
+	created        time.Time    // when the job started; kept exports are evicted oldest first
+	kind, title    string       // import | export | backup | restore | search | diff, and the line the jobs centre shows
+	path           string       // backup: the finished file on the server, for /reveal
 }
 
 func (j *job) removeFile() {
 	if j.file != "" {
 		os.Remove(j.file)
 	}
+}
+
+// snapFile is the download name, only for a job that has a temp file to serve.
+func snapFile(j *job) string {
+	if j.file == "" {
+		return ""
+	}
+	return j.fileName
 }
 
 func (j *job) snapshot() map[string]any {
