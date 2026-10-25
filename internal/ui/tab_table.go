@@ -1047,17 +1047,31 @@ func (t *tableTab) DetailKey(key string) tea.Cmd {
 func detailMove(g *Grid, key string) bool {
 	switch key {
 	case "j", "down", "tab":
-		g.Move(0, 1, false)
+		g.MoveField(1)
 	case "k", "up", "shift+tab":
-		g.Move(0, -1, false)
+		g.MoveField(-1)
 	case "home", "g":
-		g.GoCol(0, false)
+		g.MoveField(-len(g.Cols))
 	case "end", "G":
-		g.GoCol(len(g.Cols)-1, false)
+		g.MoveField(len(g.Cols))
 	default:
 		return false
 	}
 	return true
+}
+
+// DetailInfo is the line the row detail pane shows for the current column: "type · nullable · default · key".
+func (t *tableTab) DetailInfo() string {
+	g := t.grid
+	if g.col >= len(g.Cols) {
+		return ""
+	}
+	for _, c := range t.cols {
+		if c.Name == g.Cols[g.col].Name {
+			return g.Cols[g.col].Name + ": " + columnInfo(c)
+		}
+	}
+	return g.Cols[g.col].Name + ": " + g.Cols[g.col].Type
 }
 
 func (t *tableTab) Detail() []string {
