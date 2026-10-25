@@ -133,6 +133,19 @@ func (s *Server) backupRestore(ss *session, r *http.Request, restore bool) (any,
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	if req.File == "" && req.Filename != "" && !restore {
+		dbn := req.Database
+		if dbn == "" {
+			dbn = ss.o.Sess.CurrentDatabase()
+		}
+		req.File = export.Filename(req.Filename, map[string]string{"connection": ss.conn.Name, "database": dbn, "table": dbn, "tag": ss.conn.Tag})
+		if !strings.Contains(req.File, ".") { // shortcut: a pattern without an extension gets .sql(.gz), whatever the format
+			req.File += ".sql"
+			if req.Gzip {
+				req.File += ".gz"
+			}
+		}
+	}
 	if req.File == "" {
 		return nil, bad("a file path is required")
 	}
