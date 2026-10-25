@@ -19,6 +19,7 @@ import (
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
 	"webtuidb/internal/diagram"
+	"webtuidb/internal/export"
 	"webtuidb/internal/mcp"
 	"webtuidb/internal/plugin"
 )
@@ -81,6 +82,8 @@ type backupReq struct {
 	Run                  bool              // false = only show the command line
 	Confirmed            bool
 	Password             string
+	Extra                []string // free-form tool arguments, appended last (backup.Options.Extra)
+	Filename             string   // a name pattern ({connection} {database} {table}=database {tag} {date} {time}) used when File is empty
 }
 
 func (s *Server) backup(ss *session, r *http.Request) (any, error) {
