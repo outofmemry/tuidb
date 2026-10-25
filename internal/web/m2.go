@@ -73,8 +73,15 @@ func (s *Server) export(ss *session, r *http.Request) (any, error) {
 	if o.Table == "" {
 		o.Table = "result"
 	}
+	if req.NullAsS != nil {
+		req.NullAs = req.NullAsS
+	}
 	if req.NullAs != nil {
 		o.CSV.NullAs = *req.NullAs
+	}
+	o.NoHeader = !s.o.Cfg.Export.Header
+	if req.Header != nil {
+		o.NoHeader = !*req.Header
 	}
 	if req.LineBreak != nil {
 		o.CSV.LineBreak = *req.LineBreak
@@ -141,10 +148,7 @@ func (s *Server) export(ss *session, r *http.Request) (any, error) {
 
 // fileName is the name the file is offered as: the one typed, else the [export] filename pattern.
 func (req exportReq) fileName(ss *session, o export.Options) string {
-	if n := strings.TrimSpace(req.FileName); n != "" {
-		return strings.NewReplacer("/", "_", "\\", "_").Replace(n)
-	}
-	return ss.exportName(o.Table, export.Ext(o))
+	return ss.exportName(strings.TrimSpace(req.FileName), o.Table, export.Ext(o))
 }
 
 func (s *Server) exportJob(ss *session, req exportReq, o export.Options) (any, error) {
