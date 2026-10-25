@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -310,6 +309,8 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 		return w.importConns()
 	case "g":
 		return w.groupMenu()
+	case "m":
+		return w.menu()
 	case "s":
 		return w.pickSort()
 	case "u": // the clipboard is shared and often synced: no password unless asked for with U
@@ -502,23 +503,14 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		return err
 	}
 	f.submit = "Enter: save"
-	f.hotHint = "Ctrl+t: test"
+	f.hotHint = "Ctrl+t: test   Ctrl+o: password cmd preset"
 	f.hotkeys = map[string]func(map[string]string) tea.Cmd{"ctrl+t": func(v map[string]string) tea.Cmd {
 		c, err := w.build(v, idx)
 		if err != nil {
 			return w.a.fail(err)
 		}
-		connect := w.a.d.Connect
-		return tea.Batch(w.a.say("testing %s…", c.Name), func() tea.Msg {
-			o, err := connect(context.Background(), c)
-			info := ""
-			if o != nil {
-				info = o.Sess.ServerInfo()
-				o.Close()
-			}
-			return testedMsg{name: c.Name, info: info, err: err}
-		})
-	}}
+		return w.testConn(c)
+	}, "ctrl+o": func(v map[string]string) tea.Cmd { return w.pickPasswordCmd(f, v["name"]) }}
 	f.onChange = func(key string, v map[string]string) { // swap the default port when the driver changes
 		if key != "driver" {
 			return
