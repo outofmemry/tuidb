@@ -95,8 +95,16 @@ func (w *Workspace) newBoard(done func()) tea.Cmd {
 		return w.a.say("created board %s", strings.TrimSpace(v["name"]))
 	})
 	f.validate = func(v map[string]string) error {
-		if strings.TrimSpace(v["name"]) == "" || strings.TrimSpace(v["title"]) == "" || strings.TrimSpace(v["query"]) == "" {
-			return fmt.Errorf("name, panel title and query are required")
+		k, q := v["kind"], strings.TrimSpace(v["query"])
+		if strings.TrimSpace(v["name"]) == "" || strings.TrimSpace(v["title"]) == "" {
+			return fmt.Errorf("name and panel title are required")
+		}
+		switch {
+		case (k == "input" || k == "dropdown") && strings.TrimSpace(v["var"]) == "":
+			return fmt.Errorf("name the variable this panel sets")
+		case k == "input", k == "dropdown" && (q != "" || strings.TrimSpace(v["options"]) != ""):
+		case q == "":
+			return fmt.Errorf("a read-only query is required")
 		}
 		return nil
 	}
