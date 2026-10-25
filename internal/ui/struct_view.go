@@ -810,7 +810,7 @@ func (ws *Workspace) newTableDialog() tea.Cmd {
 		t.buildStructure(t.loaded)
 		t.structGrid.Editable = true
 		t.structGrid.AddRow() // a first column to start from
-		t.structGrid.Rows[0].Cur[scName], t.structGrid.Rows[0].Cur[scType], t.structGrid.Rows[0].Cur[scNull], t.structGrid.Rows[0].Cur[scPK] = "id", typeChoices(ws.caps)[0], "NO", "YES"
+		t.structGrid.Rows[0].Cur[scName], t.structGrid.Rows[0].Cur[scType], t.structGrid.Rows[0].Cur[scNull], t.structGrid.Rows[0].Cur[scPK] = "id", ws.dataTypes()[0], "NO", "YES"
 		return ws.addTab(t)
 	}))
 	return nil
