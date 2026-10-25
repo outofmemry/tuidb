@@ -1199,17 +1199,9 @@ func (w *Workspace) tabLabels(g int) []tabLabel {
 		if t.Dirty() {
 			title += " ●"
 		}
-		label := fmt.Sprintf(" %d %s %s ", n, icon, fit(title, min(width(title), 24)))
-		switch {
-		case i == active && focused:
-			bar = append(bar, th.TabActive.Render(label))
-		case i == active:
-			bar = append(bar, th.TabActive.Faint(true).Render(label))
-		default:
-			bar = append(bar, th.TabIdle.Render(label))
-		}
+		out = append(out, tabLabel{i, fmt.Sprintf(" %d %s %s ", n, icon, fit(title, min(width(title), 24)))})
 	}
-	return strings.Join(bar, " ")
+	return out
 }
 
 // paneFrame is one main frame: the tab bar of group g on its top edge and tab t (or the empty
