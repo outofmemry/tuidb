@@ -26,19 +26,28 @@ func (s *Server) meta(r *http.Request) (any, error) {
 	for _, d := range dialects {
 		ops[d] = db.Operators(d)
 	}
-	c := s.o.Cfg
-	// The web UI runs the same prefix state machine as the terminal, so it gets the resolved bindings.
-	km, err := c.Keymap()
+	c := s.cfg()
+	// The web UI runs the same prefix state machine as the terminal, so it gets the resolved bindings
+	// (plugin shortcuts included), in keymap table order.
+	km, conflicts, err := c.KeymapChecked(pluginBindings())
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]any{
 		"drivers": config.Drivers, "sslModes": config.SSLModes, "safeModes": safemode.All, "operators": ops,
-		"config": map[string]any{"general": c.General, "editor": c.Editor, "table": c.Table, "sidebar": c.Sidebar, "csv": c.CSV},
-		"theme":  webTheme(c.Theme),
-		"web":    map[string]any{"fontSize": c.Web.FontSize, "lineHeight": c.Web.LineHeight, "notifications": c.Web.Notifications},
-		"keymap": map[string]any{"prefix": km.Prefix, "bindings": km.All()},
-		"login":  c.Web.Password != "",
+		"config":             map[string]any{"general": section(c.General), "editor": section(c.Editor), "table": section(c.Table), "sidebar": section(c.Sidebar), "csv": c.CSV},
+		"theme":              webTheme(c.Theme),
+		"web":                map[string]any{"fontSize": c.Web.FontSize, "lineHeight": c.Web.LineHeight, "notifications": c.Web.Notifications, "autoHideScrollbars": c.Web.AutoHideScrollbars, "toolbar": nonNil(c.Web.Toolbar)},
+		"security":           map[string]any{"passcode": c.Security.Passcode != "", "lockAfterMins": c.Security.LockAfterMins}, // never the hash
+		"menus":              menus.All(),
+		"themes":             nonNil(config.InstalledThemes()),
+		"passwordCmdPresets": config.PasswordCmdPresets(),
+		"version":            s.o.Version,
+		"keymap":             map[string]any{"prefix": km.Prefix, "bindings": km.All()},
+		"pluginConflicts":    nonNil(conflicts), // plugin shortcuts that were skipped (a clash); never an error
+		"login":              c.Web.Password != "",
+		"query_timeout_secs": c.General.QueryTimeoutSecs, // the client prompts keep waiting / cancel after this; /exec has no hard timeout
+		"export":             map[string]any{"filename": c.Export.Filename, "header": c.Export.Header},
 	}
 	for k, v := range s.metaExtra() {
 		out[k] = v
