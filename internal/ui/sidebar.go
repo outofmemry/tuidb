@@ -792,90 +792,13 @@ func (s *sidebar) menu() tea.Cmd {
 	if r.kind == sbQuery {
 		return s.queryMenu(r.q)
 	}
+	if r.kind == sbHistory {
+		return s.historyMenu(r.h)
+	}
 	if r.kind != sbObject {
 		return nil
 	}
-	ref := r.obj.ObjRef
-	isTable := ref.Kind == db.KindTable || ref.Kind == db.KindView || ref.Kind == db.KindMatView
-	items := []pickItem{{Label: "Open", Value: "open"}, {Label: "Open in new tab", Value: "new"}, {Label: "New table…", Value: "newtable"}}
-	if isTable {
-		items = append(items, pickItem{Label: "Open structure", Value: "structure"})
-	}
-	if ref.Kind == db.KindView || ref.Kind == db.KindMatView || ref.Kind == db.KindFunction || ref.Kind == db.KindProcedure {
-		items = append(items, pickItem{Label: "Edit definition", Value: "edit"})
-	}
-	if ref.Kind == db.KindTable && s.w.caps.Triggers {
-		items = append(items, pickItem{Label: "Triggers…", Value: "triggers"})
-	}
-	items = append(items, pickItem{Label: "Show DDL", Value: "ddl"}, pickItem{Label: "Copy name", Value: "name"},
-		pickItem{Label: "Copy script: CREATE", Value: "script:create"}, pickItem{Label: "Copy script: DROP", Value: "script:drop"})
-	if ref.Kind == db.KindTable {
-		items = append(items, pickItem{Label: "Copy script: TRUNCATE", Value: "script:truncate"}, pickItem{Label: "Copy script: SELECT top 100", Value: "script:select100"},
-			pickItem{Label: "Clone…", Value: "clone"}, pickItem{Label: "Rename…", Value: "rename"}, pickItem{Label: "Truncate…", Value: "truncate"})
-	}
-	items = append(items, pickItem{Label: "Delete…", Value: "drop"}, pickItem{Label: "Pin / unpin", Value: "pin"}, pickItem{Label: "Add to group…", Value: "group"})
-	if r.group != "" {
-		items = append(items, pickItem{Label: "Remove from group " + r.group, Value: "ungroup:" + r.group})
-	} else {
-		for _, g := range s.groupsOf(objKey(ref)) {
-			items = append(items, pickItem{Label: "Remove from group " + g, Value: "ungroup:" + g})
-		}
-	}
-	if isTable {
-		items = append(items, pickItem{Label: "Diagram", Value: "diagram"})
-	}
-	if s.w.caps.Schemas {
-		items = append(items, pickItem{Label: "New schema…", Value: "newschema"}, pickItem{Label: "Drop schema…", Value: "dropschema"})
-	}
-	s.w.a.push(&pickerDlg{title: ref.Name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
-		v := it.Value.(string)
-		switch {
-		case v == "open":
-			return s.w.openObject(ref, false)
-		case v == "new":
-			return s.w.openObject(ref, true)
-		case v == "structure":
-			return s.w.openStructure(ref)
-		case v == "newtable":
-			return s.w.newTableDialog()
-		case v == "ddl":
-			return s.w.showDDL(ref)
-		case v == "edit":
-			return s.w.editDefinition(ref)
-		case v == "triggers":
-			return s.w.triggerMenu(ref)
-		case v == "name":
-			return tea.Batch(setClip(ref.Name), s.w.a.say("copied %s", ref.Name))
-		case strings.HasPrefix(v, "script:"):
-			kind := db.ScriptKind(strings.TrimPrefix(v, "script:"))
-			return s.w.async(-1, func(ctx context.Context, sess db.Session) tea.Msg {
-				text, err := sess.Script(ctx, kind, ref)
-				return scriptMsg{text: text, err: err}
-			})
-		case v == "pin":
-			return s.togglePin()
-		case v == "clone":
-			return s.cloneDialog(ref)
-		case v == "rename":
-			return s.renameDialog(ref)
-		case v == "truncate":
-			return s.adminOp(db.OpTruncate)
-		case v == "drop":
-			return s.adminOp(db.OpDropObject)
-		case v == "group":
-			return s.addToGroup(ref)
-		case strings.HasPrefix(v, "ungroup:"):
-			return s.removeFromGroup(ref, strings.TrimPrefix(v, "ungroup:"))
-		case v == "diagram":
-			return s.w.diagramAction(ref.Name)
-		case v == "newschema":
-			return s.newSchema()
-		case v == "dropschema":
-			return s.dropSchema()
-		}
-		return nil
-	}})
-	return nil
+	return s.objectMenu(r)
 }
 
 // databasePicker lists databases: Enter opens one, Ctrl/Alt+Enter opens its menu (open, rename, drop).
