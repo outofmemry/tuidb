@@ -72,7 +72,7 @@ func names(es []event) string {
 }
 
 func TestExportStreamsAndJob(t *testing.T) {
-	e := newEnv(t, "")
+	e := newEnvCfg(t, "", func(c *config.Config) { c.Export.Filename = "{table}" })
 	id := e.open()
 	resp := e.post("/api/sessions/"+id+"/export", map[string]any{"mode": "table", "ref": map[string]string{"Name": "t"}, "format": "csv"})
 	b, _ := io.ReadAll(resp.Body)
