@@ -672,7 +672,7 @@ func (s *Server) searchStart(ss *session, r *http.Request) (any, error) {
 	if err := ss.jobSlot(); err != nil {
 		return nil, err
 	}
-	j := &job{}
+	j := &job{kind: "search", title: fmt.Sprintf("Search for %q", req.Value), paused: new(atomic.Bool)}
 	for _, ob := range objs {
 		if ob.Kind == db.KindTable && (len(only) == 0 || only[ob.Name]) {
 			j.total++
@@ -680,15 +680,9 @@ func (s *Server) searchStart(ss *session, r *http.Request) (any, error) {
 	}
 	id := ss.startJob(j, func(ctx context.Context) error {
 		return db.Search(ctx, ss.o.Sess, req, func(h db.SearchHit) {
-			j.mu.Lock()
-			defer j.mu.Unlock()
-			j.checked++
-			if h.Count > 0 || h.Err != nil {
-				x := hitJSON{Ref: h.Ref, Count: h.Count, Filters: h.Filters}
-				if h.Err != nil {
-					x.Error = h.Err.Error()
-				}
-				j.hits = append(j.hits, x)
+			j.record(h)
+			if !waitWhilePaused(ctx, j.paused, maxPause) { // between two tables, outside the lock
+				j.cancel()
 			}
 		})
 	})
