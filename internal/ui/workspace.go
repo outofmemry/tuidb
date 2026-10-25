@@ -1301,21 +1301,3 @@ func (w *Workspace) detailView(th Theme, W, H int) string {
 	}
 	return strings.Join(padLines(lines, W, H), "\n")
 }
-
-func (w *Workspace) consoleView(th Theme, W, H int) string {
-	var lines []string
-	all := w.console.Lines()
-	for _, c := range all[max(0, len(all)-H):] {
-		mark := th.OK.Render("✓")
-		if c.Failed {
-			mark = th.Err.Render("✗")
-		}
-		sql := strings.Join(strings.Fields(c.SQL), " ")
-		sql = highlight(th, sql, lexLines(w.caps.Dialect, []string{sql})[0])
-		lines = append(lines, " "+th.Dim.Render(c.At.Format("15:04:05"))+" "+mark+" "+sql+th.Dim.Render("  "+c.Dur.Round(time.Millisecond).String()))
-	}
-	if len(lines) == 0 {
-		lines = []string{th.Dim.Render("  every statement sent to the server appears here")}
-	}
-	return strings.Join(padLines(lines, W, H), "\n")
-}
