@@ -446,8 +446,11 @@ func (w *Workspace) backupAction(restore bool) tea.Cmd {
 		return nil
 	}
 	f.submit = "Enter: continue"
-	f.hotHint = "Ctrl+t: tool paths"
-	f.hotkeys = map[string]func(map[string]string) tea.Cmd{"ctrl+t": func(map[string]string) tea.Cmd { return w.toolPaths() }}
+	f.hotHint = "Ctrl+t: tool paths   Ctrl+o: common options"
+	f.hotkeys = map[string]func(map[string]string) tea.Cmd{
+		"ctrl+t": func(map[string]string) tea.Cmd { return w.toolPaths() },
+		"ctrl+o": func(map[string]string) tea.Cmd { return w.commonOptions(f, restore) },
+	}
 	w.a.push(f)
 	return nil
 }
