@@ -177,7 +177,7 @@ func (s *Server) backupRestore(ss *session, r *http.Request, restore bool) (any,
 	if !restore {
 		req.NewDatabase = ""
 	}
-	cmd, err := backup.Plan(backup.Options{Conn: conn, Database: req.Database, File: req.File, Gzip: req.Gzip, Format: req.Format, DataOnly: req.DataOnly, SchemaOnly: req.SchemaOnly, NewDatabase: req.NewDatabase}, restore)
+	cmd, err := backup.Plan(backup.Options{Conn: conn, Database: req.Database, File: req.File, Gzip: req.Gzip, Format: req.Format, DataOnly: req.DataOnly, SchemaOnly: req.SchemaOnly, NewDatabase: req.NewDatabase, Extra: req.Extra}, restore)
 	if err != nil {
 		if !tool.Found && !req.Run { // let the dialog name the missing executable
 			return map[string]any{"display": "", "tool": tool, "levelLabel": ss.lvl().Label()}, nil
@@ -234,7 +234,10 @@ func (s *Server) backupRestore(ss *session, r *http.Request, restore bool) (any,
 	if err := ss.jobSlot(); err != nil {
 		return nil, err
 	}
-	j := &job{}
+	j := &job{kind: "backup", title: "Backup " + filepath.Base(req.File), fileName: filepath.Base(req.File), path: req.File}
+	if restore {
+		j.kind, j.title, j.path = "restore", "Restore "+filepath.Base(req.File), ""
+	}
 	info["job"] = ss.startJob(j, func(ctx context.Context) error {
 		err := backup.Run(ctx, cmd, func(line string) {
 			j.mu.Lock()
