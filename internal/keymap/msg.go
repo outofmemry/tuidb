@@ -7,12 +7,12 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-var shiftLetter = regexp.MustCompile(`^shift\+([a-z])$`)
+var shiftLetter = regexp.MustCompile(`^(alt\+)?shift\+([a-z])$`)
 
 // Canonical normalizes a Bubble Tea keystroke ("shift+a") to the form Parse produces ("A").
 func Canonical(keystroke string) string {
 	if m := shiftLetter.FindStringSubmatch(keystroke); m != nil {
-		return strings.ToUpper(m[1])
+		return m[1] + strings.ToUpper(m[2]) // "shift+a" -> "A", "alt+shift+k" -> "alt+K"
 	}
 	return keystroke
 }

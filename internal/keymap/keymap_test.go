@@ -121,13 +121,15 @@ func TestFromMsg(t *testing.T) {
 		{tea.Key{Code: '?', Text: "?"}, "?"},
 		{tea.Key{Code: tea.KeyEnter, Mod: tea.ModAlt}, "alt+enter"},
 		{tea.Key{Code: tea.KeyEscape}, "esc"},
+		{tea.Key{Code: 'k', Mod: tea.ModAlt | tea.ModShift}, "alt+K"},
+		{tea.Key{Code: 'k', ShiftedCode: 'K', Text: "K", Mod: tea.ModAlt | tea.ModShift}, "alt+K"},
 	} {
 		if got := FromMsg(tea.KeyPressMsg(c.k)); got != c.want {
 			t.Errorf("%+v -> %q, want %q", c.k, got, c.want)
 		}
 	}
 	// What the keymap parser produces must equal what the terminal reports.
-	for spec, k := range map[string]tea.Key{"C-d": {Code: 'd', Mod: tea.ModCtrl}, "M-Enter": {Code: tea.KeyEnter, Mod: tea.ModAlt}, "P": {Code: 'p', ShiftedCode: 'P', Text: "P", Mod: tea.ModShift}} {
+	for spec, k := range map[string]tea.Key{"C-d": {Code: 'd', Mod: tea.ModCtrl}, "M-Enter": {Code: tea.KeyEnter, Mod: tea.ModAlt}, "M-K": {Code: 'k', Mod: tea.ModAlt | tea.ModShift}, "P": {Code: 'p', ShiftedCode: 'P', Text: "P", Mod: tea.ModShift}} {
 		if p, _ := Parse(spec); p != FromMsg(tea.KeyPressMsg(k)) {
 			t.Errorf("Parse(%q)=%q but terminal gives %q", spec, p, FromMsg(tea.KeyPressMsg(k)))
 		}
@@ -184,6 +186,14 @@ func TestSessionBindings(t *testing.T) {
 	for k, want := range map[string]string{"n": "new_session", "l": "switch_session"} {
 		if got, ok := m.Lookup(Global, k); !ok || got != want {
 			t.Errorf("prefix %s = %q, %v; want %q", k, got, ok, want)
+		}
+	}
+}
+
+func TestCloseAllTabsNotBrowserReserved(t *testing.T) {
+	for _, b := range defaults {
+		if b.action == "close_all_tabs" && b.key == "ctrl+w" {
+			t.Fatal("ctrl+w closes the browser window; close_all_tabs must not use it")
 		}
 	}
 }
