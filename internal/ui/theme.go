@@ -105,6 +105,32 @@ var namedPalettes = map[string]map[string]string{
 		"prefix_bg": "#c2620a", "prefix_fg": "#ffffff", "popup_bg": "#faece5"}),
 }
 
+// derivedKeys are the palette keys that follow another one unless set themselves: a theme that only
+// changes accent (or sel_cell, border...) still recolors the tab bar, cell selection, grid lines...
+var derivedKeys = map[string]string{
+	"tabs_bg": "header_bg", "tab_active_bg": "accent", "notification_bg": "status_bg", "grid_line": "border", "cell_selection": "sel_cell",
+}
+
+func init() {
+	// the named themes inherit dark / light, so their surfaces are derived from their own colors:
+	// the page is the alt-row tone pushed toward the extreme, the sidebar is the alt-row tone.
+	for name, p := range namedPalettes {
+		pole := "#000000"
+		if strings.HasSuffix(name, "-light") {
+			pole = "#ffffff"
+		}
+		f := 0.35
+		if pole == "#ffffff" {
+			f = 0.6
+		}
+		base := blend(p["alt_row"], pole, f)
+		p["editor_bg"], p["window_bg"], p["sidebar_bg"] = base, base, p["alt_row"]
+		for k, src := range derivedKeys {
+			p[k] = p[src]
+		}
+	}
+}
+
 // termDark is what theme.name = "auto" resolves to: dark until the terminal reports a light background.
 var termDark = true
 
