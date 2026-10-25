@@ -17,23 +17,22 @@ import (
 )
 
 type resultView struct {
-	title     string
-	grid      *Grid
-	msg       string
-	isErr     bool
-	hasRows   bool
-	took      time.Duration
-	trunc     bool
-	rows      int
-	stmt      string
-	pinned    bool       // survives the next run
-	ref       *db.ObjRef // set when the result maps to one table and can be edited
-	find      string
-	raw       *db.Result // the rows as the server sent them: export and chart read these
-	chart     bool       // show the chart instead of the grid
-	limit     int        // row limit this result was fetched with when "load more" raised it
-	matchCase bool       // the result search is case-sensitive
-	msgView   bool       // show the message lines (notices, status) instead of the rows
+	title   string
+	grid    *Grid
+	msg     string
+	isErr   bool
+	hasRows bool
+	took    time.Duration
+	trunc   bool
+	rows    int
+	stmt    string
+	pinned  bool       // survives the next run
+	ref     *db.ObjRef // set when the result maps to one table and can be edited
+	find    FindSpec
+	raw     *db.Result // the rows as the server sent them: export and chart read these
+	chart   bool       // show the chart instead of the grid
+	limit   int        // row limit this result was fetched with when "load more" raised it
+	msgView bool       // show the message lines (notices, status) instead of the rows
 }
 
 type queryTab struct {
