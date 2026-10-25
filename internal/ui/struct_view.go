@@ -513,17 +513,7 @@ func (t *tableTab) structInput(msg tea.Msg) tea.Cmd {
 		if !ok {
 			return nil
 		}
-		switch k.Keystroke() {
-		case "enter":
-			g.FinishEdit(true)
-		case "tab":
-			g.FinishEdit(true)
-			g.Move(0, 1, false)
-		case "esc":
-			g.FinishEdit(false)
-		default:
-			g.edit.Handle(k)
-		}
+		g.EditKey(k)
 		return nil
 	}
 	k, ok := msg.(tea.KeyPressMsg)
@@ -551,6 +541,8 @@ func (t *tableTab) structInput(msg tea.Msg) tea.Cmd {
 		g.ClearSelection()
 	case "c":
 		return t.copy(g.CopyCells(FmtPlain, t.ref.Name), "cells")
+	case "m": // the row menu (menus.Structure): add, delete, move, copy as…
+		return t.structMenu()
 	case "enter", "e":
 		return t.structActivate(g)
 	case "space":
