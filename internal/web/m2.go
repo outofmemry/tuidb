@@ -526,6 +526,23 @@ func (s *Server) importOpts(req importReq) (importer.Options, error) {
 	if req.Delimiter != "" {
 		o.CSV.Delimiter = req.Delimiter
 	}
+	o.Encoding, o.OnConflict, o.ColumnTypes = req.Encoding, req.OnConflict, req.ColumnTypes
+	o.NullAs, o.EmptyIsNull, o.KeepFormulaQuote = req.NullAs, req.EmptyIsNull, req.KeepFormulaQuote
+	for col, typ := range req.ColumnTypes {
+		if !validColumnType(typ) {
+			return importer.Options{}, bad("invalid type %q for column %q", typ, col)
+		}
+	}
+	switch req.OnConflict {
+	case "", "stop", "update", "replace":
+	default:
+		return importer.Options{}, bad("unknown on_conflict %q (stop, update or replace)", req.OnConflict)
+	}
+	if rs := []rune(req.Quote); len(rs) == 1 {
+		o.Quote = rs[0]
+	} else if len(rs) > 1 {
+		return importer.Options{}, bad("quote must be one character")
+	}
 	return o, nil
 }
 
