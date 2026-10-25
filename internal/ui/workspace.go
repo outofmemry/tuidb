@@ -675,6 +675,15 @@ func (w *Workspace) action(name string) tea.Cmd {
 		w.focusDetail = w.focusDetail && w.showDetail
 	case "toggle_console":
 		w.showConsole = !w.showConsole
+		w.focusConsole = w.focusConsole && w.showConsole
+	case "toggle_panels":
+		return w.togglePanels()
+	case "move_tab_left":
+		return w.moveTab(-1)
+	case "move_tab_right":
+		return w.moveTab(1)
+	case "jobs":
+		return w.jobsAction()
 	case "focus_left":
 		if w.focusDetail {
 			w.focusDetail = false
@@ -729,9 +738,13 @@ func (w *Workspace) action(name string) tea.Cmd {
 		return w.exportAction()
 	case "import":
 		return w.importAction()
-	case "users", "diagram", "metrics", "backup", "restore", "split_right", "next_pane", "prev_pane", "assistant", "plugins", "go_back", "go_forward", "mcp_log":
+	case "users", "diagram", "metrics", "backup", "restore", "split_right", "next_pane", "prev_pane", "assistant", "plugins", "go_back", "go_forward", "mcp_log",
+		"close_pane", "assistant_new", "assistant_clear", "assistant_history":
 		return w.m3Action(name)
 	default:
+		if n, ok := strings.CutPrefix(name, "plugin:"); ok { // a plugin's own shortcut
+			return w.pluginsAction(n)
+		}
 		if strings.HasPrefix(name, "tab_") {
 			var n int
 			fmt.Sscanf(name, "tab_%d", &n)
