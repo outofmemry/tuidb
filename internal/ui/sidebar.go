@@ -1053,6 +1053,9 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 			if r.label != "" {
 				name = r.label
 			}
+			if hex := s.itemColour(r.obj.ObjRef); hex != "" { // "Set colour…" (shared with the diagram)
+				name = lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render(name)
+			}
 			arrow := ""
 			if s.w.a.d.Cfg.Sidebar.ShowColumns && r.obj.Kind != db.KindFunction && r.obj.Kind != db.KindProcedure && r.obj.Kind != db.KindSequence && r.obj.Kind != db.KindType {
 				arrow = th.Dim.Render("▸ ")
