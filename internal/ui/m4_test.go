@@ -169,8 +169,8 @@ func TestM4HistorySaveAndImport(t *testing.T) {
 	setField(t, h, "path", out)
 	h.press("enter")
 	after, _ := h.a.d.Hist.List("shop", "", 0)
-	if len(after) != 2*len(before) {
-		t.Fatalf("import: %d entries, want %d", len(after), 2*len(before))
+	if len(after) != len(before) { // the same entries again are skipped, not duplicated
+		t.Fatalf("import: %d entries, want %d", len(after), len(before))
 	}
 }
 
