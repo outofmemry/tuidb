@@ -162,7 +162,7 @@ func (s *Server) exportJob(ss *session, req exportReq, o export.Options) (any, e
 	if err != nil {
 		return nil, err
 	}
-	j := &job{file: f.Name(), fileName: req.fileName(ss, o)}
+	j := &job{kind: "export", title: "Export " + req.Ref.Name, file: f.Name(), fileName: req.fileName(ss, o)}
 	id := ss.startJob(j, func(ctx context.Context) error {
 		err := export.Table(ctx, ss.o.Sess, req.Ref, req.Filters, o, f, func(n int64) {
 			j.mu.Lock()
@@ -190,6 +190,7 @@ type hitJSON struct {
 	Count   int64        `json:"count"`
 	Filters db.FilterSet `json:"filters"`
 	Error   string       `json:"error,omitempty"`
+	Schema  string       `json:"schema"`
 }
 
 // job is one background import or search; the browser polls it.
