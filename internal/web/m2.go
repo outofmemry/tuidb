@@ -427,15 +427,22 @@ const maxUpload int64 = 512 << 20 // a bigger spool fills the temp disk
 // ---- import -----------------------------------------------------------------------------
 
 type importReq struct {
-	Source      string
-	Content     string // JSON body only; a multipart upload sends the file as its own part
-	Header      bool
-	Delimiter   string
-	CreateTable bool
-	Ref         db.ObjRef
-	Mapping     map[string]string
-	Confirmed   bool
-	Password    string
+	Source           string
+	Content          string // JSON body only; a multipart upload sends the file as its own part
+	Header           bool
+	Delimiter        string
+	CreateTable      bool
+	Ref              db.ObjRef
+	Mapping          map[string]string
+	Confirmed        bool
+	Password         string
+	Encoding         string            // "" | utf-8 | latin1 | utf-16le | ... (IANA names)
+	Quote            string            // CSV quote character (one rune)
+	OnConflict       string            `json:"on_conflict"`  // "" | stop | update | replace
+	ColumnTypes      map[string]string `json:"column_types"` // created columns: column -> type
+	NullAs           string            `json:"null_as"`      // cell text that becomes NULL
+	EmptyIsNull      bool              `json:"empty_is_null"`
+	KeepFormulaQuote bool              `json:"keep_formula_quote"` // keep the apostrophe before = + - @
 }
 
 // importInput reads the request: a JSON body (Content inline) or multipart/form-data with an
