@@ -449,7 +449,8 @@ func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
 		}
 		rv := t.toResult(m)
 		if t.replace >= 0 && t.replace < len(t.res) { // a committed result is refreshed in place
-			rv.title, rv.pinned, rv.chart = t.res[t.replace].title, t.res[t.replace].pinned, t.res[t.replace].chart
+			old := t.res[t.replace]
+			rv.title, rv.pinned, rv.chart, rv.find, rv.msgView = old.title, old.pinned, old.chart, old.find, old.msgView
 			rv.limit, t.override = t.override, 0
 			t.res[t.replace] = rv
 			t.running, t.queue, t.rc, t.replace = false, nil, t.replace, -1
@@ -504,7 +505,7 @@ func (t *queryTab) toResult(m queryDoneMsg) *resultView {
 		cols[i] = gridCol{Name: c.Name, Type: c.Type}
 	}
 	rv.hasRows, rv.rows, rv.raw = true, len(r.Rows), r
-	rv.grid = &Grid{}
+	rv.grid = &Grid{DecodeSpatial: t.ws.a.d.Cfg.Table.DecodeSpatial, NoStripes: !t.ws.a.d.Cfg.Table.AlternatingRows}
 	rv.grid.SetData(cols, r.Rows)
 	return rv
 }
