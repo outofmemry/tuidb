@@ -569,6 +569,18 @@ func (s *Server) importPreview(ss *session, r *http.Request) (any, error) {
 	return map[string]any{"columns": cols, "rows": rows}, nil
 }
 
+// importGate is the statement kinds an import will run, for the read-only and safe-mode checks.
+func importGate(req importReq) []db.Statement {
+	stmts := []db.Statement{{Text: "INSERT"}}
+	if req.OnConflict == "update" || req.OnConflict == "replace" {
+		stmts = append(stmts, db.Statement{Text: "UPDATE"})
+	}
+	if req.CreateTable {
+		stmts = append(stmts, db.Statement{Text: "CREATE TABLE"})
+	}
+	return stmts
+}
+
 func (s *Server) importStart(ss *session, r *http.Request) (any, error) {
 	var o importer.Options
 	req, in, cleanup, err := importInput(r, true, func(n int64) (func(), error) {
