@@ -653,22 +653,9 @@ func (t *tableTab) Input(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// findPrompt asks for text and jumps to its first match in the loaded rows; n / N repeat.
-func (t *tableTab) findPrompt(g *Grid, last *string) tea.Cmd {
-	t.ws.a.push(newForm("Find in the loaded rows", []formField{{Key: "q", Label: "Text", Kind: fText, Value: *last}}, func(v map[string]string) tea.Cmd {
-		*last = v["q"]
-		return t.findNext(g, *last, 1)
-	}))
-	return nil
-}
-
-func (t *tableTab) findNext(g *Grid, text string, dir int) tea.Cmd {
-	if text == "" {
-		return t.ws.a.say("press / to search the loaded rows")
-	}
-	if !g.Find(text, dir) {
-		return t.ws.a.say("%q is not in the loaded rows", text)
-	}
+// findPrompt opens the find / replace form; n / N repeat the search.
+func (t *tableTab) findPrompt(g *Grid) tea.Cmd {
+	t.ws.a.findForm("Find in the loaded rows", g, &t.find, true)
 	return nil
 }
 
@@ -752,6 +739,8 @@ func (t *tableTab) Action(name string) (bool, tea.Cmd) {
 			}
 		}
 		switch name {
+		case "copy_rows_as", "copy_cells_as":
+			return true, t.structCopyAs()
 		case "add_row":
 			return true, t.structAdd(t.editGrid())
 		case "delete_rows":
