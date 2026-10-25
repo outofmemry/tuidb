@@ -544,7 +544,11 @@ func (t *queryTab) Input(msg tea.Msg) tea.Cmd {
 		}
 	}
 	if t.ed.Handle(msg) {
-		return t.afterEdit()
+		cmds := []tea.Cmd{t.afterEdit()}
+		if cmd, note := t.ed.takeEx(); cmd != "" || note != "" {
+			cmds = append(cmds, t.vimEx(cmd, note))
+		}
+		return tea.Batch(cmds...)
 	}
 	return nil
 }
@@ -600,6 +604,10 @@ func (t *queryTab) resultsInput(msg tea.Msg) tea.Cmd {
 		t.rc = min(len(t.res)-1, t.rc+1)
 		return nil
 	case "esc":
+		if rv.grid != nil && rv.grid.selecting { // the first Esc deselects, the next one returns to the editor
+			rv.grid.ClearSelection()
+			return nil
+		}
 		t.focusResults = false
 		return nil
 	case "m":
