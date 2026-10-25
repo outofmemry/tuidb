@@ -393,6 +393,7 @@ type resultJSON struct {
 	DurationMs int64       `json:"durationMs"`
 	Truncated  bool        `json:"truncated"`
 	Editable   bool        `json:"editable"`
+	Table      *tableInfo  `json:"table,omitempty"` // exec results: the table an editable SELECT reads (see editableResult)
 }
 
 // toJSON renders cells with db.FormatValue; SQL NULL stays JSON null.
@@ -511,11 +512,15 @@ func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit 
 		Vars        map[string]string // query parameter values; nil = ask when the statements have any
 		ParamFormat string            // overrides [editor] param_format for this run (the Variables dialog's picker)
 		Pin         string            // a query tab's id: its statements run on one dedicated connection (see session.pinned)
+		Syntax      string            // Mongo: "shell" | "command" | "" (either, told apart by a leading "{")
 	}
 	if err := decode(r, &req); err != nil {
 		return nil, 0, nil, err
 	}
 	dialect := ss.o.Sess.Caps().Dialect
+	if err := checkSyntax(dialect, req.Syntax, req.Text); err != nil {
+		return nil, 0, nil, err
+	}
 	stmts = db.Split(dialect, req.Text)
 	if req.Current {
 		st, ok := db.StatementAt(stmts, req.Offset)
