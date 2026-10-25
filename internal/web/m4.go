@@ -211,7 +211,8 @@ func (s *Server) execStream(ss *session, r *http.Request) (any, error) {
 			}
 		}
 		ev.send("done", map[string]any{"i": i, "stmt": it.Stmt, "label": it.Label, "error": it.Error, "affected": it.Affected, "message": it.Message, "noticeId": it.NoticeID,
-			"durationMs": it.DurationMs, "truncated": it.Truncated, "hasRows": it.HasRows, "docs": it.Docs})
+			"durationMs": it.DurationMs, "truncated": it.Truncated, "hasRows": it.HasRows, "docs": it.Docs,
+			"editable": it.Editable, "table": it.Table, "resultId": it.ResultID})
 		if it.Error != "" && ss.srv.o.Cfg.Editor.ReturnOnError {
 			break
 		}
@@ -557,6 +558,17 @@ func (c *consoleLog) add(conn, text string) {
 	if len(c.lines) > consoleCap {
 		c.lines = c.lines[len(c.lines)-consoleCap:]
 	}
+}
+
+// tail is the console lines as text (crashlog keeps the last 20), for the crash log.
+func (c *consoleLog) tail() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []string
+	for _, l := range c.lines {
+		out = append(out, l.Conn+": "+l.Text)
+	}
+	return out
 }
 
 func (s *Server) getConsole(r *http.Request) (any, error) {
