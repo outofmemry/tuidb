@@ -650,13 +650,20 @@ func (s *Server) searchStart(ss *session, r *http.Request) (any, error) {
 	}
 	ctx, cancel := ss.ctx(r)
 	defer cancel()
-	schema := req.Schema
-	if schema == "" {
-		schema = ss.o.Sess.CurrentSchema()
-	}
-	objs, err := ss.o.Sess.Objects(ctx, schema)
+	schemas, err := db.SearchSchemas(ctx, ss.o.Sess, req)
 	if err != nil {
 		return nil, bad("%v", err)
+	}
+	var objs []db.Object
+	for _, schema := range schemas {
+		if schema == "" {
+			schema = ss.o.Sess.CurrentSchema()
+		}
+		one, err := ss.o.Sess.Objects(ctx, schema)
+		if err != nil {
+			return nil, bad("%v", err)
+		}
+		objs = append(objs, one...)
 	}
 	only := map[string]bool{}
 	for _, t := range req.Tables {
