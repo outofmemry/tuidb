@@ -52,18 +52,24 @@ type Workspace struct {
 	cur     int
 	nextTab int
 
-	focusSB     bool
-	focusDetail bool // the row-detail pane has the keyboard (focus_right from the grid)
-	showSB      bool
-	showDetail  bool
-	showConsole bool
-	console     store.Console  // the last 1000 statements; clear_console empties it
-	names       map[int]string // tab id -> name set by rename_tab
-	W, H        int
-	closed      bool
-	applying    bool               // statements are being sent: edits and a second commit are refused meanwhile
-	jobCancel   context.CancelFunc // the running export / import / search, nil when none
-	vars        map[string]string  // query parameter values, remembered for the session
+	focusSB      bool
+	focusDetail  bool // the row-detail pane has the keyboard (focus_right from the grid)
+	showSB       bool
+	showDetail   bool
+	showConsole  bool
+	console      store.Console  // the last 1000 statements; clear_console empties it
+	names        map[int]string // tab id -> name set by rename_tab
+	W, H         int
+	closed       bool
+	applying     bool               // statements are being sent: edits and a second commit are refused meanwhile
+	jobCancel    context.CancelFunc // the running export / import / search, nil when none
+	jobs         []*jobEntry        // the jobs centre: running and finished jobs until dismissed (m15_jobs.go)
+	jobFile      string             // the file the next job writes, for "Open folder"
+	nextJob      int
+	focusConsole bool // the console pane has the keyboard (focus_down)
+	zen          bool // toggle_panels: sidebar, console, row detail and status line hidden
+	zenSaved     [3]bool
+	vars         map[string]string // query parameter values, remembered for the session
 	// meta caches column metadata per object, so reopening a table or its structure skips that
 	// round trip. Only touched on the UI loop; cleared by reload, reconnect and schema changes.
 	meta map[db.ObjRef][]db.Column
