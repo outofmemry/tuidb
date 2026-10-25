@@ -186,7 +186,12 @@ func (w *Workspace) openBoard(b board.Board) tea.Cmd {
 	for _, x := range b.Vars {
 		v.vals[x.Name] = x.Default
 	}
-	d := &paneDlg{title: "Board " + b.Name, hint: "Tab: panel   Enter: run it / click   r: run all   e: variables   Esc: close", onClose: func() { v.closed = true }}
+	for _, p := range b.Panels { // input and dropdown panels declare their own variable
+		if _, dup := v.vals[p.Var]; p.Var != "" && !dup {
+			v.vals[p.Var] = p.Default
+		}
+	}
+	d := &paneDlg{title: "Board " + b.Name, hint: "Tab: panel   Enter: run / click / edit   r: run all   v: variables   e: errors   Esc: close", onClose: func() { v.closed = true }}
 	d.lines = v.lines
 	step := func(d int) func() tea.Cmd {
 		return func() tea.Cmd {
