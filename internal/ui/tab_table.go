@@ -133,7 +133,7 @@ func (t *tableTab) saveState() {
 	for h := range t.hidden {
 		hidden = append(hidden, h)
 	}
-	t.ws.a.d.State.SetTable(t.stateKey(), store.TableState{Hidden: hidden, Filters: t.filters, ShowBar: t.showFilters, Sort: t.sort})
+	t.ws.a.d.State.SetTable(t.stateKey(), store.TableState{Hidden: hidden, Filters: t.filters, ShowBar: t.showFilters, Sort: t.sort, ColWidths: t.ws.a.d.State.Table(t.stateKey()).ColWidths})
 }
 
 func (t *tableTab) ID() int       { return t.id }
@@ -480,7 +480,11 @@ func (t *tableTab) fill(res *db.Result) {
 		}
 		cols[i] = gridCol{Name: c.Name, Type: typ, PK: pk[c.Name]}
 	}
+	first := len(t.grid.Cols) == 0
 	t.grid.SetData(cols, res.Rows)
+	if first {
+		t.restoreWidths() // widths dragged with the mouse in an earlier session (M15.43)
+	}
 	t.resCols = res.Columns
 	// Rows are identified by their primary key: with a key column hidden (or, for a table
 	// without a key, any column hidden) an edit could hit other rows, so the grid turns read-only.
