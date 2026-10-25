@@ -680,26 +680,16 @@ func (t *queryTab) findPrompt(rv *resultView) tea.Cmd {
 	if rv.grid == nil {
 		return t.ws.a.say("nothing to search in this result")
 	}
-	var f *formDlg
-	title := func() string {
-		return "Find in this result · match case " + map[bool]string{true: "on", false: "off"}[rv.matchCase]
-	}
-	f = newForm(title(), []formField{{Key: "q", Label: "Text", Kind: fText, Value: rv.find}}, func(v map[string]string) tea.Cmd {
-		rv.find = v["q"]
-		return t.findIn(rv, 1)
-	})
-	f.hotHint = "Alt+c: match case"
-	f.hotkeys = map[string]func(map[string]string) tea.Cmd{"alt+c": func(map[string]string) tea.Cmd { rv.matchCase = !rv.matchCase; f.title = title(); return nil }}
-	t.ws.a.push(f)
+	t.ws.a.findForm("Find in this result", rv.grid, &rv.find, true) // findForm offers Replace only on an editable grid
 	return nil
 }
 
 func (t *queryTab) findIn(rv *resultView, dir int) tea.Cmd {
-	if rv.find == "" {
+	if rv.find.Text == "" {
 		return t.ws.a.say("press / to search this result")
 	}
-	if !rv.grid.FindCase(rv.find, dir, rv.matchCase) {
-		return t.ws.a.say("%q is not in this result", rv.find)
+	if !rv.grid.FindSpec(rv.find, dir) {
+		return t.ws.a.say("%q is not in this result", rv.find.Text)
 	}
 	return nil
 }
