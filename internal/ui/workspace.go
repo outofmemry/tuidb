@@ -77,7 +77,8 @@ type Workspace struct {
 	// gen counts session changes (database switch, reconnect, reload). Messages created under an
 	// older generation are dropped: their rows, columns and errors belong to another database.
 	gen int
-	m3  m3State // milestone 3: split panes, back/forward history, assistant chat
+	m3  m3State      // milestone 3: split panes, back/forward history, assistant chat
+	con consoleState // the console pane: cursor, find, errors only (m15_console.go)
 }
 
 type pingMsg struct{ err error }
@@ -204,6 +205,9 @@ func (w *Workspace) dirty() bool {
 }
 
 func (w *Workspace) context() string {
+	if w.consoleFocused() && !w.con.searching { // typing in the find box must not hit the bare console keys
+		return keymap.Console
+	}
 	if w.focusSB || w.tab() == nil {
 		return keymap.Sidebar
 	}
