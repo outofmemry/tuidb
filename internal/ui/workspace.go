@@ -1004,9 +1004,20 @@ func (w *Workspace) openAnything() tea.Cmd {
 		case "plugin":
 			return w.pluginsAction(t.name)
 		}
+		if cmd, ok := w.openAnythingExtra(t.name); ok {
+			return cmd
+		}
 		return w.a.run(t.name)
 	}
-	p.hint = "Enter: open   Ctrl/Alt+Enter: new tab   Esc: close"
+	// Tab completes the keyword with the selected name, so the next characters narrow it further
+	p.keys = map[string]func(it pickItem, ok bool) tea.Cmd{"tab": func(it pickItem, ok bool) tea.Cmd {
+		if ok {
+			p.q.Set(it.Label)
+			p.refresh()
+		}
+		return nil
+	}}
+	p.hint = "Enter: open   Alt+Enter: new tab   Tab: complete   Esc: close"
 	w.a.push(p)
 	return nil
 }
@@ -1123,7 +1134,7 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	sbW, detW, conH, mainW, mainH := layoutOf(w.showSB, w.showDetail, w.showConsole, W, H)
 	var cols []string
 	if sbW > 0 {
-		cols = append(cols, frame(th, w.sb.title(th), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
+		cols = append(cols, w.frame(th, w.sb.title(th), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
 	}
 	if w.m3.split {
 		cols = append(cols, w.splitFrames(th, mainW, mainH))
