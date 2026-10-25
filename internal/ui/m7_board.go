@@ -71,12 +71,22 @@ func (w *Workspace) newBoard(done func()) tea.Cmd {
 	f := newForm("New metrics board", []formField{
 		{Key: "name", Label: "Board name", Kind: fText},
 		{Key: "title", Label: "First panel title", Kind: fText},
-		{Key: "kind", Label: "Panel kind", Kind: fChoice, Options: []string{"number", "table", "bar", "line"}, Value: "table"},
-		{Key: "query", Label: "Read-only query", Kind: fText},
+		{Key: "kind", Label: "Panel kind", Kind: fChoice, Options: []string{"number", "table", "bar", "line", "input", "dropdown", "exporter"}, Value: "table"},
+		{Key: "var", Label: "Variable", Kind: fText, Hint: "name of the $var it sets", Show: func(v map[string]string) bool { return v["kind"] == "input" || v["kind"] == "dropdown" }},
+		{Key: "options", Label: "Options", Kind: fText, Hint: "a, b, c  (empty: first column of the query)", Show: func(v map[string]string) bool { return v["kind"] == "dropdown" }},
+		{Key: "default", Label: "Default", Kind: fText, Show: func(v map[string]string) bool { return v["kind"] == "input" || v["kind"] == "dropdown" }},
+		{Key: "format", Label: "Export format", Kind: fChoice, Options: []string{"csv", "json", "sql", "excel"}, Value: "csv", Show: func(v map[string]string) bool { return v["kind"] == "exporter" }},
+		{Key: "query", Label: "Read-only query", Kind: fText, Show: func(v map[string]string) bool { return v["kind"] != "input" }},
 		{Key: "chart", Label: "Chart columns", Kind: fText, Hint: "x: a, y: b, c", Show: func(v map[string]string) bool { return v["kind"] == "bar" || v["kind"] == "line" }},
 	}, func(v map[string]string) tea.Cmd {
-		nb := board.Board{Name: strings.TrimSpace(v["name"]), Panels: []board.Panel{{
-			Title: strings.TrimSpace(v["title"]), Kind: v["kind"], Query: strings.TrimSpace(v["query"]), Chart: strings.TrimSpace(v["chart"])}}}
+		p := board.Panel{Title: strings.TrimSpace(v["title"]), Kind: v["kind"], Query: strings.TrimSpace(v["query"]), Chart: strings.TrimSpace(v["chart"])}
+		switch v["kind"] {
+		case "input", "dropdown":
+			p.Var, p.Default, p.Options = strings.TrimSpace(v["var"]), v["default"], splitList(v["options"])
+		case "exporter":
+			p.Format = v["format"]
+		}
+		nb := board.Board{Name: strings.TrimSpace(v["name"]), Panels: []board.Panel{p}}
 		err := nb.Save()
 		if err != nil {
 			return w.a.fail(err)
