@@ -22,6 +22,17 @@ var (
 	badRe    = regexp.MustCompile(`(?i)\b(join|union|intersect|except|group\s+by|having|distinct|into|over|for\s+update|with)\b|\(`)
 )
 
+// editableTable is the engine's FROM-clause check (single table, no join / group / distinct), with the strict
+// regexp rule below as the fallback when it cannot parse the statement.
+// shortcut: an aliased select list is accepted, so "SELECT a AS b, b AS a" could swap two columns' meaning; the
+// caller's primary-key-by-name check is the only guard. Upgrade: reject aliases that rename a table column.
+func editableTable(stmt, dialect string) (schema, table string, ok bool) {
+	if schema, table, ok = db.EditableSelect(stmt, dialect); ok {
+		return
+	}
+	return singleTable(stmt)
+}
+
 // singleTable returns the schema and table of a simple single-table SELECT.
 func singleTable(stmt string) (schema, table string, ok bool) {
 	m := selectRe.FindStringSubmatch(stmt)
