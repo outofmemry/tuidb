@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // cellEditDlg edits one cell in a multi-line popover: JSON documents and long text do not fit an

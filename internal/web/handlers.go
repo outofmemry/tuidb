@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
-	"tuidb/internal/safemode"
-	"tuidb/internal/store"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
+	"webtuidb/internal/safemode"
+	"webtuidb/internal/store"
 )
 
 var dialects = []string{"postgres", "mysql", "clickhouse", "redis", "mongo", "sqlite", "duckdb", "cql", "partiql"}

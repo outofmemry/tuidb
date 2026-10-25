@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func testGrid() *Grid {

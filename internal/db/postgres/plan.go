@@ -9,7 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 var ident = db.PG.Quote

@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func testConn(t *testing.T) config.Connection {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1 to run against the docker databases")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1 to run against the docker databases")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_CASSANDRA")
+	url := os.Getenv("WEBTUIDB_TEST_URL_CASSANDRA")
 	if url == "" {
-		url = "cassandra://tuidb:tuidb@127.0.0.1:59042/tuidb"
+		url = "cassandra://webtuidb:webtuidb@127.0.0.1:59042/webtuidb"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {
@@ -75,7 +75,7 @@ func open(t *testing.T, bootstrap ...string) *session {
 // tempTable returns a unique table name that is dropped when the test ends.
 func tempTable(t *testing.T, s *session) string {
 	t.Helper()
-	name := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
+	name := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
 	t.Cleanup(func() { s.query("DROP TABLE IF EXISTS " + q(name)).Exec() })
 	return name
 }
@@ -143,13 +143,13 @@ func TestIntegrationOpen(t *testing.T) {
 		t.Errorf("server info %q", s.ServerInfo())
 	}
 	dbs, err := s.Databases(ctx)
-	if err != nil || !contains(dbs, "tuidb") {
+	if err != nil || !contains(dbs, "webtuidb") {
 		t.Fatalf("databases %v %v", dbs, err)
 	}
 	if !strings.HasPrefix(dbs[len(dbs)-1], "system") || strings.HasPrefix(dbs[0], "system") {
 		t.Errorf("system keyspaces must come last: %v", dbs)
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("current db %q", s.CurrentDatabase())
 	}
 	if sc, _ := s.Schemas(ctx); sc != nil || s.Caps().Schemas {
@@ -181,14 +181,14 @@ func TestIntegrationOptionsAndBootstrap(t *testing.T) {
 	seed(t)
 	c := testConn(t)
 	c.Database = ""
-	c.Options = map[string]string{"keyspace": "tuidb", "consistency": "one", "timeout": "20s", "protocol_version": "4"}
+	c.Options = map[string]string{"keyspace": "webtuidb", "consistency": "one", "timeout": "20s", "protocol_version": "4"}
 	c.Bootstrap = []string{"CONSISTENCY LOCAL_ONE", "SELECT * FROM system.local"}
 	s, err := (drv{}).Open(context.Background(), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if s.CurrentDatabase() != "tuidb" || s.(*session).consistency().String() != "LOCAL_ONE" {
+	if s.CurrentDatabase() != "webtuidb" || s.(*session).consistency().String() != "LOCAL_ONE" {
 		t.Errorf("keyspace %q consistency %v", s.CurrentDatabase(), s.(*session).consistency())
 	}
 	c.Bootstrap = []string{"USE system_schema"}
@@ -216,15 +216,15 @@ func TestIntegrationUseAndConsistency(t *testing.T) {
 	if res := exec(t, s, "select count(*) from keyspaces"); res.Rows[0][0].(int64) < 5 { // unqualified: resolved against the new keyspace
 		t.Errorf("rows %v", res.Rows)
 	}
-	exec(t, s, `USE "tuidb"`)
-	exec(t, s, "USE TUIDB") // bare names fold to lower case
-	if s.CurrentDatabase() != "tuidb" {
+	exec(t, s, `USE "webtuidb"`)
+	exec(t, s, "USE WEBTUIDB") // bare names fold to lower case
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("current %q", s.CurrentDatabase())
 	}
 	if err := s.UseDatabase(ctx, "no_such_keyspace"); err == nil {
 		t.Error("USE of a missing keyspace must fail")
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Error("a failed USE must keep the old keyspace")
 	}
 	exec(t, s, "consistency one")

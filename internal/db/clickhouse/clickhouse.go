@@ -1,4 +1,4 @@
-// Package clickhouse is the tuidb driver for ClickHouse over the native protocol.
+// Package clickhouse is the webtuidb driver for ClickHouse over the native protocol.
 package clickhouse
 
 import (
@@ -20,8 +20,8 @@ import (
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 	chdriver "github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func init() { db.Register(driver{}) }

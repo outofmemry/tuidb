@@ -14,18 +14,18 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func testConn(t *testing.T) config.Connection {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1 to run against the docker databases")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1 to run against the docker databases")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_DYNAMODB")
+	url := os.Getenv("WEBTUIDB_TEST_URL_DYNAMODB")
 	if url == "" {
-		url = "dynamodb://tuidb:tuidb@127.0.0.1:58000/?region=us-east-1"
+		url = "dynamodb://webtuidb:webtuidb@127.0.0.1:58000/?region=us-east-1"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {
@@ -106,7 +106,7 @@ func exec(t *testing.T, s *session, stmt string) *db.Result {
 // tempTable creates a table (keys: id S [, sk N]) that is dropped when the test ends.
 func tempTable(t *testing.T, s *session, sortKey bool) string {
 	t.Helper()
-	name := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
+	name := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
 	sp := tableSpec{Keys: []keySpec{{Name: "id", Type: "S"}}}
 	if sortKey {
 		sp.Keys = append(sp.Keys, keySpec{Name: "sk", Type: "N"})
@@ -244,11 +244,11 @@ func TestObjectsColumnsIndexes(t *testing.T) {
 		}
 		found[o.Name] = o.Detail
 	}
-	if d, ok := found["tuidb_users"]; !ok || !strings.Contains(d, "items") {
+	if d, ok := found["webtuidb_users"]; !ok || !strings.Contains(d, "items") {
 		t.Errorf("objects %v", found)
 	}
 
-	cols, err := s.Columns(ctx, ref("tuidb_users"))
+	cols, err := s.Columns(ctx, ref("webtuidb_users"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,35 +270,35 @@ func TestObjectsColumnsIndexes(t *testing.T) {
 		t.Errorf("email extra %q", by["email"].Extra)
 	}
 
-	ocols, err := s.Columns(ctx, ref("tuidb_orders"))
+	ocols, err := s.Columns(ctx, ref("webtuidb_orders"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ocols[0].Name != "customer" || ocols[1].Name != "ts" || ocols[1].Extra != "sort key" || !ocols[1].PK {
 		t.Errorf("orders columns %+v", ocols)
 	}
-	ev, _ := s.Columns(ctx, ref("tuidb_events"))
+	ev, _ := s.Columns(ctx, ref("webtuidb_events"))
 	for _, c := range ev {
 		if c.Name == "kind" && c.Type != "mixed" {
 			t.Errorf("kind holds S and N, shown as %q", c.Type)
 		}
 	}
 
-	ix, err := s.Indexes(ctx, ref("tuidb_users"))
+	ix, err := s.Indexes(ctx, ref("webtuidb_users"))
 	if err != nil || len(ix) != 2 || !ix[0].Primary || ix[1].Name != "by_email" || ix[1].Algorithm != "GSI" || ix[1].Condition != "ALL" {
 		t.Errorf("users indexes %+v %v", ix, err)
 	}
-	ix, _ = s.Indexes(ctx, ref("tuidb_orders"))
+	ix, _ = s.Indexes(ctx, ref("webtuidb_orders"))
 	if len(ix) != 2 || ix[1].Algorithm != "LSI" || ix[1].Condition != "KEYS_ONLY" || strings.Join(ix[1].Columns, ",") != "customer,status" {
 		t.Errorf("orders indexes %+v", ix)
 	}
-	if _, err := s.Columns(ctx, ref("tuidb_no_such")); err == nil || !strings.Contains(err.Error(), "ResourceNotFound") {
+	if _, err := s.Columns(ctx, ref("webtuidb_no_such")); err == nil || !strings.Contains(err.Error(), "ResourceNotFound") {
 		t.Errorf("missing table: %v", err)
 	}
-	if tr, _ := s.Triggers(ctx, ref("tuidb_users")); tr != nil {
+	if tr, _ := s.Triggers(ctx, ref("webtuidb_users")); tr != nil {
 		t.Error("triggers")
 	}
-	if fk, _ := s.ForeignKeys(ctx, ref("tuidb_users")); fk != nil {
+	if fk, _ := s.ForeignKeys(ctx, ref("webtuidb_users")); fk != nil {
 		t.Error("foreign keys")
 	}
 }
@@ -306,11 +306,11 @@ func TestObjectsColumnsIndexes(t *testing.T) {
 func TestDDLAndScripts(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	ddl, err := s.DDL(ctx, ref("tuidb_orders"))
+	ddl, err := s.DDL(ctx, ref("webtuidb_orders"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"TableName": "tuidb_orders"`, "KeySchema", "LocalSecondaryIndexes", "by_status", "BillingMode", "PAY_PER_REQUEST", "StreamSpecification", "TimeToLive"} {
+	for _, want := range []string{`"TableName": "webtuidb_orders"`, "KeySchema", "LocalSecondaryIndexes", "by_status", "BillingMode", "PAY_PER_REQUEST", "StreamSpecification", "TimeToLive"} {
 		if !strings.Contains(ddl, want) {
 			t.Errorf("ddl lacks %q:\n%s", want, ddl)
 		}
@@ -318,19 +318,19 @@ func TestDDLAndScripts(t *testing.T) {
 	if !json.Valid([]byte(ddl)) {
 		t.Errorf("ddl is not JSON:\n%s", ddl)
 	}
-	create, err := s.Script(ctx, db.ScriptCreate, ref("tuidb_orders"))
-	if err != nil || !strings.HasPrefix(create, `CREATE TABLE "tuidb_orders" {`) {
+	create, err := s.Script(ctx, db.ScriptCreate, ref("webtuidb_orders"))
+	if err != nil || !strings.HasPrefix(create, `CREATE TABLE "webtuidb_orders" {`) {
 		t.Fatalf("create script %q %v", create, err)
 	}
 	// the generated CREATE script runs as is: it clones the structure
-	clone := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
-	exec(t, s, strings.Replace(create, `"tuidb_orders"`, quote(clone), 1))
+	clone := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
+	exec(t, s, strings.Replace(create, `"webtuidb_orders"`, quote(clone), 1))
 	t.Cleanup(func() { s.Exec(context.Background(), "DROP TABLE "+quote(clone), 0) })
 	if ix, _ := s.Indexes(ctx, ref(clone)); len(ix) != 2 || ix[1].Algorithm != "LSI" {
 		t.Errorf("clone indexes %+v", ix)
 	}
-	for kind, want := range map[db.ScriptKind]string{db.ScriptDrop: `DROP TABLE "tuidb_orders"`, db.ScriptTruncate: `TRUNCATE TABLE "tuidb_orders"`, db.ScriptSelectTop: `SELECT * FROM "tuidb_orders"`} {
-		if got, err := s.Script(ctx, kind, ref("tuidb_orders")); err != nil || got != want {
+	for kind, want := range map[db.ScriptKind]string{db.ScriptDrop: `DROP TABLE "webtuidb_orders"`, db.ScriptTruncate: `TRUNCATE TABLE "webtuidb_orders"`, db.ScriptSelectTop: `SELECT * FROM "webtuidb_orders"`} {
+		if got, err := s.Script(ctx, kind, ref("webtuidb_orders")); err != nil || got != want {
 			t.Errorf("script %s = %q %v", kind, got, err)
 		}
 	}
@@ -338,7 +338,7 @@ func TestDDLAndScripts(t *testing.T) {
 
 func TestRowsBasic(t *testing.T) {
 	s := open(t)
-	r := rows(t, s, db.RowQuery{ObjRef: ref("tuidb_users"), Sort: []db.Sort{{Column: "id"}}})
+	r := rows(t, s, db.RowQuery{ObjRef: ref("webtuidb_users"), Sort: []db.Sort{{Column: "id"}}})
 	if len(r.Rows) != 4 || len(r.Docs) != 4 || !r.HasRows {
 		t.Fatalf("rows %d docs %d", len(r.Rows), len(r.Docs))
 	}
@@ -373,25 +373,25 @@ func TestRowsBasic(t *testing.T) {
 	}
 
 	// limit + offset walk the pages
-	p := rows(t, s, db.RowQuery{ObjRef: ref("tuidb_users"), Sort: []db.Sort{{Column: "id"}}, Limit: 2, Offset: 1})
+	p := rows(t, s, db.RowQuery{ObjRef: ref("webtuidb_users"), Sort: []db.Sort{{Column: "id"}}, Limit: 2, Offset: 1})
 	if len(p.Rows) != 2 {
 		t.Fatalf("page of %d", len(p.Rows))
 	}
-	all := rows(t, s, db.RowQuery{ObjRef: ref("tuidb_users"), Limit: 3})
+	all := rows(t, s, db.RowQuery{ObjRef: ref("webtuidb_users"), Limit: 3})
 	if len(all.Rows) != 3 {
 		t.Errorf("limit 3 returned %d", len(all.Rows))
 	}
-	rest := rows(t, s, db.RowQuery{ObjRef: ref("tuidb_users"), Limit: 3, Offset: 3})
+	rest := rows(t, s, db.RowQuery{ObjRef: ref("webtuidb_users"), Limit: 3, Offset: 3})
 	if len(rest.Rows) != 1 {
 		t.Errorf("offset 3 returned %d", len(rest.Rows))
 	}
-	none := rows(t, s, db.RowQuery{ObjRef: ref("tuidb_users"), Limit: 3, Offset: 10})
+	none := rows(t, s, db.RowQuery{ObjRef: ref("webtuidb_users"), Limit: 3, Offset: 10})
 	if len(none.Rows) != 0 {
 		t.Errorf("offset past the end returned %d", len(none.Rows))
 	}
 
 	// projection
-	pr := rows(t, s, db.RowQuery{ObjRef: ref("tuidb_users"), Columns: []string{"id", "name"}, Sort: []db.Sort{{Column: "id", Desc: true}}})
+	pr := rows(t, s, db.RowQuery{ObjRef: ref("webtuidb_users"), Columns: []string{"id", "name"}, Sort: []db.Sort{{Column: "id", Desc: true}}})
 	if len(pr.Columns) != 2 || pr.Columns[1].Name != "name" {
 		t.Fatalf("projected columns %+v", pr.Columns)
 	}
@@ -400,13 +400,13 @@ func TestRowsBasic(t *testing.T) {
 		t.Errorf("projection fetched everything: %s", pr.Docs[0])
 	}
 	// client-side sort of a non-key column; N sorts numerically, nulls first
-	so := rows(t, s, db.RowQuery{ObjRef: ref("tuidb_users"), Sort: []db.Sort{{Column: "age", Desc: true}}})
+	so := rows(t, s, db.RowQuery{ObjRef: ref("webtuidb_users"), Sort: []db.Sort{{Column: "age", Desc: true}}})
 	eq(t, "age desc", col(so, "age"), "85", "41", "36", "NULL")
 }
 
 func TestRowsQueryAndFilters(t *testing.T) {
 	s := open(t)
-	ord := ref("tuidb_orders")
+	ord := ref("webtuidb_orders")
 	// partition key pinned: a Query, ordered by the sort key on the server
 	r := rows(t, s, db.RowQuery{ObjRef: ord, Filters: flt("customer", "=", "c1"), Sort: []db.Sort{{Column: "ts", Desc: true}}})
 	eq(t, "c1 ts desc", col(r, "ts"), "300", "200", "100")
@@ -427,7 +427,7 @@ func TestRowsQueryAndFilters(t *testing.T) {
 		t.Errorf("disabled filter left %d rows", n)
 	}
 
-	users := ref("tuidb_users")
+	users := ref("webtuidb_users")
 	idsOf := func(fs db.FilterSet) []string {
 		t.Helper()
 		r := rows(t, s, db.RowQuery{ObjRef: users, Filters: fs, Sort: []db.Sort{{Column: "id"}}})
@@ -471,23 +471,23 @@ func TestRowsQueryAndFilters(t *testing.T) {
 func TestCount(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	ex, err := s.Count(ctx, db.RowQuery{ObjRef: ref("tuidb_orders")}, false)
+	ex, err := s.Count(ctx, db.RowQuery{ObjRef: ref("webtuidb_orders")}, false)
 	if err != nil || ex.N != 5 || !ex.Exact {
 		t.Errorf("exact %+v %v", ex, err)
 	}
-	est, err := s.Count(ctx, db.RowQuery{ObjRef: ref("tuidb_orders")}, true)
+	est, err := s.Count(ctx, db.RowQuery{ObjRef: ref("webtuidb_orders")}, true)
 	if err != nil || est.N != 5 { // 0 from DescribeTable falls back to counting
 		t.Errorf("estimate %+v %v", est, err)
 	}
-	f, err := s.Count(ctx, db.RowQuery{ObjRef: ref("tuidb_orders"), Filters: flt("customer", "=", "c2")}, true)
+	f, err := s.Count(ctx, db.RowQuery{ObjRef: ref("webtuidb_orders"), Filters: flt("customer", "=", "c2")}, true)
 	if err != nil || f.N != 2 || !f.Exact {
 		t.Errorf("filtered %+v %v", f, err)
 	}
-	f, err = s.Count(ctx, db.RowQuery{ObjRef: ref("tuidb_users"), Filters: flt("age", ">", "40")}, false)
+	f, err = s.Count(ctx, db.RowQuery{ObjRef: ref("webtuidb_users"), Filters: flt("age", ">", "40")}, false)
 	if err != nil || f.N != 2 {
 		t.Errorf("scan filtered %+v %v", f, err)
 	}
-	if _, err := s.Count(ctx, db.RowQuery{ObjRef: ref("tuidb_no_such")}, false); err == nil {
+	if _, err := s.Count(ctx, db.RowQuery{ObjRef: ref("webtuidb_no_such")}, false); err == nil {
 		t.Error("count of a missing table")
 	}
 }
@@ -537,14 +537,14 @@ func TestExec(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
 	r := exec(t, s, `-- comment first
-SELECT id, name FROM "tuidb_users" WHERE id = 2;`)
+SELECT id, name FROM "webtuidb_users" WHERE id = 2;`)
 	if !r.HasRows || len(r.Rows) != 1 || db.FormatValue(r.Rows[0][1]) != "Alan Turing" || r.Columns[0].Name != "id" {
 		t.Errorf("select %+v", r)
 	}
 	if r.Duration <= 0 {
 		t.Error("no duration")
 	}
-	r = exec(t, s, `SELECT * FROM "tuidb_users" WHERE id = 999`)
+	r = exec(t, s, `SELECT * FROM "webtuidb_users" WHERE id = 999`)
 	if !r.HasRows || len(r.Rows) != 0 {
 		t.Errorf("empty select %+v", r)
 	}
@@ -563,7 +563,7 @@ SELECT id, name FROM "tuidb_users" WHERE id = 2;`)
 	if n := len(exec(t, s, fmt.Sprintf(`SELECT * FROM "%s"`, name)).Rows); n != 0 {
 		t.Errorf("%d rows after delete", n)
 	}
-	for _, bad := range []string{`SELEC * FROM x`, `SELECT * FROM "tuidb_no_such"`, `INSERT INTO "` + name + `" VALUE {'id': 'a'}; INSERT`, `CREATE TABLE`, `ALTER TABLE "x" MODIFY`} {
+	for _, bad := range []string{`SELEC * FROM x`, `SELECT * FROM "webtuidb_no_such"`, `INSERT INTO "` + name + `" VALUE {'id': 'a'}; INSERT`, `CREATE TABLE`, `ALTER TABLE "x" MODIFY`} {
 		if _, err := s.Exec(ctx, bad, 0); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
@@ -582,13 +582,13 @@ func TestExecCancel(t *testing.T) {
 	s := open(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := s.Exec(ctx, `SELECT * FROM "tuidb_users"`, 0); !errors.Is(err, context.Canceled) {
+	if _, err := s.Exec(ctx, `SELECT * FROM "webtuidb_users"`, 0); !errors.Is(err, context.Canceled) {
 		t.Errorf("exec err %v", err)
 	}
-	if _, err := s.Rows(ctx, db.RowQuery{ObjRef: ref("tuidb_users")}); !errors.Is(err, context.Canceled) {
+	if _, err := s.Rows(ctx, db.RowQuery{ObjRef: ref("webtuidb_users")}); !errors.Is(err, context.Canceled) {
 		t.Errorf("rows err %v", err)
 	}
-	if _, err := s.Count(ctx, db.RowQuery{ObjRef: ref("tuidb_users")}, false); !errors.Is(err, context.Canceled) {
+	if _, err := s.Count(ctx, db.RowQuery{ObjRef: ref("webtuidb_users")}, false); !errors.Is(err, context.Canceled) {
 		t.Errorf("count err %v", err)
 	}
 	if _, err := s.Objects(ctx, ""); !errors.Is(err, context.Canceled) {
@@ -893,7 +893,7 @@ func TestPlanAdminAndTable(t *testing.T) {
 		t.Error("table still listed after drop")
 	}
 	// create from the structure editor, with a sort key and an index
-	nt := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
+	nt := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
 	def := &db.TableDef{Name: nt, PrimaryKey: []string{"pk", "sk"}, Columns: []db.Column{
 		{Name: "pk", Type: "S", PK: true}, {Name: "sk", Type: "N", PK: true}, {Name: "alt", Type: "B"}},
 		Indexes: []db.Index{{Name: "by_alt", Columns: []string{"alt"}, Condition: "KEYS_ONLY"}}}
@@ -913,10 +913,10 @@ func TestPlanAdminAndTable(t *testing.T) {
 
 func TestPlanErrors(t *testing.T) {
 	s := open(t)
-	if _, err := s.Plan([]db.Change{{Kind: db.Insert, ObjRef: ref("tuidb_no_such"), Set: []db.KeyVal{{Col: "id", Val: "1"}}}}); err == nil {
+	if _, err := s.Plan([]db.Change{{Kind: db.Insert, ObjRef: ref("webtuidb_no_such"), Set: []db.KeyVal{{Col: "id", Val: "1"}}}}); err == nil {
 		t.Error("plan for a missing table")
 	}
-	u := ref("tuidb_users")
+	u := ref("webtuidb_users")
 	if _, err := s.Columns(context.Background(), u); err != nil {
 		t.Fatal(err)
 	}
@@ -970,7 +970,7 @@ func TestSafeModeClassification(t *testing.T) {
 
 func TestSeedIsComplete(t *testing.T) {
 	s := open(t)
-	for _, n := range []string{"tuidb_users", "tuidb_orders", "tuidb_events"} {
+	for _, n := range []string{"webtuidb_users", "webtuidb_orders", "webtuidb_events"} {
 		c, err := s.Count(context.Background(), db.RowQuery{ObjRef: ref(n)}, false)
 		if err != nil || c.N == 0 {
 			t.Errorf("%s: %+v %v", n, c, err)

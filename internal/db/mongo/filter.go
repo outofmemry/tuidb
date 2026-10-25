@@ -8,7 +8,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // colInfo is the sampled structure of a collection, cached for filter and edit coercion.

@@ -12,7 +12,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // rawJS is text emitted verbatim into generated shell statements.

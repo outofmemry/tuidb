@@ -21,8 +21,8 @@ import (
 	mdb "go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func init() { db.Register(driver{}) }
@@ -99,7 +99,7 @@ func (driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (
 	}
 	opts := options.Client().
 		SetHosts([]string{net.JoinHostPort(c.Host, strconv.Itoa(c.EffectivePort()))}).
-		SetDirect(true).SetMaxPoolSize(8).SetAppName("tuidb").
+		SetDirect(true).SetMaxPoolSize(8).SetAppName("webtuidb").
 		SetServerSelectionTimeout(10 * time.Second)
 	if tc != nil {
 		opts.SetTLSConfig(tc)

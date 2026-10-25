@@ -6,15 +6,15 @@ import (
 	"testing"
 	"time"
 
-	_ "tuidb/internal/db/dynamodb"
+	_ "webtuidb/internal/db/dynamodb"
 )
 
 // End-to-end against DynamoDB Local: PartiQL in the editor, browse and edit a table in the grid,
 // commit (ExecuteTransaction), edit a query result in place, and the structure editor's honest refusal.
-// Run with TUIDB_INTEGRATION=1 (docker compose up -d --wait dynamodb).
+// Run with WEBTUIDB_INTEGRATION=1 (docker compose up -d --wait dynamodb).
 func TestE2EDynamoDB(t *testing.T) {
-	h := newRealHarness(t, "TUIDB_TEST_URL_DYNAMODB", "dynamodb://tuidb:tuidb@127.0.0.1:58000/?region=us-east-1")
-	tbl := fmt.Sprintf("tuidb_e2e_%d", time.Now().UnixNano()%1_000_000)
+	h := newRealHarness(t, "WEBTUIDB_TEST_URL_DYNAMODB", "dynamodb://webtuidb:webtuidb@127.0.0.1:58000/?region=us-east-1")
+	tbl := fmt.Sprintf("webtuidb_e2e_%d", time.Now().UnixNano()%1_000_000)
 	h.press("enter")
 	if h.a.ws() == nil {
 		t.Fatalf("connect failed:\n%s", h.screen())

@@ -10,9 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"tuidb/internal/db"
-	"tuidb/internal/keymap"
-	"tuidb/internal/store"
+	"webtuidb/internal/db"
+	"webtuidb/internal/keymap"
+	"webtuidb/internal/store"
 )
 
 const (

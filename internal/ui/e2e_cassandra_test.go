@@ -7,20 +7,20 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 
-	_ "tuidb/internal/db/cassandra"
+	_ "webtuidb/internal/db/cassandra"
 )
 
 // TestE2ECassandra is e2eSQL for CQL: no multi-row INSERT, no ORDER BY outside a partition, and the table is keyed
 // (p, id) so that its rows come back in a known order.
 func TestE2ECassandra(t *testing.T) {
-	url := os.Getenv("TUIDB_TEST_URL_CASSANDRA")
+	url := os.Getenv("WEBTUIDB_TEST_URL_CASSANDRA")
 	if url == "" {
-		url = "cassandra://tuidb:tuidb@127.0.0.1:59042/tuidb"
+		url = "cassandra://webtuidb:webtuidb@127.0.0.1:59042/webtuidb"
 	}
-	if os.Getenv("TUIDB_INTEGRATION") != "" { // the keyspace the connection URL names
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "" { // the keyspace the connection URL names
 		c, err := config.ParseURL(url)
 		if err != nil {
 			t.Fatal(err)
@@ -40,8 +40,8 @@ func TestE2ECassandra(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := newRealHarness(t, "TUIDB_TEST_URL_CASSANDRA", url)
-	tbl := fmt.Sprintf("tuidb_e2e_%d", time.Now().UnixNano()%1_000_000)
+	h := newRealHarness(t, "WEBTUIDB_TEST_URL_CASSANDRA", url)
+	tbl := fmt.Sprintf("webtuidb_e2e_%d", time.Now().UnixNano()%1_000_000)
 	h.press("enter")
 	if h.a.ws() == nil {
 		t.Fatalf("connect failed:\n%s", h.screen())
@@ -111,7 +111,7 @@ func TestE2ECassandra(t *testing.T) {
 	h.press("enter")
 	h.prefix("s")
 	h.want("saved")
-	if got := h.query(fmt.Sprintf("select count(*) from system_schema.columns where keyspace_name = 'tuidb' and table_name = '%s' and column_name = 'extra'", tbl)); got[0] != "1" {
+	if got := h.query(fmt.Sprintf("select count(*) from system_schema.columns where keyspace_name = 'webtuidb' and table_name = '%s' and column_name = 'extra'", tbl)); got[0] != "1" {
 		t.Fatalf("column not added: %v\n%s", got, h.screen())
 	}
 

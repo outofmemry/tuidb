@@ -10,7 +10,7 @@ import (
 
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // maps runs a metadata query and returns its rows as column-name maps.

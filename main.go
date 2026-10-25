@@ -1,4 +1,4 @@
-// tuidb is a terminal TablePlus: connect to PostgreSQL, MySQL, MariaDB, CockroachDB, SQLite, DuckDB, ClickHouse, Cassandra, DynamoDB, Cloudflare D1, Redis and MongoDB,
+// webtuidb is a terminal TablePlus: connect to PostgreSQL, MySQL, MariaDB, CockroachDB, SQLite, DuckDB, ClickHouse, Cassandra, DynamoDB, Cloudflare D1, Redis and MongoDB,
 // browse and edit data, and run queries, with tmux-style prefix key bindings.
 package main
 
@@ -12,29 +12,29 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tuidb/internal/config"
-	"tuidb/internal/keymap"
-	"tuidb/internal/store"
-	"tuidb/internal/ui"
-	"tuidb/internal/web"
+	"webtuidb/internal/config"
+	"webtuidb/internal/keymap"
+	"webtuidb/internal/store"
+	"webtuidb/internal/ui"
+	"webtuidb/internal/web"
 
-	_ "tuidb/internal/db/cassandra"
-	_ "tuidb/internal/db/clickhouse"
-	_ "tuidb/internal/db/cockroach"
-	_ "tuidb/internal/db/d1"
-	_ "tuidb/internal/db/duckdb"
-	_ "tuidb/internal/db/dynamodb"
-	_ "tuidb/internal/db/mariadb"
-	_ "tuidb/internal/db/mongo"
-	_ "tuidb/internal/db/mysql"
-	_ "tuidb/internal/db/postgres"
-	_ "tuidb/internal/db/redis"
-	_ "tuidb/internal/db/sqlite"
+	_ "webtuidb/internal/db/cassandra"
+	_ "webtuidb/internal/db/clickhouse"
+	_ "webtuidb/internal/db/cockroach"
+	_ "webtuidb/internal/db/d1"
+	_ "webtuidb/internal/db/duckdb"
+	_ "webtuidb/internal/db/dynamodb"
+	_ "webtuidb/internal/db/mariadb"
+	_ "webtuidb/internal/db/mongo"
+	_ "webtuidb/internal/db/mysql"
+	_ "webtuidb/internal/db/postgres"
+	_ "webtuidb/internal/db/redis"
+	_ "webtuidb/internal/db/sqlite"
 )
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "tuidb:", err)
+		fmt.Fprintln(os.Stderr, "webtuidb:", err)
 		os.Exit(1)
 	}
 }
@@ -48,7 +48,7 @@ func run() error {
 	token := flag.String("token", "", "with --frontend: API token (default: random)")
 	insecure := flag.Bool("insecure-listen", false, "with --frontend: allow a non-loopback --listen address (credentials go over the network)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: tuidb [flags] [connection-name | URL]\n       tuidb --frontend [--listen addr] [--open]\n\n  URL: postgresql:// mysql:// mariadb:// cockroachdb:// sqlite:// duckdb:// clickhouse:// cassandra:// dynamodb:// d1:// redis:// mongodb://\n\nflags:\n")
+		fmt.Fprintf(os.Stderr, "usage: webtuidb [flags] [connection-name | URL]\n       webtuidb --frontend [--listen addr] [--open]\n\n  URL: postgresql:// mysql:// mariadb:// cockroachdb:// sqlite:// duckdb:// clickhouse:// cassandra:// dynamodb:// d1:// redis:// mongodb://\n\nflags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -91,7 +91,7 @@ func run() error {
 		return err
 	}
 	if state.Recovered != "" {
-		fmt.Fprintln(os.Stderr, "tuidb:", state.Recovered)
+		fmt.Fprintln(os.Stderr, "webtuidb:", state.Recovered)
 	}
 	d := &ui.Deps{
 		Cfg: cfg, Keys: km, Conns: conns, ConnPath: connPath, State: state,

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { api, ApiError, clip, qs, recentKey, type Column, type FilterSet, type Meta, type ObjRef, type Plan, type ResultData, type SessionInfo, type Sort, type Val } from './api'
-import { PlanDialog } from './Dialogs'
+import { api, ApiError, clip, qs, recentKey, type Column, type FilterSet, type Meta, type ObjRef, type Plan, type ResultData, type SessionInfo, type Sort, type Val } from '../utils/api'
+import { PlanDialog, confirm } from './Dialogs'
+import { Select } from './Select'
 import { FilterBar } from './FilterBar'
 import { Grid, show, type GridRow } from './Grid'
 import { CellEditor, type CellTarget } from './CellEditor'
@@ -73,9 +74,9 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
   const stale = rowsQ.isPlaceholderData // the previous page stays on screen while reloading, but its server snapshot may be gone
   const pending = Object.keys(edits).length + deletes.size + inserts.length
   const clearPending = () => { setEdits({}); setDeletes(new Set()); setInserts([]); setSelected(null) }
-  const guard = () => pending === 0 || window.confirm('Discard pending changes?')
-  const reload = () => { if (guard()) { clearPending(); setNonce((n) => n + 1) } }
-  const change = <T,>(set: (v: T) => void) => (v: T) => { if (guard()) { clearPending(); setOffset(0); set(v) } }
+  const guard = async () => pending === 0 || (await confirm('Discard pending changes?'))
+  const reload = async () => { if (await guard()) { clearPending(); setNonce((n) => n + 1) } }
+  const change = <T,>(set: (v: T) => void) => async (v: T) => { if (await guard()) { clearPending(); setOffset(0); set(v) } }
 
   const rows: GridRow[] = useMemo(() => {
     if (!res) return []
@@ -200,21 +201,18 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
   useEffect(() => {
     if (!active) return
     const h = (e: Event) => { const f = keyActions[(e as CustomEvent).detail.action]; if (f) { e.preventDefault(); f() } }
-    window.addEventListener('tuidb:action', h)
-    return () => window.removeEventListener('tuidb:action', h)
+    window.addEventListener('webtuidb:action', h)
+    return () => window.removeEventListener('webtuidb:action', h)
   })
 
   return (
-    <div className="pane">
-      <div className="toolbar">
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="toolbar bg-canvas">
         <button onClick={reload}>Reload</button>
         <button onClick={() => setShowBar(!showBar)}>{showBar ? 'Hide filters' : 'Filters'}{hasActive ? ' (on)' : ''}</button>
         <ColumnsMenu all={colNames} hidden={hidden} onChange={change<string[]>(setHidden)} menuRef={colsMenu} />
-        <select value={view} onChange={(e) => setView(e.target.value as View)} aria-label="View">
-          <option value="data">Data</option><option value="structure">Structure</option>
-          {info.caps.Document && <option value="json">JSON</option>}
-        </select>
-        <span className="grow" />
+        <Select className="bg-raised border-transparent" aria-label="View" value={view} onChange={(v) => setView(v as View)} options={[{ value: 'data', label: 'Data' }, { value: 'structure', label: 'Structure' }, ...(info.caps.Document ? [{ value: 'json', label: 'JSON' }] : [])]} />
+        <span className="flex-1 min-w-0" />
         {view === 'data' && res?.editable && !stale && <>
           <button onClick={addRow}>Add row</button>
           <button onClick={duplicate} disabled={!selected}>Duplicate row</button>
@@ -222,29 +220,29 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
         </>}
       </div>
       {showBar && view === 'data' && <FilterBar value={filters} columns={colNames} operators={ops} onApply={change<FilterSet>(setFilters)} />}
-      {(rowsQ.isFetching || cols.isLoading) && <div className="progress" role="progressbar" aria-label="Loading rows" />}
-      {!res && !rowsQ.error && <div className="note dim">Loading rows…</div>}
-      {rowsQ.error && <div className="err note">{rowsQ.error.message}</div>}
+      {(rowsQ.isFetching || cols.isLoading) && <div className="relative h-[2px] -mb-[2px] z-[4] overflow-hidden bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] after:absolute after:inset-0 after:w-[40%] after:bg-accent after:animate-slide motion-reduce:after:animate-none motion-reduce:after:w-full motion-reduce:after:opacity-60" role="progressbar" aria-label="Loading rows" />}
+      {!res && !rowsQ.error && <div className="p-2.5 text-[12.5px] text-ink-2">Loading rows…</div>}
+      {rowsQ.error && <div className="p-2.5 text-[12.5px] text-del">{rowsQ.error.message}</div>}
       {view === 'data' && res && res.cells.length === 0 && inserts.length === 0 && (
-        <div className="empty">{hasActive ? 'No rows match these filters.' : res.editable ? 'This table has no rows yet. Add one to start.' : 'This table has no rows yet.'}</div>
+        <div className="py-14 px-8 max-w-[46ch] text-ink-2 text-[15px] leading-normal">{hasActive ? 'No rows match these filters.' : res.editable ? 'This table has no rows yet. Add one to start.' : 'This table has no rows yet.'}</div>
       )}
       {view === 'data' && res && (res.cells.length > 0 || inserts.length > 0) && (
-        <div className="body">
+        <div className="flex-1 min-h-0 flex">
           <Grid columns={res.columns} rows={rows} sort={sort} onSort={onSort} edited={editedAll} editable={res.editable && !stale} onOpen={setCell}
             selected={selected} onSelect={setSelected} onSpace={() => setDetail(!detail)} />
           {detail && (
-            <div className="detail" role="region" aria-label="Row details">
-              <div className="toolbar"><strong className="grow">Row details</strong><button className="ghost" onClick={() => setDetail(false)} aria-label="Close">✕</button></div>
-              <div className="scroll">
-                {!selRow && <div className="note dim">Select a row to see its fields.</div>}
+            <div className="w-[340px] flex-none border-l border-rule flex flex-col min-h-0 bg-canvas font-mono max-[760px]:fixed max-[760px]:inset-0 max-[760px]:z-30 max-[760px]:w-full" role="region" aria-label="Row details">
+              <div className="toolbar bg-canvas"><strong className="flex-1 min-w-0 font-medium">Row details</strong><button className="btn-ghost" onClick={() => setDetail(false)} aria-label="Close">✕</button></div>
+              <div className="overflow-auto flex-1">
+                {!selRow && <div className="p-2.5 text-[12.5px] text-ink-2">Select a row to see its fields.</div>}
                 {selRow && res.columns.map((c, i) => {
                   const ed = editedAll[selRow.key]?.[c.name]
                   const val = show(ed, selRow.cells[i])
                   return (
-                    <div key={c.name} className={`field ${ed !== undefined ? 'edited' : ''}`} onClick={() => setCell({ row: selRow.key, col: c.name, readOnly: !res.editable || selRow.state === 'deleted' })}
+                    <div key={c.name} className={`px-3 py-2 border-b border-rule cursor-pointer hover:bg-panel ${ed !== undefined ? 'shadow-[inset_3px_0_0_var(--edit)]' : ''}`} onClick={() => setCell({ row: selRow.key, col: c.name, readOnly: !res.editable || selRow.state === 'deleted' })}
                       title={res.editable ? 'Click to edit' : undefined}>
-                      <div className="name">{c.pk && <span className="pk">◆</span>}{c.name}<span className="dim"> {c.type}</span></div>
-                      <div className={`val mono ${val === null ? 'null' : ''}`}>{val === null ? 'NULL' : val}</div>
+                      <div className="text-[12px] text-ink-2 mb-[3px]">{c.pk && <span className="text-accent mr-1">◆</span>}{c.name}<span className="text-ink-3 text-[11px]"> {c.type}</span></div>
+                      <div className={`font-mono text-[12px] whitespace-pre-wrap wrap-anywhere max-h-[9em] overflow-hidden ${val === null ? 'text-ink-3' : ''}`}>{val === null ? 'NULL' : val}</div>
                     </div>
                   )
                 })}
@@ -258,28 +256,28 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
         return r && ci >= 0 ? <CellEditor col={cell.col} readOnly={cell.readOnly} value={show(editedAll[r.key]?.[cell.col], r.cells[ci])}
           onDone={(v) => { setCell(null); if (v !== undefined) onEdit(cell.row, cell.col, v) }} /> : null
       })()}
-      {view === 'json' && <pre className="docs">{(res?.docs ?? []).map((d) => { try { return JSON.stringify(JSON.parse(d), null, 2) } catch { return d } }).join('\n')}</pre>}
+      {view === 'json' && <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] max-w-[100ch]">{(res?.docs ?? []).map((d) => { try { return JSON.stringify(JSON.parse(d), null, 2) } catch { return d } }).join('\n')}</pre>}
       {view === 'structure' && <Structure sid={sid} refQ={refQ} caps={info.caps} columns={cols.data ?? []} />}
       {view === 'data' && marks.length > 0 && (
-        <div className="tray" role="region" aria-label="Staged changes">
-          <div className="bar">
-            <strong><b>{marks.length}</b>staged change{marks.length === 1 ? '' : 's'}</strong>
-            <span className="grow dim">Not sent to the database yet.</span>
+        <div className="border-t border-rule-2 bg-panel flex flex-col max-h-[42%] font-mono motion-safe:animate-rise" role="region" aria-label="Staged changes">
+          <div className="flex items-center gap-2 px-2.5 py-2">
+            <strong className="font-medium text-[13px]"><b className="inline-block min-w-[22px] px-1.5 mr-1.5 rounded-[2px] bg-edit text-on-accent text-center font-semibold">{marks.length}</b>staged change{marks.length === 1 ? '' : 's'}</strong>
+            <span className="flex-1 min-w-0 text-ink-2">Not sent to the database yet.</span>
             <button onClick={() => setTrayOpen(!trayOpen)} aria-expanded={trayOpen}>{trayOpen ? 'Hide list' : 'Show list'}</button>
             <button onClick={previewSql}>Preview SQL</button>
             <button onClick={clearPending}>Discard all</button>
-            <button className="primary" onClick={commit}>Send changes</button>
+            <button className="btn-primary" onClick={commit}>Send changes</button>
           </div>
           {trayOpen && (
-            <div className="list mono">
+            <div className="overflow-auto border-t border-rule px-2.5 pt-1.5 pb-2.5 text-[11.5px] font-mono">
               {marks.map((m) => (
-                <div className="item" key={m.id}>
-                  <span className="what">
-                    {m.kind === 'insert' && <><span className="plus">+ </span>{clip(m.detail ?? '', 160)}</>}
-                    {m.kind === 'delete' && <del>remove {m.where}</del>}
-                    {m.kind === 'update' && <><span className="where">{m.col} on {m.where}:  </span><del>{clip(m.from ?? 'NULL', 80)}</del> <ins>{clip(m.to ?? 'NULL', 80)}</ins></>}
+                <div className="flex gap-2.5 items-baseline py-[3px]" key={m.id}>
+                  <span className="flex-1 min-w-0 wrap-anywhere whitespace-nowrap overflow-hidden text-ellipsis">
+                    {m.kind === 'insert' && <><span className="text-new font-bold">+ </span>{clip(m.detail ?? '', 160)}</>}
+                    {m.kind === 'delete' && <del className="text-del decoration-1">remove {m.where}</del>}
+                    {m.kind === 'update' && <><span className="text-ink-2">{m.col} on {m.where}:  </span><del className="text-del decoration-1">{clip(m.from ?? 'NULL', 80)}</del> <ins className="text-edit no-underline">{clip(m.to ?? 'NULL', 80)}</ins></>}
                   </span>
-                  <button className="ghost" onClick={m.revert} aria-label={`Undo change to ${m.where}`}>Undo</button>
+                  <button className="btn-ghost" onClick={m.revert} aria-label={`Undo change to ${m.where}`}>Undo</button>
                 </div>
               ))}
             </div>
@@ -287,15 +285,15 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
         </div>
       )}
       {view === 'data' && (
-        <div className="toolbar foot">
+        <div className="toolbar bg-canvas border-b-0! border-t border-rule text-[12px] text-ink-2">
           <button disabled={offset === 0} onClick={() => change<number>(setOffset)(Math.max(0, offset - limit))} aria-label="Previous page">Prev</button>
-          <span><span className="n">{from}–{to}</span>{total ? <> of <span className="n">{total.exact ? '' : '~'}{total.n}</span></> : ''}</span>
+          <span><span className="font-mono text-ink">{from}–{to}</span>{total ? <> of <span className="font-mono text-ink">{total.exact ? '' : '~'}{total.n}</span></> : ''}</span>
           <button disabled={!res || res.cells.length < limit} onClick={() => change<number>(setOffset)(offset + limit)} aria-label="Next page">Next</button>
-          {total && !total.exact && <button className="ghost" onClick={() => setExact(true)}>Count exactly</button>}
-          <label className="dim">Rows per page <input type="number" min={1} style={{ width: 70 }} defaultValue={limit}
+          {total && !total.exact && <button className="btn-ghost" onClick={() => setExact(true)}>Count exactly</button>}
+          <label className="text-ink-2">Rows per page <input type="number" min={1} style={{ width: 70 }} defaultValue={limit}
             onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== limit) change<number>(setLimit)(n) }} /></label>
-          {res?.truncated && <span className="dim">Stopped at the row limit.</span>}
-          {rowsQ.isFetching && <span className="dim">Loading…</span>}
+          {res?.truncated && <span className="text-ink-2">Stopped at the row limit.</span>}
+          {rowsQ.isFetching && <span className="text-ink-2">Loading…</span>}
         </div>
       )}
       {plan && <PlanDialog sid={sid} plan={plan} onClose={() => setPlan(null)} onApplied={applied} />}
@@ -306,10 +304,10 @@ export function DataTab({ sid, info, meta, obj, notify, active }: { sid: string;
 function ColumnsMenu({ all, hidden, onChange, menuRef }: { all: string[]; hidden: string[]; onChange: (h: string[]) => void; menuRef?: React.Ref<HTMLDetailsElement> }) {
   return (
     <details ref={menuRef} style={{ position: 'relative' }}>
-      <summary className="btnlike">Columns{hidden.length ? ` (${all.length - hidden.length}/${all.length})` : ''}</summary>
-      <div className="popover">
+      <summary className="list-none border border-rule-2 rounded-[2px] font-mono px-[11px] py-1 leading-5 cursor-pointer hover:bg-raised [&::-webkit-details-marker]:hidden">Columns{hidden.length ? ` (${all.length - hidden.length}/${all.length})` : ''}</summary>
+      <div className="popover absolute z-20 mt-1 w-60 max-h-[300px] overflow-auto p-2">
         {all.map((c) => (
-          <label key={c} className="row"><input type="checkbox" checked={!hidden.includes(c)} onChange={(e) => onChange(e.target.checked ? hidden.filter((h) => h !== c) : [...hidden, c])} />{c}</label>
+          <label key={c} className="flex items-center gap-1.5"><input type="checkbox" checked={!hidden.includes(c)} onChange={(e) => onChange(e.target.checked ? hidden.filter((h) => h !== c) : [...hidden, c])} />{c}</label>
         ))}
       </div>
     </details>
@@ -320,7 +318,7 @@ function Structure({ sid, refQ, caps, columns }: { sid: string; refQ: string; ca
   const get = (what: string, on: boolean) => useQuery({ queryKey: ['obj', sid, what, refQ], queryFn: () => api<any[]>('GET', `/sessions/${sid}/object/${what}${refQ}`), enabled: on, gcTime: 0 })
   const idx = get('indexes', caps.Indexes), trg = get('triggers', caps.Triggers)
   return (
-    <div className="structure" data-ctx="structure">
+    <div className="px-4 py-3 overflow-auto [&_h4]:mt-4 [&_h4]:mb-1.5 [&_h4:first-child]:mt-0 [&_h4]:text-[13px] [&_h4]:text-ink-2 [&_table]:border-collapse [&_table]:mb-2.5 [&_table]:text-[12px] [&_table]:font-mono [&_:is(th,td)]:text-left [&_:is(th,td)]:py-1 [&_:is(th,td)]:pr-[18px] [&_:is(th,td)]:pl-0 [&_:is(th,td)]:border-b [&_td]:border-rule [&_th]:border-rule-2 [&_th]:font-sans [&_th]:font-medium [&_th]:text-ink-2" data-ctx="structure">
       <h4>Columns</h4>
       <table><thead><tr><th>Name</th><th>Type</th><th>Null</th><th>Default</th><th>Key</th><th>Extra</th><th>References</th></tr></thead><tbody>
         {columns.map((c) => <tr key={c.Name}><td>{c.Name}</td><td>{c.Type}</td><td>{c.Nullable ? 'yes' : 'no'}</td><td>{c.HasDef ? c.Default : ''}</td><td>{c.PK ? 'PK' : ''}</td><td>{c.Extra}</td>

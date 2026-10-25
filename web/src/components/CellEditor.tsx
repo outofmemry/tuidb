@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Val } from './api'
+import type { Val } from '../utils/api'
 import { Dialog } from './Dialogs'
 
 export type CellTarget = { row: string; col: string; readOnly?: boolean }
@@ -18,18 +18,18 @@ export function CellEditor({ col, value, readOnly, onDone }: { col: string; valu
   const save = () => onDone(text === start ? undefined : text)
   return (
     <Dialog title={readOnly ? col : `Edit ${col}`} onClose={() => onDone(undefined)}>
-      {value === null && <p className="dim" style={{ margin: '0 0 6px' }}>This cell is NULL.</p>}
-      <textarea className="mono cell" value={text} readOnly={readOnly} autoFocus spellCheck={false} onChange={(e) => setText(e.target.value)}
+      {value === null && <p className="text-ink-2" style={{ margin: '0 0 6px' }}>This cell is NULL.</p>}
+      <textarea className="font-mono w-full min-h-[40vh] max-h-[60vh] resize-y text-[12.5px] leading-[1.45] px-3 py-2.5 bg-canvas" value={text} readOnly={readOnly} autoFocus spellCheck={false} onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !readOnly) { e.preventDefault(); save() } }} />
-      <div className="actions">
+      <div className="flex justify-end gap-2 mt-[18px]">
         {!readOnly && <>
-          <span className="grow dim">{text.length} characters</span>
+          <span className="flex-1 min-w-0 text-left text-ink-2">{text.length} characters</span>
           <button onClick={() => onDone({ $: 'null' })}>Set NULL</button>
           <button onClick={() => onDone({ $: 'default' })}>Set DEFAULT</button>
           <button onClick={() => onDone({ $: 'empty' })}>Set empty</button>
         </>}
         <button onClick={() => onDone(undefined)}>{readOnly ? 'Close' : 'Cancel'}</button>
-        {!readOnly && <button className="primary" onClick={save} title="Ctrl+Enter">Save</button>}
+        {!readOnly && <button className="btn-primary" onClick={save} title="Ctrl+Enter">Save</button>}
       </div>
     </Dialog>
   )

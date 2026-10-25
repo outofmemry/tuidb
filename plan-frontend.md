@@ -1,16 +1,16 @@
-# plan-frontend.md — Web UI for tuidb (TanStack) on the existing Go engine
+# plan-frontend.md — Web UI for webtuidb (TanStack) on the existing Go engine
 
 > On approval this file is copied verbatim to `plan-frontend.md` at the repo root.
 
 ## Context
 
-tuidb is a Go terminal client for 12 database engines. All engine logic already lives behind
+webtuidb is a Go terminal client for 12 database engines. All engine logic already lives behind
 one contract, `db.Session` (`internal/db/types.go`): metadata, `Rows`/`Count`, `Exec`, `Plan`/
 `PlanAdmin`/`PlanTable`, `Apply`, with `db.Split`, `db.IsReadOnly`, `db.FormatValue`,
 `safemode.Gate`, and the `store` package (history, saved queries, table state) around it. The
 Bubble Tea UI (`internal/ui`) is only a renderer plus orchestration on top of that contract.
 
-Goal: the same binary gains `tuidb --frontend`, a local HTTP+JSON API over the same engine, and a
+Goal: the same binary gains `webtuidb --frontend`, a local HTTP+JSON API over the same engine, and a
 TanStack web app embedded in the binary. The TUI stays untouched. Web and TUI share
 connections.toml, history, saved queries and table state because both go through `config` and
 `store`.
@@ -142,7 +142,7 @@ Routes:
    exec, static stub. Test: `httptest` against an in-package `fakeSession` (copy the shape of
    `internal/ui/fake_test.go`) covering token auth, rows → cells formatting, exec splitting and
    gate 409, plan/apply building Changes incl. special values and no-PK key fallback. Integration
-   test (`TUIDB_INTEGRATION=1`) against compose postgres: open → rows → edit → apply → verify.
+   test (`WEBTUIDB_INTEGRATION=1`) against compose postgres: open → rows → edit → apply → verify.
 2. **Web scaffold + browse** — Vite app, router, connections page, workspace with sidebar and
    read-only table tab + query tab. Dev: `vite` proxies `/api` to `:7788`.
 3. **Edit + gate + admin** — pending edits, preview/commit, gate dialog, admin ops, history and

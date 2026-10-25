@@ -1,4 +1,4 @@
-module tuidb
+module webtuidb
 
 go 1.27.3
 

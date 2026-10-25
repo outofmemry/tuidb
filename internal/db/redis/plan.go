@@ -12,7 +12,7 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // lookup is what planning may ask the server: a key's type and a read command's reply.
@@ -210,7 +210,7 @@ func planChanges(lk lookup, changes []db.Change) ([]db.Statement, error) {
 					if _, err := rand.Read(b); err != nil {
 						return err
 					}
-					marker := "__tuidb_deleted_" + hex.EncodeToString(b) + "__"
+					marker := "__webtuidb_deleted_" + hex.EncodeToString(b) + "__"
 					add("LSET", key, idx, marker)
 					add("LREM", key, "1", marker)
 				default:

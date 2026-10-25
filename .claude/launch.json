@@ -1,6 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "web", "runtimeExecutable": "env", "runtimeArgs": ["TUIDB_API=http://127.0.0.1:7799", "npm", "run", "dev", "--prefix", "web"], "port": 5173 }
+    { "name": "web", "runtimeExecutable": "env", "runtimeArgs": ["WEBTUIDB_API=http://127.0.0.1:7799", "npm", "run", "dev", "--prefix", "web"], "port": 5173 }
   ]
 }

@@ -16,8 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgconn/ctxwatch"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func init() { db.Register(driver{}) }
@@ -38,7 +38,7 @@ func (driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (
 	return s, nil
 }
 
-// sslMode maps tuidb's ssl_mode names to libpq's. "" keeps whatever Options say (default prefer).
+// sslMode maps webtuidb's ssl_mode names to libpq's. "" keeps whatever Options say (default prefer).
 func sslMode(m string) (string, error) {
 	switch m {
 	case "":

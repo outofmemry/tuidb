@@ -8,8 +8,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tuidb/internal/db"
-	"tuidb/internal/keymap"
+	"webtuidb/internal/db"
+	"webtuidb/internal/keymap"
 )
 
 // A query result is editable only when it provably maps to one table: a plain

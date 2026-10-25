@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func (s *session) Databases(ctx context.Context) ([]string, error) {

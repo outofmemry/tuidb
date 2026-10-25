@@ -7,7 +7,7 @@ inline edit, add / duplicate / delete rows, Set Value, undo / redo, copy-as form
 filter bar, quick filter, visible-columns picker, foreign-key follow, structure editor (columns, primary key,
 foreign keys, indexes, new table), database new / rename / drop, SQL editor (highlighting, autocomplete with saved-query
 keywords, run current / all, cancel, row limit, per-statement result tabs), safe mode (all five levels),
-Json / Tree views for MongoDB and Redis, `tuidb -keys`.
+Json / Tree views for MongoDB and Redis, `webtuidb -keys`.
 
 **Milestone 1 is complete.** Added since the first pass: trigger, view and function editing (opened as runnable SQL in a
 query tab, so safe mode applies), Redis key folders by `:`, paste rows / cells, find in a grid or result (`/`, `n`, `N`),
@@ -51,16 +51,16 @@ the Postgres driver has its own small pool (pgxpool needs `puddle`, which was no
 
 ---
 
-# tuidb — a TablePlus clone for the terminal
+# webtuidb — a TablePlus clone for the terminal
 
 ## Context
 
-TablePlus is a native GUI database client (connections, data grid with pending edits, SQL editor, filters, import/export, safe mode, history, process list, users, backup/restore, ER diagram, metrics board, AI assistant, MCP server). The user wants the same feature set as a TUI called **tuidb**, for **PostgreSQL, MySQL, ClickHouse, Redis and MongoDB**, driven tmux-style: a **prefix key (Ctrl+d) + key** for every action, all rebindable from `~/.config/tuidb/config.toml`.
+TablePlus is a native GUI database client (connections, data grid with pending edits, SQL editor, filters, import/export, safe mode, history, process list, users, backup/restore, ER diagram, metrics board, AI assistant, MCP server). The user wants the same feature set as a TUI called **webtuidb**, for **PostgreSQL, MySQL, ClickHouse, Redis and MongoDB**, driven tmux-style: a **prefix key (Ctrl+d) + key** for every action, all rebindable from `~/.config/webtuidb/config.toml`.
 
 Decisions already made with the user:
 - **Go + Bubble Tea** (Go 1.27 installed). Single static binary.
 - **Prefix = `C-d`** by default.
-- **Passwords in plain text** in `~/.config/tuidb/connections.toml` (0600), with an optional `password_cmd` whose stdout is the password.
+- **Passwords in plain text** in `~/.config/webtuidb/connections.toml` (0600), with an optional `password_cmd` whose stdout is the password.
 - **Milestones, core first** (M1 → M2 → M3). Each milestone is shippable.
 
 The project folder is empty (only `.claude/settings.json`). Not a git repo yet; `git init` happens in M1.
@@ -89,8 +89,8 @@ No SQL formatter library exists in Go that is good enough; write a small keyword
 ## Package layout
 
 ```
-tuidb/
-  main.go                       flags: tuidb [url|connection-name] [--config path]
+webtuidb/
+  main.go                       flags: webtuidb [url|connection-name] [--config path]
   internal/config/              config.go (Config + defaults + Load/merge), connections.go (Connection, groups, tags, load/save 0600, URL import/export), paths.go (XDG dirs)
   internal/keymap/              key.go (parse "C-d", "M-x", "S-Enter", "f5"...), action.go (Action enum + default bindings table), prefix.go (prefix state machine, which-key listing)
   internal/db/                  driver.go (interfaces + value types), registry.go, split.go (statement splitter), classify.go (read-only detection per dialect), change.go (pending change model → statements), filter.go (filter rows → WHERE), ssh.go (tunnel dialer)
@@ -181,7 +181,7 @@ Un-prefixed widget keys (not configurable in M1): grid `hjkl`/arrows, `g`/`G`, `
 
 ### Config files
 
-`~/.config/tuidb/config.toml` (all optional; defaults mirror TablePlus):
+`~/.config/webtuidb/config.toml` (all optional; defaults mirror TablePlus):
 ```toml
 [general]
 prefix = "C-d"
@@ -226,7 +226,7 @@ run_all = ["M-Enter", "-n F5"]
 [mcp]    enabled = false; port = 51003; approval_for_unsafe = true                                                                              # M3
 ```
 
-`~/.config/tuidb/connections.toml` (0600; created on first save):
+`~/.config/webtuidb/connections.toml` (0600; created on first save):
 ```toml
 [[connection]]
 name = "Acme Prod"; driver = "postgres"; host = "..."; port = 5432; user = "..."; password = "..."  # or password_cmd = "..."
@@ -237,7 +237,7 @@ bootstrap = ["SET search_path TO app"]
 ```
 Groups nest via `group = "A/B"`. Tags default: local, testing, development, staging, production (colored) + custom via `[[tag]]`.
 
-State and data under `~/.local/share/tuidb/`: `history/<conn>.jsonl`, `queries/**/*.sql` (favorites; first line `-- name: X keywords: a, b`), `state.json` (column widths, per-table filter/sort, pinned items, last session, recent items), `boards/*.toml` (M3).
+State and data under `~/.local/share/webtuidb/`: `history/<conn>.jsonl`, `queries/**/*.sql` (favorites; first line `-- name: X keywords: a, b`), `state.json` (column widths, per-table filter/sort, pinned items, last session, recent items), `boards/*.toml` (M3).
 
 ### UI (`internal/ui`)
 
@@ -260,11 +260,11 @@ Tab reuse follows TablePlus exactly: opening an object replaces the current tab 
 ## Milestones
 
 ### M1 — Core (connect, browse, edit, query) for all 5 engines
-1. `go mod init tuidb`, `git init`, layout above, `main.go`.
+1. `go mod init webtuidb`, `git init`, layout above, `main.go`.
 2. `config` + `keymap` with full default table, TOML override, validation, which-key overlay, prefix state machine. **Unit tests**: key parsing, config merge, conflict detection.
 3. `db` core: interfaces, statement splitter (handles `;` in strings/comments/`$$` bodies), read-only classifier per dialect, SSH tunnel dialer, pending-change → statement planner, filter → WHERE builder (operators: `= <> < > <= >= IN NOT IN IS NULL IS NOT NULL BETWEEN NOT BETWEEN LIKE ILIKE(pg) Contains/Not contains/Has prefix/Has suffix`, Any column, Raw SQL; AND/OR combine). **Unit tests** for splitter, classifier, planner, filter builder.
 4. Drivers: postgres, mysql, clickhouse, redis, mongo — `Databases/Schemas/Objects/Columns/Indexes/FKs/Triggers/DDL/Rows/Count/Query(stream+cancel)/Plan/Apply/Ping`. Multi-db-version compatibility via information_schema / `system.*` / `listCollections` / `SCAN`.
-5. UI: welcome (list, groups, tags, search, create/edit/test/duplicate/delete, import from URL, `tuidb <url>` CLI), workspace, sidebar (Items with recent/pinned/functions/sequences/types sections, fuzzy/contains search, context actions: open, open in new tab, structure, copy name, copy script as create/drop/truncate/select-100, clone, truncate, delete, pin), tabs, data grid (paging 300, limit/offset popover, estimated count + exact on demand, sort, cell select/copy/paste, add/duplicate/delete rows, inline edit, Set Value menu: EMPTY/NULL/DEFAULT/NOW()/date, FK follow, quick filter), filter bar + column picker, structure/index/trigger/DDL tabs with create/rename/alter/drop for tables, columns, PK/FK/defaults, indexes, triggers, views/matviews/functions/procedures (DDL editor), database open/new/rename/drop, commit/preview/discard with undo/redo, **safe mode** (5 levels, confirm dialog listing statements, password dialog), editor (autocomplete from schema + keywords, run current/all, cancel, row-limit, result tabs with `-- name:` labels, pinning, Data/Message views, result editing + commit, copy-as formats, result search), console log (last 1000, timestamps), row detail pane, Open Anything, quick look (text/JSON tree/hex), status line with tag colour and reconnect-on-click-equivalent (`reconnect` action), keep-alive + timeout dialog.
+5. UI: welcome (list, groups, tags, search, create/edit/test/duplicate/delete, import from URL, `webtuidb <url>` CLI), workspace, sidebar (Items with recent/pinned/functions/sequences/types sections, fuzzy/contains search, context actions: open, open in new tab, structure, copy name, copy script as create/drop/truncate/select-100, clone, truncate, delete, pin), tabs, data grid (paging 300, limit/offset popover, estimated count + exact on demand, sort, cell select/copy/paste, add/duplicate/delete rows, inline edit, Set Value menu: EMPTY/NULL/DEFAULT/NOW()/date, FK follow, quick filter), filter bar + column picker, structure/index/trigger/DDL tabs with create/rename/alter/drop for tables, columns, PK/FK/defaults, indexes, triggers, views/matviews/functions/procedures (DDL editor), database open/new/rename/drop, commit/preview/discard with undo/redo, **safe mode** (5 levels, confirm dialog listing statements, password dialog), editor (autocomplete from schema + keywords, run current/all, cancel, row-limit, result tabs with `-- name:` labels, pinning, Data/Message views, result editing + commit, copy-as formats, result search), console log (last 1000, timestamps), row detail pane, Open Anything, quick look (text/JSON tree/hex), status line with tag colour and reconnect-on-click-equivalent (`reconnect` action), keep-alive + timeout dialog.
 6. History (per connection, incl. GUI-generated statements, search, run/copy/insert/save-as/add-to-queries/delete/clear) and Queries/favorites (folders, keywords → autocomplete expansion, auto-save, run/edit/rename/delete, shared folder path).
 7. `docker-compose.yml` with the 5 engines + seed scripts; `make smoke` runs an integration test per driver against them.
 
@@ -287,7 +287,7 @@ Tab reuse follows TablePlus exactly: opening an object replaces the current tab 
 - Editor extras: multiple carets (select next/all occurrences, add caret above/below), Vim keybinding mode (basic normal/insert/visual motions), invisible chars, fold state persistence.
 - AI Assistant tab (Anthropic, OpenAI-compatible incl. Ollama; `@` table context; SQL blocks with copy/run; approval for non-read-only; stop; chat history).
 - MCP server (stdio + HTTP, tokens with read-only/read-write/full and per-connection scope, tools `list_connections/list_open_connections/open_connection/disconnect/execute_read_query/execute_query`, activity log, approval sheet for unsafe queries).
-- Plugins: `~/.config/tuidb/plugins/*.toml` declaring a command (any executable) that receives JSON context (connection, selection, cell) on stdin and returns text/SQL; shown in the palette and context menus. Not TablePlus JS plugins.
+- Plugins: `~/.config/webtuidb/plugins/*.toml` declaring a command (any executable) that receives JSON context (connection, selection, cell) on stdin and returns text/SQL; shown in the palette and context menus. Not TablePlus JS plugins.
 - Bootstrap commands, encoding override, workspace overview, go back/forward, reopen workspaces at startup.
 
 Dropped (no terminal equivalent / not applicable): licensing, crash reports, Keychain, Touch ID, passcode lock, native menu bar/toolbar customisation, themes from git, DBngin, iOS, Windows .NET notes, spatial map preview, image/PDF preview (hex + save-as instead), Excel import (CSV only; export supported).
@@ -296,5 +296,5 @@ Dropped (no terminal equivalent / not applicable): licensing, crash reports, Key
 
 - `go build ./... && go vet ./... && go test ./...` — unit tests for keymap, config, splitter, classifier, change planner, filter builder, sqlfmt, CSV mapping.
 - `docker compose up -d` (Docker Desktop must be running; it is installed but the daemon is currently stopped) then `make smoke`: integration test per driver (connect, list objects, browse, plan+apply an edit, run a query with cancel, process list).
-- Manual TUI check per milestone in the app's terminal: `tuidb` → create the 5 seeded connections → browse/edit/commit a row in each → run multi-statement query → safe-mode dialog appears on `alert2` with an UPDATE → rebind `commit = "x"` in config.toml and confirm `C-d x` commits and `C-d ?` shows the new key.
+- Manual TUI check per milestone in the app's terminal: `webtuidb` → create the 5 seeded connections → browse/edit/commit a row in each → run multi-statement query → safe-mode dialog appears on `alert2` with an UPDATE → rebind `commit = "x"` in config.toml and confirm `C-d x` commits and `C-d ?` shows the new key.
 - Record a `vhs`/`asciinema`-free check: drive the binary in `tmux` and capture panes for the autonomous smoke of the TUI itself.

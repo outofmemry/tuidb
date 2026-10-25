@@ -13,24 +13,24 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func open(t *testing.T) *session {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_REDIS")
+	url := os.Getenv("WEBTUIDB_TEST_URL_REDIS")
 	if url == "" {
-		url = "redis://:tuidb@127.0.0.1:56379/0"
+		url = "redis://:webtuidb@127.0.0.1:56379/0"
 	}
 	conn, err := config.ParseURL(url)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pw, ok := os.LookupEnv("TUIDB_TEST_PASSWORD_REDIS"); ok {
+	if pw, ok := os.LookupEnv("WEBTUIDB_TEST_PASSWORD_REDIS"); ok {
 		conn.Password = pw
 	}
 	sess, err := driver{}.Open(context.Background(), conn, nil)
@@ -46,7 +46,7 @@ func tmpKey(t *testing.T, s *session, name string) string {
 	t.Helper()
 	b := make([]byte, 4)
 	rand.Read(b)
-	k := "tuidb_test:" + hex.EncodeToString(b) + ":" + name
+	k := "webtuidb_test:" + hex.EncodeToString(b) + ":" + name
 	t.Cleanup(func() { s.c().Del(context.Background(), k, k+"2") })
 	return k
 }
@@ -122,7 +122,7 @@ func TestOpenMetadata(t *testing.T) {
 			t.Errorf("%s columns %v", key, cs)
 		}
 	}
-	if _, err := s.Columns(ctx, ref("tuidb_test:missing")); err == nil {
+	if _, err := s.Columns(ctx, ref("webtuidb_test:missing")); err == nil {
 		t.Error("missing key should fail")
 	}
 	if ix, _ := s.Indexes(ctx, ref("user:1")); ix != nil {
@@ -262,7 +262,7 @@ func TestExec(t *testing.T) {
 	if err != nil || len(r.Rows) != 2 || !r.Truncated || r.Rows[1][0] != int64(1) || r.Rows[1][1] != "j2" {
 		t.Errorf("lrange %+v %v", r, err)
 	}
-	if r := run(t, s, `GET tuidb_test:nothing`); r.HasRows || r.Message != "(nil)" {
+	if r := run(t, s, `GET webtuidb_test:nothing`); r.HasRows || r.Message != "(nil)" {
 		t.Errorf("nil %+v", r)
 	}
 	if r := run(t, s, `HGETALL user:1`); len(r.Rows) != 3 || r.Columns[0].Name != "key" {

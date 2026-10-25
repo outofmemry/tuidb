@@ -9,7 +9,7 @@ import (
 
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 const filteringNote = "ALLOW FILTERING was added: no key or index covers this filter, so Cassandra reads the rows and filters them server-side (slow on big tables)"

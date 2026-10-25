@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func openTest(t *testing.T, bootstrap ...string) db.Session {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_POSTGRES")
+	url := os.Getenv("WEBTUIDB_TEST_URL_POSTGRES")
 	if url == "" {
-		url = "postgresql://tuidb:tuidb@127.0.0.1:55432/tuidb"
+		url = "postgresql://webtuidb:webtuidb@127.0.0.1:55432/webtuidb"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {
@@ -40,7 +40,7 @@ func openTest(t *testing.T, bootstrap ...string) db.Session {
 	return s
 }
 
-func tempName() string { return fmt.Sprintf("tuidb_test_%06d", rand.Intn(1000000)) }
+func tempName() string { return fmt.Sprintf("webtuidb_test_%06d", rand.Intn(1000000)) }
 
 // must panics on error, which fails the running test (cleanups still run).
 func must[T any](v T, err error) T {
@@ -68,10 +68,10 @@ func TestIntegrationMetadata(t *testing.T) {
 	if !strings.HasPrefix(s.ServerInfo(), "PostgreSQL 1") {
 		t.Errorf("server info %q", s.ServerInfo())
 	}
-	if dbs := must(s.Databases(ctx)); !has(dbs, "tuidb") {
+	if dbs := must(s.Databases(ctx)); !has(dbs, "webtuidb") {
 		t.Errorf("databases %v", dbs)
 	}
-	if s.CurrentDatabase() != "tuidb" || s.CurrentSchema() != "public" {
+	if s.CurrentDatabase() != "webtuidb" || s.CurrentSchema() != "public" {
 		t.Errorf("current %s.%s", s.CurrentDatabase(), s.CurrentSchema())
 	}
 	schemas := must(s.Schemas(ctx))
@@ -323,7 +323,7 @@ func TestIntegrationCancel(t *testing.T) {
 	for _, p := range must(pl.Processes(context.Background())) {
 		if strings.Contains(p.Query, "pg_sleep(5)") {
 			pid = p.ID
-			if p.User != "tuidb" || p.DB != "tuidb" || p.State != "active" || p.Elapsed <= 0 {
+			if p.User != "webtuidb" || p.DB != "webtuidb" || p.State != "active" || p.Elapsed <= 0 {
 				t.Errorf("process %+v", p)
 			}
 		}
@@ -481,7 +481,7 @@ func TestIntegrationDatabases(t *testing.T) {
 	if s.CurrentDatabase() != name+"_x" || len(must(s.Objects(ctx, "public"))) != 0 {
 		t.Errorf("use database: %s", s.CurrentDatabase())
 	}
-	if err := s.UseDatabase(ctx, "tuidb"); err != nil {
+	if err := s.UseDatabase(ctx, "webtuidb"); err != nil {
 		t.Fatal(err)
 	}
 	if len(must(s.Objects(ctx, "public"))) == 0 {
@@ -491,16 +491,16 @@ func TestIntegrationDatabases(t *testing.T) {
 	if has(must(s.Databases(ctx)), name+"_x") {
 		t.Error("dropped database still listed")
 	}
-	if err := s.UseDatabase(ctx, "no_such_db_"+name); err == nil || s.CurrentDatabase() != "tuidb" {
+	if err := s.UseDatabase(ctx, "no_such_db_"+name); err == nil || s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("bad database: %v / %s", err, s.CurrentDatabase())
 	}
 }
 
 func TestIntegrationBootstrap(t *testing.T) {
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1")
 	}
-	c, _ := config.ParseURL("postgresql://tuidb:tuidb@127.0.0.1:55432/tuidb")
+	c, _ := config.ParseURL("postgresql://webtuidb:webtuidb@127.0.0.1:55432/webtuidb")
 	c.Bootstrap = []string{"SET search_path TO app"}
 	d, _ := db.Lookup("postgres")
 	s, err := d.Open(context.Background(), c, nil)

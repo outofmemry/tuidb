@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func keys(names ...string) []db.Object {

@@ -9,18 +9,18 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func open(t *testing.T) (*session, context.Context) {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_MONGODB")
+	url := os.Getenv("WEBTUIDB_TEST_URL_MONGODB")
 	if url == "" {
-		url = "mongodb://tuidb:tuidb@127.0.0.1:57017/tuidb?authSource=admin"
+		url = "mongodb://webtuidb:webtuidb@127.0.0.1:57017/webtuidb?authSource=admin"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {
@@ -41,8 +41,8 @@ func open(t *testing.T) (*session, context.Context) {
 
 func tempColl(t *testing.T, s *session, ctx context.Context) string {
 	t.Helper()
-	name := "tuidb_test_" + bson.NewObjectID().Hex()[16:]
-	t.Cleanup(func() { s.client.Database("tuidb").Collection(name).Drop(context.Background()) })
+	name := "webtuidb_test_" + bson.NewObjectID().Hex()[16:]
+	t.Cleanup(func() { s.client.Database("webtuidb").Collection(name).Drop(context.Background()) })
 	return name
 }
 
@@ -76,10 +76,10 @@ func TestIntegrationBasics(t *testing.T) {
 		t.Errorf("caps %+v", c)
 	}
 	dbs, err := s.Databases(ctx)
-	if err != nil || !contains(dbs, "tuidb") {
+	if err != nil || !contains(dbs, "webtuidb") {
 		t.Fatalf("databases %v %v", dbs, err)
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("current %q", s.CurrentDatabase())
 	}
 	objs, err := s.Objects(ctx, "")
@@ -293,7 +293,7 @@ func TestIntegrationExec(t *testing.T) {
 		t.Errorf("ISODate %+v", r)
 	}
 	r = exec(t, s, ctx, `db.getName()`, 0)
-	if r.Rows[0][0] != "tuidb" {
+	if r.Rows[0][0] != "webtuidb" {
 		t.Errorf("getName %+v", r)
 	}
 	r = exec(t, s, ctx, `db.getCollectionNames()`, 0)
@@ -341,7 +341,7 @@ func TestIntegrationExec(t *testing.T) {
 	if r.Rows[0][0] != "admin" {
 		t.Errorf("db after use %+v", r)
 	}
-	exec(t, s, ctx, `use tuidb`, 0)
+	exec(t, s, ctx, `use webtuidb`, 0)
 }
 
 func TestIntegrationWritesAndPlan(t *testing.T) {
@@ -506,7 +506,7 @@ func TestIntegrationRawFilterIsInert(t *testing.T) {
 	if n, _ := s.Count(ctx, db.RowQuery{ObjRef: ref}, false); n.N != 2 {
 		t.Errorf("documents changed: %d", n.N)
 	}
-	if names, _ := s.client.Database("tuidb").ListCollectionNames(ctx, bson.D{}); !contains(names, "customers") || !contains(names, name) {
+	if names, _ := s.client.Database("webtuidb").ListCollectionNames(ctx, bson.D{}); !contains(names, "customers") || !contains(names, name) {
 		t.Errorf("collections changed: %v", names)
 	}
 	r, err := s.Rows(ctx, raw(`{status: 'paid', _id: {$ne: ObjectId('507f1f77bcf86cd799439011')}, d: ISODate('2024-01-01')}`))
@@ -569,7 +569,7 @@ func TestIntegrationCursorsAndTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got bson.D
-	if err := s.client.Database("tuidb").Collection(name).FindOne(ctx, bson.D{{Key: "_id", Value: 9}}).Decode(&got); err != nil {
+	if err := s.client.Database("webtuidb").Collection(name).FindOne(ctx, bson.D{{Key: "_id", Value: 9}}).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
 	dec, _ := lookup(got, "dec")
@@ -595,7 +595,7 @@ func runAdmin(t *testing.T, s *session, ctx context.Context, op db.AdminOp, ref 
 
 func TestIntegrationDatabaseAdmin(t *testing.T) {
 	s, ctx := open(t)
-	dbn := "tuidb_test_" + bson.NewObjectID().Hex()[16:]
+	dbn := "webtuidb_test_" + bson.NewObjectID().Hex()[16:]
 	t.Cleanup(func() { s.client.Database(dbn).Drop(context.Background()) })
 	runAdmin(t, s, ctx, db.OpCreateDatabase, db.ObjRef{Name: dbn}, map[string]string{"collection": "first"})
 	if dbs, _ := s.Databases(ctx); !contains(dbs, dbn) {
@@ -605,7 +605,7 @@ func TestIntegrationDatabaseAdmin(t *testing.T) {
 	if dbs, _ := s.Databases(ctx); contains(dbs, dbn) {
 		t.Errorf("database not dropped")
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("current database changed to %s", s.CurrentDatabase())
 	}
 }

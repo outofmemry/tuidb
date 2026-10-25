@@ -10,9 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"tuidb/internal/config"
-	"tuidb/internal/keymap"
-	"tuidb/internal/store"
+	"webtuidb/internal/config"
+	"webtuidb/internal/keymap"
+	"webtuidb/internal/store"
 )
 
 // Deps is everything the UI needs from the outside; tests build one with fakes.
@@ -79,7 +79,7 @@ func (a *App) Init() tea.Cmd {
 	if !a.d.Cfg.General.ReopenWorkspaces {
 		return a.keepAliveTick()
 	}
-	// reopen what was open when tuidb last quit (each in the database it was showing)
+	// reopen what was open when webtuidb last quit (each in the database it was showing)
 	var cmds []tea.Cmd
 	for _, ws := range a.d.State.LastSession() {
 		if c, ok := a.connByName(ws.Connection); ok {
@@ -512,13 +512,13 @@ func (a *App) View() tea.View {
 	v := tea.NewView(a.render())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion // for the wheel; shift-drag still selects terminal text
-	v.WindowTitle = "tuidb"
+	v.WindowTitle = "webtuidb"
 	return v
 }
 
 func (a *App) render() string {
 	if a.w < 20 || a.h < 6 {
-		return fmt.Sprintf("tuidb needs at least 20×6 cells (this terminal is %d×%d)", a.w, a.h)
+		return fmt.Sprintf("webtuidb needs at least 20×6 cells (this terminal is %d×%d)", a.w, a.h)
 	}
 	bodyH := a.h - 2
 	var body string
@@ -614,7 +614,7 @@ func (a *App) whichKey(w int) []string {
 func (a *App) topBar() string {
 	th := a.th
 	bar := th.StatusBar
-	l := th.TabActive.Render(" ◆ tuidb ") + bar.Render(" ")
+	l := th.TabActive.Render(" ◆ webtuidb ") + bar.Render(" ")
 	var right string
 	if w := a.ws(); w != nil {
 		left, rightParts := w.crumbs(th)

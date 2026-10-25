@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"tuidb/internal/keymap"
+	"webtuidb/internal/keymap"
 )
 
 // jnode is an ordered JSON value (encoding/json maps would lose key order, which matters for documents).

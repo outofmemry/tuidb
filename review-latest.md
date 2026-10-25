@@ -1,4 +1,4 @@
-# Code review — tuidb (full codebase)
+# Code review — webtuidb (full codebase)
 
 Scope: all tracked Go code (41,218 lines), the untracked web frontend (`web/src`, `internal/web`), plus build/CI/docs.
 Review method: 18 parallel review agents, one per subsystem, followed by manual verification of every P1 claim against the source (and targeted throwaway tests for the reachable ones).
@@ -685,7 +685,7 @@ Three statements are false against the code: a stub `dist/index.html` is "checke
 **Severity: P3**
 **Location:** `main.go:54-66`, `:109`
 
-Go's `flag` parsing stops at the first non-flag argument, so `tuidb pg-local --frontend` leaves `*frontend` false, never runs the "only works with --frontend" guard, and silently discards the remaining arguments; the TUI starts instead of reporting the mistake.
+Go's `flag` parsing stops at the first non-flag argument, so `webtuidb pg-local --frontend` leaves `*frontend` false, never runs the "only works with --frontend" guard, and silently discards the remaining arguments; the TUI starts instead of reporting the mistake.
 
 **Fix:** reject `flag.NArg() > 1` with a usage error.
 
@@ -719,7 +719,7 @@ func (s *State) do(f func(*stateFile)) error {
 }
 ```
 
-**Trigger:** run `tuidb` and `tuidb --frontend` together (README:83 advertises that they share pinned/recent tables, filters, and row limits). Pin a table in the TUI, then open a table in the browser (`POST /api/state/touch`, fired by `web/src/Workspace.tsx:42`); the browser rewrites the file from its startup snapshot and the TUI's pins, recents, filters, row limits, and last-session entry disappear with no error.
+**Trigger:** run `webtuidb` and `webtuidb --frontend` together (README:83 advertises that they share pinned/recent tables, filters, and row limits). Pin a table in the TUI, then open a table in the browser (`POST /api/state/touch`, fired by `web/src/Workspace.tsx:42`); the browser rewrites the file from its startup snapshot and the TUI's pins, recents, filters, row limits, and last-session entry disappear with no error.
 
 **Fix:** lock the file (`flock`/lockfile), re-read before mutate, or merge per key with a version/generation number.
 
@@ -752,7 +752,7 @@ if err != nil {
 
 `url.Parse` errors embed the full raw URL. A password containing an unescaped `%`, a space, or a bad port is echoed verbatim.
 
-**Trigger:** paste `postgresql://bob:p@ss%word@db/x` into the TUI import dialog (`internal/ui/welcome.go:353-355` → `w.a.fail`) or pass it on the CLI (`main.go:152-155`, printed to stderr): `tuidb: bad URL: parse "postgresql://bob:p@ss%word@db/x": invalid URL escape "%wo"`. The web path already has a `redactURL` (`internal/web/handlers.go:89-117`); the TUI/CLI do not.
+**Trigger:** paste `postgresql://bob:p@ss%word@db/x` into the TUI import dialog (`internal/ui/welcome.go:353-355` → `w.a.fail`) or pass it on the CLI (`main.go:152-155`, printed to stderr): `webtuidb: bad URL: parse "postgresql://bob:p@ss%word@db/x": invalid URL escape "%wo"`. The web path already has a `redactURL` (`internal/web/handlers.go:89-117`); the TUI/CLI do not.
 
 **Fix:** reuse the redaction helper in `ParseURL`, or wrap the error with a sanitized URL (scheme/host only).
 
@@ -800,7 +800,7 @@ return map[string]string{"DISABLED": "disable", "PREFERRED": "prefer", "REQUIRED
 
 An unrecognized value yields `""`, the `if mode != ""` validation is skipped, and the key is marked consumed, so nothing remains in `Options`. For MySQL/MariaDB `SSLMode == ""` means no TLS at all (`mysql.go:161-164`).
 
-**Trigger:** `mysql://u@h/d?ssl-mode=VERIFY-FULL` or `ssl-mode=verify-identity` (hyphen, tuidb's own spelling) → `""` → plaintext. `?tls=TRUE`/`?secure=TRUE` → `truthy` false → explicit `disable`.
+**Trigger:** `mysql://u@h/d?ssl-mode=VERIFY-FULL` or `ssl-mode=verify-identity` (hyphen, webtuidb's own spelling) → `""` → plaintext. `?tls=TRUE`/`?secure=TRUE` → `truthy` false → explicit `disable`.
 
 **Fix:** accept case-insensitively, normalize `-`/`_`, and return an error for any unknown `ssl-mode`/`tls`/`secure` value instead of `""`/"disable".
 
@@ -813,10 +813,10 @@ An unrecognized value yields `""`, the `if mode != ""` validation is skipped, an
 
 ```go
 h, _ := os.UserHomeDir()
-return filepath.Join(h, ".config", "tuidb")   // h == "" -> ".config/tuidb"
+return filepath.Join(h, ".config", "webtuidb")   // h == "" -> ".config/webtuidb"
 ```
 
-With `HOME` unset (launchd/systemd unit, cron, container, `env -u HOME tuidb`), the app loads `./.config/tuidb/connections.toml`, chmods it, and executes any `password_cmd` it names. History, state, and saved queries are also written into the CWD.
+With `HOME` unset (launchd/systemd unit, cron, container, `env -u HOME webtuidb`), the app loads `./.config/webtuidb/connections.toml`, chmods it, and executes any `password_cmd` it names. History, state, and saved queries are also written into the CWD.
 
 **Fix:** treat an empty `UserHomeDir` as an error, and require `XDG_*` values to be absolute.
 
@@ -1908,7 +1908,7 @@ When the limit trips, `stop()` closes the result and `rows.Err()` is intentional
 USE reporting;
 DELETE FROM orders WHERE id = 1;   -- unqualified: may now run in either keyspace
 ```
-`Exec("/* c */ USE system_schema")` → `err=nil`, `CurrentDatabase()=="tuidb"`, and later unqualified queries ran in `system_schema` (40/40 in the probe). App-generated SQL is keyspace-qualified, so the damage is confined to user-authored unqualified statements — which then run in an unpredictable keyspace.
+`Exec("/* c */ USE system_schema")` → `err=nil`, `CurrentDatabase()=="webtuidb"`, and later unqualified queries ran in `system_schema` (40/40 in the probe). App-generated SQL is keyspace-qualified, so the damage is confined to user-authored unqualified statements — which then run in an unpredictable keyspace.
 
 **Fix:** classify on `scan("cql", stmt)` tokens (which already yields `USE` as token 0 for all these forms), as `cqlReadOnly` does, and strip leading comments before the regex.
 
@@ -2309,7 +2309,7 @@ INSERT INTO t (id, u) VALUES (1, {v: null, d: null, ip: null, b: null, u: null})
 Opening the table:
 ```
 panic: runtime error: invalid memory address or nil pointer dereference
-  tuidb/internal/db/cassandra.normalize(...) normalize.go:93
+  webtuidb/internal/db/cassandra.normalize(...) normalize.go:93
 ```
 
 Without the `varint`, the same row renders `{"b":"0x","d":"\u003cnil\u003e","ip":"\u003cnil\u003e","u":"00000000-…"}`, and null text/int/set/timestamp fields show `""`/`0`/`[]`/`0001-01-01 …` instead of `null`. Writing the cell back then fails on the server (`Value '<nil>' is not a valid representation of a decimal`) or silently stores the zero value.
@@ -2417,7 +2417,7 @@ Only a comment-free full-string `USE` matches `useRe` and is routed to `UseDatab
 -- switch to system
 USE system
 ```
-`Exec` returns "Statement executed" and `CurrentDatabase()` still reports `tuidb`; a subsequent `SELECT currentDatabase()` returned `system` or `tuidb` 20/20 times once the pool had two connections. Because `Objects` returns refs with no schema (`:258`), browse queries are unqualified (`SELECT * FROM \`customers\``), so with a same-named table in two databases the grid can show or update either one, non-deterministically and without error.
+`Exec` returns "Statement executed" and `CurrentDatabase()` still reports `webtuidb`; a subsequent `SELECT currentDatabase()` returned `system` or `webtuidb` 20/20 times once the pool had two connections. Because `Objects` returns refs with no schema (`:258`), browse queries are unqualified (`SELECT * FROM \`customers\``), so with a same-named table in two databases the grid can show or update either one, non-deterministically and without error.
 
 **Fix:** classify with the lexer (strip comments) before matching, or reject `USE` in the editor path and require the database picker.
 

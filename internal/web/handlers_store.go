@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"tuidb/internal/store"
+	"webtuidb/internal/store"
 )
 
 func (s *Server) history(r *http.Request) (any, error) {

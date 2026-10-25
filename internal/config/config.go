@@ -1,4 +1,4 @@
-// Package config loads ~/.config/tuidb/config.toml over TablePlus-like defaults.
+// Package config loads ~/.config/webtuidb/config.toml over TablePlus-like defaults.
 package config
 
 import (
@@ -10,8 +10,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"tuidb/internal/keymap"
-	"tuidb/internal/safemode"
+	"webtuidb/internal/keymap"
+	"webtuidb/internal/safemode"
 )
 
 type Config struct {

@@ -10,18 +10,18 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func testConn(t *testing.T) config.Connection {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1 to run against the docker databases")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1 to run against the docker databases")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_MYSQL")
+	url := os.Getenv("WEBTUIDB_TEST_URL_MYSQL")
 	if url == "" {
-		url = "mysql://tuidb:tuidb@127.0.0.1:53306/tuidb"
+		url = "mysql://webtuidb:webtuidb@127.0.0.1:53306/webtuidb"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {
@@ -37,7 +37,7 @@ func open(t *testing.T, bootstrap ...string) *session {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var d db.Driver = drv{}
-	if c.Driver == config.MariaDB { // TUIDB_TEST_URL_MYSQL=mariadb://... runs this suite through the MariaDB driver's configuration
+	if c.Driver == config.MariaDB { // WEBTUIDB_TEST_URL_MYSQL=mariadb://... runs this suite through the MariaDB driver's configuration
 		d = New(config.MariaDB, func(c *db.Capabilities) { c.Sequences = true })
 	}
 	s, err := d.Open(ctx, c, nil)
@@ -51,7 +51,7 @@ func open(t *testing.T, bootstrap ...string) *session {
 // tempTable returns a unique table name that is dropped when the test ends.
 func tempTable(t *testing.T, s *session) string {
 	t.Helper()
-	name := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
+	name := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
 	t.Cleanup(func() { s.db().Exec("DROP TABLE IF EXISTS " + q(name)) })
 	return name
 }
@@ -77,10 +77,10 @@ func TestIntegrationOpen(t *testing.T) {
 		t.Errorf("server info %q", s.ServerInfo())
 	}
 	dbs, err := s.Databases(ctx)
-	if err != nil || !contains(dbs, "tuidb") {
+	if err != nil || !contains(dbs, "webtuidb") {
 		t.Errorf("databases %v %v", dbs, err)
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("current db %q", s.CurrentDatabase())
 	}
 	if sc, _ := s.Schemas(ctx); sc != nil || s.Caps().Schemas {
@@ -112,13 +112,13 @@ func TestIntegrationBadPassword(t *testing.T) {
 }
 
 func TestIntegrationBootstrapEveryConnection(t *testing.T) {
-	s := open(t, "SET @tuidb_boot = 42")
+	s := open(t, "SET @webtuidb_boot = 42")
 	var wg sync.WaitGroup
 	for range 4 { // SLEEP forces four distinct pooled connections
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r, err := s.Exec(context.Background(), "SELECT @tuidb_boot, SLEEP(0.3)", 0)
+			r, err := s.Exec(context.Background(), "SELECT @webtuidb_boot, SLEEP(0.3)", 0)
 			if err != nil || r.Rows[0][0] != int64(42) {
 				t.Errorf("bootstrap not applied: %v %v", r, err)
 			}
@@ -359,7 +359,7 @@ func TestIntegrationProcesses(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.Exec(context.Background(), "SELECT SLEEP(10) /* tuidb-kill-me */", 0)
+		_, err := s.Exec(context.Background(), "SELECT SLEEP(10) /* webtuidb-kill-me */", 0)
 		done <- err
 	}()
 	var id string
@@ -367,7 +367,7 @@ func TestIntegrationProcesses(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		ps, _ = s.Processes(context.Background())
 		for _, p := range ps {
-			if strings.Contains(p.Query, "tuidb-kill-me") {
+			if strings.Contains(p.Query, "webtuidb-kill-me") {
 				id = p.ID
 			}
 		}
@@ -609,7 +609,7 @@ func TestIntegrationPlanAdmin(t *testing.T) {
 func TestIntegrationDatabases(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	name := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
+	name := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
 	t.Cleanup(func() { s.db().Exec("DROP DATABASE IF EXISTS " + q(name)) })
 	st, err := s.PlanAdmin(db.OpCreateDatabase, db.ObjRef{Name: name}, map[string]string{"encoding": "utf8mb4", "collation": "utf8mb4_unicode_ci"})
 	if err != nil {
@@ -637,13 +637,13 @@ func TestIntegrationDatabases(t *testing.T) {
 	if objs, _ := s.Objects(ctx, ""); len(objs) != 1 || objs[0].Name != "only_here" {
 		t.Errorf("objects %+v", objs)
 	}
-	if _, err := s.Exec(ctx, "USE `tuidb`", 0); err != nil || s.CurrentDatabase() != "tuidb" {
+	if _, err := s.Exec(ctx, "USE `webtuidb`", 0); err != nil || s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("USE statement: %v, current %q", err, s.CurrentDatabase())
 	}
 	if _, err := s.Rows(ctx, db.RowQuery{ObjRef: db.ObjRef{Schema: name, Name: "only_here"}}); err != nil {
 		t.Errorf("schema-qualified browse: %v", err)
 	}
-	if err := s.UseDatabase(ctx, "tuidb_does_not_exist"); err == nil || s.CurrentDatabase() != "tuidb" {
+	if err := s.UseDatabase(ctx, "webtuidb_does_not_exist"); err == nil || s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("bad database: %v, current %q", err, s.CurrentDatabase())
 	}
 	st, _ = s.PlanAdmin(db.OpDropDatabase, db.ObjRef{Name: name}, nil)

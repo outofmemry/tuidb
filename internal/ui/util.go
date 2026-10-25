@@ -9,7 +9,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // fit truncates s to w display cells with an ellipsis, or right-pads it.

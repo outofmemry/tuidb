@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func TestRegisteredAsMariaDB(t *testing.T) {

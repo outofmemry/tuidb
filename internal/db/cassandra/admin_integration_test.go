@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func admin(t *testing.T, s *session, op db.AdminOp, ref db.ObjRef, opts map[string]string) {
@@ -24,7 +24,7 @@ func admin(t *testing.T, s *session, op db.AdminOp, ref db.ObjRef, opts map[stri
 func TestIntegrationKeyspaceAdmin(t *testing.T) {
 	s := open(t)
 	ctx := context.Background()
-	ks := fmt.Sprintf("tuidb_ks_%x", rand.Uint32())
+	ks := fmt.Sprintf("webtuidb_ks_%x", rand.Uint32())
 	t.Cleanup(func() { s.query("DROP KEYSPACE IF EXISTS " + q(ks)).Exec() })
 	admin(t, s, db.OpCreateDatabase, db.ObjRef{Name: ks}, map[string]string{"strategy": "SimpleStrategy", "replication": "1", "durable_writes": "false"})
 	dbs, _ := s.Databases(ctx)
@@ -43,7 +43,7 @@ func TestIntegrationKeyspaceAdmin(t *testing.T) {
 	if objs, _ := s.Objects(ctx, ""); len(objs) != 1 || objs[0].Name != "t" {
 		t.Errorf("objects %v", objs)
 	}
-	if err := s.UseDatabase(ctx, "tuidb"); err != nil {
+	if err := s.UseDatabase(ctx, "webtuidb"); err != nil {
 		t.Fatal(err)
 	}
 	admin(t, s, db.OpDropDatabase, db.ObjRef{Name: ks}, nil)

@@ -4,7 +4,7 @@ web:
 	cd web && npm ci && npm run build
 	touch internal/web/dist/.gitkeep
 build:
-	go build -o tuidb .
+	go build -o webtuidb .
 test:
 	go vet ./... && go test ./...
 up:
@@ -13,4 +13,4 @@ down:
 	docker compose down -v
 # Driver and end-to-end UI tests against the compose databases (needs `make up`).
 smoke:
-	TUIDB_INTEGRATION=1 go test -count=1 ./...
+	WEBTUIDB_INTEGRATION=1 go test -count=1 ./...

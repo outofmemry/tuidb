@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 const allTypesRow = `INSERT INTO all_types (id, a, t, ti, si, i, bi, vi, f, d, dec, b, u, tu, ts, dt, tm, dur, ip, bl, l, s, m, fl, tup, addr, v) VALUES
@@ -132,7 +132,7 @@ func TestIntegrationEditRoundTrip(t *testing.T) {
 		}
 	}
 	st, err := s.Plan([]db.Change{{Kind: db.Insert, ObjRef: ref("all_types"), Set: []db.KeyVal{kv("id", "12"), kv("t", db.Null), kv("i", db.Default)}}})
-	if err != nil || st[0].Text != `INSERT INTO "tuidb"."all_types" ("id") VALUES (?)` {
+	if err != nil || st[0].Text != `INSERT INTO "webtuidb"."all_types" ("id") VALUES (?)` {
 		t.Errorf("insert with NULLs: %v %v", st, err)
 	}
 	// invalid text fails at Plan time with the column named, before anything is sent
@@ -158,17 +158,17 @@ func TestIntegrationPlanShapes(t *testing.T) {
 		return st[0]
 	}
 	st := plan(db.Change{Kind: db.Update, ObjRef: ref("customers"), Key: []db.KeyVal{kv("id", int64(1))}, Set: []db.KeyVal{kv("name", "O'Brien"), kv("notes", db.Null), kv("email", db.Empty), kv("balance", "1.5"), kv("tags", `["a"]`), kv("created_at", db.Expr("toTimestamp(now())"))}})
-	if st.Text != `UPDATE "tuidb"."customers" SET "name" = ?, "notes" = NULL, "email" = ?, "balance" = ?, "tags" = fromJson(?), "created_at" = toTimestamp(now()) WHERE "id" = ?` {
+	if st.Text != `UPDATE "webtuidb"."customers" SET "name" = ?, "notes" = NULL, "email" = ?, "balance" = ?, "tags" = fromJson(?), "created_at" = toTimestamp(now()) WHERE "id" = ?` {
 		t.Errorf("update text %s", st.Text)
 	}
 	if !strings.Contains(st.Display, `"name" = 'O''Brien'`) || !strings.Contains(st.Display, `"tags" = fromJson('["a"]')`) || !strings.HasSuffix(st.Display, `WHERE "id" = 1`) {
 		t.Errorf("update display %s", st.Display)
 	}
 	st = plan(db.Change{Kind: db.Update, ObjRef: ref("all_types"), Key: []db.KeyVal{kv("id", int64(1))}, Set: []db.KeyVal{kv("ts", db.Expr("NOW()")), kv("dt", db.Expr("now()")), kv("tu", db.Expr("NOW()"))}})
-	if st.Text != `UPDATE "tuidb"."all_types" SET "ts" = toTimestamp(now()), "dt" = toDate(now()), "tu" = NOW() WHERE "id" = ?` {
+	if st.Text != `UPDATE "webtuidb"."all_types" SET "ts" = toTimestamp(now()), "dt" = toDate(now()), "tu" = NOW() WHERE "id" = ?` {
 		t.Errorf("NOW(): %s", st.Text)
 	}
-	if st := plan(db.Change{Kind: db.Delete, ObjRef: ref("orders"), Key: []db.KeyVal{kv("customer_id", int64(1)), kv("id", int64(2))}}); st.Text != `DELETE FROM "tuidb"."orders" WHERE "customer_id" = ? AND "id" = ?` {
+	if st := plan(db.Change{Kind: db.Delete, ObjRef: ref("orders"), Key: []db.KeyVal{kv("customer_id", int64(1)), kv("id", int64(2))}}); st.Text != `DELETE FROM "webtuidb"."orders" WHERE "customer_id" = ? AND "id" = ?` {
 		t.Errorf("delete %s", st.Text)
 	}
 	for name, c := range map[string]db.Change{
@@ -263,7 +263,7 @@ func TestIntegrationApplyBatch(t *testing.T) {
 	ctx := context.Background()
 	tbl := tempTable(t, s)
 	exec(t, s, "CREATE TABLE "+q(tbl)+" (id int PRIMARY KEY, v int)")
-	qt := `"tuidb".` + q(tbl)
+	qt := `"webtuidb".` + q(tbl)
 	ins := func(id, v string) db.Statement {
 		return db.Statement{Text: "INSERT INTO " + qt + " (id, v) VALUES (" + id + ", " + v + ")", Display: "insert " + id}
 	}

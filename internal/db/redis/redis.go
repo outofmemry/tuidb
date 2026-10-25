@@ -19,8 +19,8 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/maintnotifications"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 const maxKeys = 10000 // Objects stops listing here

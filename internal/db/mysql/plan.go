@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 var q = db.MySQL.Quote

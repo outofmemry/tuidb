@@ -16,7 +16,7 @@ import (
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
 	"gopkg.in/inf.v0"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // goValue turns a cell value into what gocql marshals for the column type. The UI hands over original values as the driver

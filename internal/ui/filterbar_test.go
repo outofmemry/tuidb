@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func TestInlineArgsKeepsOrderForQuestionMarkDialects(t *testing.T) {

@@ -10,8 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func TestNormalize(t *testing.T) {
@@ -186,7 +186,7 @@ func TestSearchableSkipsHeavyTypes(t *testing.T) {
 }
 
 func TestUseRe(t *testing.T) {
-	for stmt, want := range map[string]string{"USE system": "system", " use `my db` ; ": "my db", `USE "x"`: "x", "use\ntuidb;": "tuidb", "-- to system\nUSE system": "system", "/* c */ USE x /* d */;-- e": "x", "USE/**/y": "y"} {
+	for stmt, want := range map[string]string{"USE system": "system", " use `my db` ; ": "my db", `USE "x"`: "x", "use\nwebtuidb;": "webtuidb", "-- to system\nUSE system": "system", "/* c */ USE x /* d */;-- e": "x", "USE/**/y": "y"} {
 		m := useRe.FindStringSubmatch(stmt)
 		if m == nil || m[1]+m[2]+m[3] != want {
 			t.Errorf("%q: %q", stmt, m)

@@ -1,6 +1,6 @@
 -- Idempotent: the integration tests apply this file statement by statement (db.Split("cql", ...)) before they run.
-CREATE KEYSPACE IF NOT EXISTS tuidb WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
-USE tuidb;
+CREATE KEYSPACE IF NOT EXISTS webtuidb WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+USE webtuidb;
 CREATE TYPE IF NOT EXISTS address (street text, city text, zip int);
 CREATE TABLE IF NOT EXISTS customers (
   id int PRIMARY KEY, name text, email text, notes text, balance decimal, created_at timestamp, tags set<text>, prefs map<text, int>, home frozen<address>);

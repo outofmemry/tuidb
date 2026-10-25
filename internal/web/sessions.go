@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
-	"tuidb/internal/safemode"
-	"tuidb/internal/ui"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
+	"webtuidb/internal/safemode"
+	"webtuidb/internal/ui"
 )
 
 const (

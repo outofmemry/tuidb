@@ -8,22 +8,22 @@ import (
 	"os"
 	"testing"
 
-	"tuidb/internal/config"
-	"tuidb/internal/store"
-	"tuidb/internal/web"
+	"webtuidb/internal/config"
+	"webtuidb/internal/store"
+	"webtuidb/internal/web"
 
-	_ "tuidb/internal/db/postgres"
+	_ "webtuidb/internal/db/postgres"
 )
 
 // Real driver, real server: open -> rows -> edit -> plan -> apply -> verify -> restore.
-// Run with TUIDB_INTEGRATION=1 and `make up` (compose postgres).
+// Run with WEBTUIDB_INTEGRATION=1 and `make up` (compose postgres).
 func TestPostgresRoundTrip(t *testing.T) {
-	if os.Getenv("TUIDB_INTEGRATION") == "" {
-		t.Skip("set TUIDB_INTEGRATION=1 (and `make up`) to run")
+	if os.Getenv("WEBTUIDB_INTEGRATION") == "" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1 (and `make up`) to run")
 	}
-	url := os.Getenv("TUIDB_TEST_POSTGRES")
+	url := os.Getenv("WEBTUIDB_TEST_POSTGRES")
 	if url == "" {
-		url = "postgres://tuidb:tuidb@127.0.0.1:55432/tuidb"
+		url = "postgres://webtuidb:webtuidb@127.0.0.1:55432/webtuidb"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {

@@ -9,22 +9,22 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 // These tests drive the registered "mariadb" driver through the db.Session interface only, against
-// the docker-compose mariadb service (TUIDB_INTEGRATION=1). The shared MySQL scenarios run against
-// the same server from internal/db/mysql with TUIDB_TEST_URL_MYSQL=mariadb://...
+// the docker-compose mariadb service (WEBTUIDB_INTEGRATION=1). The shared MySQL scenarios run against
+// the same server from internal/db/mysql with WEBTUIDB_TEST_URL_MYSQL=mariadb://...
 
 func testConn(t *testing.T) config.Connection {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1 to run against the docker databases")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1 to run against the docker databases")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_MARIADB")
+	url := os.Getenv("WEBTUIDB_TEST_URL_MARIADB")
 	if url == "" {
-		url = "mariadb://tuidb:tuidb@127.0.0.1:53307/tuidb"
+		url = "mariadb://webtuidb:webtuidb@127.0.0.1:53307/webtuidb"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {
@@ -62,7 +62,7 @@ func ref(name string) db.ObjRef { return db.ObjRef{Name: name, Kind: db.KindTabl
 // temp registers cleanup for a uniquely named object and returns its name.
 func temp(t *testing.T, s db.Session, kind string) string {
 	t.Helper()
-	name := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
+	name := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
 	t.Cleanup(func() { s.Exec(context.Background(), "DROP "+kind+" IF EXISTS "+q(name), 0) })
 	return name
 }
@@ -134,10 +134,10 @@ func TestIntegrationOpen(t *testing.T) {
 	if !c.Sequences || !c.Transactions || !c.ProcessList || c.Schemas || c.Dialect != "mysql" || c.Editor != "sql" || len(c.Types) == 0 {
 		t.Errorf("caps %+v", c)
 	}
-	if dbs, err := s.Databases(ctx); err != nil || !contains(dbs, "tuidb") {
+	if dbs, err := s.Databases(ctx); err != nil || !contains(dbs, "webtuidb") {
 		t.Errorf("databases %v %v", dbs, err)
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("current db %q", s.CurrentDatabase())
 	}
 	if sc, _ := s.Schemas(ctx); sc != nil || s.CurrentSchema() != "" {
@@ -161,11 +161,11 @@ func contains(l []string, v string) bool {
 }
 
 func TestIntegrationBootstrapEveryConnection(t *testing.T) {
-	s := open(t, "SET @tuidb_boot = 42")
+	s := open(t, "SET @webtuidb_boot = 42")
 	done := make(chan error, 4)
 	for range 4 { // SLEEP forces four distinct pooled connections
 		go func() {
-			r, err := s.Exec(context.Background(), "SELECT @tuidb_boot, SLEEP(0.3)", 0)
+			r, err := s.Exec(context.Background(), "SELECT @webtuidb_boot, SLEEP(0.3)", 0)
 			if err == nil && r.Rows[0][0] != int64(42) {
 				err = fmt.Errorf("bootstrap not applied: %v", r.Rows)
 			}
@@ -423,7 +423,7 @@ func TestIntegrationProcesses(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.Exec(context.Background(), "SELECT SLEEP(10) /* tuidb-kill-me */", 0)
+		_, err := s.Exec(context.Background(), "SELECT SLEEP(10) /* webtuidb-kill-me */", 0)
 		done <- err
 	}()
 	var id string
@@ -431,7 +431,7 @@ func TestIntegrationProcesses(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		ps, _ = pl.Processes(context.Background())
 		for _, p := range ps {
-			if strings.Contains(p.Query, "tuidb-kill-me") && p.User == "tuidb" {
+			if strings.Contains(p.Query, "webtuidb-kill-me") && p.User == "webtuidb" {
 				id = p.ID
 			}
 		}
@@ -751,7 +751,7 @@ func TestIntegrationPlanAdminTablesAndDatabases(t *testing.T) {
 		t.Error("table still exists")
 	}
 
-	name := fmt.Sprintf("tuidb_test_%x", rand.Uint32())
+	name := fmt.Sprintf("webtuidb_test_%x", rand.Uint32())
 	t.Cleanup(func() { s.Exec(ctx, "DROP DATABASE IF EXISTS "+q(name), 0) })
 	run(db.OpCreateDatabase, db.ObjRef{Name: name}, map[string]string{"encoding": "utf8mb4", "collation": "utf8mb4_unicode_ci"})
 	if dbs, _ := s.Databases(ctx); !contains(dbs, name) {
@@ -766,10 +766,10 @@ func TestIntegrationPlanAdminTablesAndDatabases(t *testing.T) {
 	if len(objs) != 2 {
 		t.Errorf("objects of the new database %+v", objs)
 	}
-	if err := s.UseDatabase(ctx, "tuidb_does_not_exist"); err == nil || s.CurrentDatabase() != name {
+	if err := s.UseDatabase(ctx, "webtuidb_does_not_exist"); err == nil || s.CurrentDatabase() != name {
 		t.Errorf("bad database: %v, current %q", err, s.CurrentDatabase())
 	}
-	if err := s.UseDatabase(ctx, "tuidb"); err != nil {
+	if err := s.UseDatabase(ctx, "webtuidb"); err != nil {
 		t.Fatal(err)
 	}
 	run(db.OpDropDatabase, db.ObjRef{Name: name}, nil)

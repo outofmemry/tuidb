@@ -11,19 +11,19 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
-	"tuidb/internal/store"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
+	"webtuidb/internal/store"
 
-	_ "tuidb/internal/db/mysql"
-	_ "tuidb/internal/db/postgres"
+	_ "webtuidb/internal/db/mysql"
+	_ "webtuidb/internal/db/postgres"
 )
 
-// End-to-end: real UI model, real driver, real database. Run with TUIDB_INTEGRATION=1 (make up first).
+// End-to-end: real UI model, real driver, real database. Run with WEBTUIDB_INTEGRATION=1 (make up first).
 func newRealHarness(t *testing.T, urlEnv, def string) *harness {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") == "" {
-		t.Skip("set TUIDB_INTEGRATION=1 (and `make up`) to run")
+	if os.Getenv("WEBTUIDB_INTEGRATION") == "" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1 (and `make up`) to run")
 	}
 	u := os.Getenv(urlEnv)
 	if u == "" {
@@ -67,7 +67,7 @@ func (h *harness) query(sql string) []string {
 
 func e2eSQL(t *testing.T, name, urlEnv, def string) {
 	h := newRealHarness(t, urlEnv, def)
-	tbl := fmt.Sprintf("tuidb_e2e_%d", time.Now().UnixNano()%1_000_000)
+	tbl := fmt.Sprintf("webtuidb_e2e_%d", time.Now().UnixNano()%1_000_000)
 	h.press("enter")
 	if h.a.ws() == nil {
 		t.Fatalf("connect failed:\n%s", h.screen())
@@ -175,9 +175,9 @@ func e2eSQL(t *testing.T, name, urlEnv, def string) {
 }
 
 func TestE2EPostgres(t *testing.T) {
-	e2eSQL(t, "postgres", "TUIDB_TEST_URL_POSTGRES", "postgresql://tuidb:tuidb@127.0.0.1:55432/tuidb")
+	e2eSQL(t, "postgres", "WEBTUIDB_TEST_URL_POSTGRES", "postgresql://webtuidb:webtuidb@127.0.0.1:55432/webtuidb")
 }
 
 func TestE2EMySQL(t *testing.T) {
-	e2eSQL(t, "mysql", "TUIDB_TEST_URL_MYSQL", "mysql://tuidb:tuidb@127.0.0.1:53306/tuidb")
+	e2eSQL(t, "mysql", "WEBTUIDB_TEST_URL_MYSQL", "mysql://webtuidb:webtuidb@127.0.0.1:53306/webtuidb")
 }

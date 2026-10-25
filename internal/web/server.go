@@ -1,4 +1,4 @@
-// Package web serves the tuidb engine over a local HTTP+JSON API and the embedded web app.
+// Package web serves the webtuidb engine over a local HTTP+JSON API and the embedded web app.
 // It only wraps db.Session, store and config; the terminal UI is untouched.
 package web
 
@@ -26,9 +26,9 @@ import (
 	"syscall"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/store"
-	"tuidb/internal/ui"
+	"webtuidb/internal/config"
+	"webtuidb/internal/store"
+	"webtuidb/internal/ui"
 )
 
 //go:embed all:dist
@@ -100,9 +100,9 @@ func Run(o Options) error {
 		return err
 	}
 	url := fmt.Sprintf("http://%s/#token=%s", ln.Addr(), s.o.Token)
-	fmt.Println("tuidb web UI:", url)
+	fmt.Println("webtuidb web UI:", url)
 	if _, err := fs.Stat(distFS, "dist/index.html"); err != nil {
-		fmt.Fprintln(os.Stderr, "tuidb: the web app is not built into this binary; run `make web` then `make build` (the API still works)")
+		fmt.Fprintln(os.Stderr, "webtuidb: the web app is not built into this binary; run `make web` then `make build` (the API still works)")
 	}
 	if o.Open {
 		openBrowser(url)
@@ -117,7 +117,7 @@ func Run(o Options) error {
 		sh, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(sh); err != nil {
-			fmt.Fprintln(os.Stderr, "tuidb: shutdown:", err)
+			fmt.Fprintln(os.Stderr, "webtuidb: shutdown:", err)
 		}
 	}()
 	go s.reapIdle(ctx, idleSessionTTL)
@@ -143,7 +143,7 @@ func openBrowser(url string) {
 		cmd = exec.Command("xdg-open", url)
 	}
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "tuidb: could not open the browser:", err)
+		fmt.Fprintln(os.Stderr, "webtuidb: could not open the browser:", err)
 		return
 	}
 	go cmd.Wait()

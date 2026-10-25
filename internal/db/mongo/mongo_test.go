@@ -11,8 +11,8 @@ import (
 	"github.com/dop251/goja/ast"
 	"go.mongodb.org/mongo-driver/v2/bson"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func TestCell(t *testing.T) {
@@ -235,7 +235,7 @@ func TestParseDoc(t *testing.T) {
 	if _, ok := d[len(d)-2].Value.(bson.Regex); !ok || len(d) != 12 {
 		t.Errorf("doc %#v", d)
 	}
-	bad := []string{"{a: db.tuidb_test_x.drop()}", "db.dropDatabase`x`", "new db.c.drop", "{a: (function(){return 1})()}", `{$where: "1"}`,
+	bad := []string{"{a: db.webtuidb_test_x.drop()}", "db.dropDatabase`x`", "new db.c.drop", "{a: (function(){return 1})()}", `{$where: "1"}`,
 		`{"$where": "1"}`, `{a: {$expr: {$function: {body: "1", args: [], lang: "js"}}}}`, "{a: `x`}", "{a: db.x}", "{a: x = 1}", "{a: (1, 2)}",
 		"{a: () => 1}", "{a: x++}", "{[k]: 1}", "{a}", "{...o}", "{get a() { return 1 }}", "{a: ObjectId.constructor('x')()}", "{a: 1}); db.c.drop(", "[1]"}
 	for _, b := range bad {

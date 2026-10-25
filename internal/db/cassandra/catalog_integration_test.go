@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func TestIntegrationCatalog(t *testing.T) {
@@ -87,7 +87,7 @@ func TestIntegrationCatalog(t *testing.T) {
 		}
 	}
 	d, _ := s.DDL(ctx, ref("orders"))
-	if !strings.Contains(d, "CLUSTERING ORDER BY (id DESC)") || !strings.Contains(d, "tuidb.orders") {
+	if !strings.Contains(d, "CLUSTERING ORDER BY (id DESC)") || !strings.Contains(d, "webtuidb.orders") {
 		t.Errorf("orders ddl %q", d)
 	}
 	d, _ = s.DDL(ctx, db.ObjRef{Name: "add_one(int)", Kind: db.KindFunction})
@@ -103,16 +103,16 @@ func TestIntegrationCatalog(t *testing.T) {
 		exec(t, s, d)
 	}
 
-	for kind, want := range map[db.ScriptKind]string{db.ScriptDrop: `DROP TABLE "tuidb"."orders";`, db.ScriptTruncate: `TRUNCATE "tuidb"."orders";`,
-		db.ScriptSelectTop: `SELECT * FROM "tuidb"."orders" LIMIT 100;`} {
+	for kind, want := range map[db.ScriptKind]string{db.ScriptDrop: `DROP TABLE "webtuidb"."orders";`, db.ScriptTruncate: `TRUNCATE "webtuidb"."orders";`,
+		db.ScriptSelectTop: `SELECT * FROM "webtuidb"."orders" LIMIT 100;`} {
 		if got, err := s.Script(ctx, kind, ref("orders")); err != nil || got != want {
 			t.Errorf("script %s: %q %v", kind, got, err)
 		}
 	}
-	if got, _ := s.Script(ctx, db.ScriptDrop, db.ObjRef{Name: "total_sum(int)", Kind: db.KindFunction}); got != `DROP AGGREGATE "tuidb"."total_sum"(int);` {
+	if got, _ := s.Script(ctx, db.ScriptDrop, db.ObjRef{Name: "total_sum(int)", Kind: db.KindFunction}); got != `DROP AGGREGATE "webtuidb"."total_sum"(int);` {
 		t.Errorf("drop aggregate %q", got)
 	}
-	if got, _ := s.Script(ctx, db.ScriptDrop, db.ObjRef{Name: "add_one(int)", Kind: db.KindFunction}); got != `DROP FUNCTION "tuidb"."add_one"(int);` {
+	if got, _ := s.Script(ctx, db.ScriptDrop, db.ObjRef{Name: "add_one(int)", Kind: db.KindFunction}); got != `DROP FUNCTION "webtuidb"."add_one"(int);` {
 		t.Errorf("drop function %q", got)
 	}
 }

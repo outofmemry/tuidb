@@ -7,7 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"tuidb/internal/config"
+	"webtuidb/internal/config"
 )
 
 // Theme is built once from a palette; [theme.colors] in config.toml overrides single entries.

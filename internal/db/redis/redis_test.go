@@ -9,8 +9,8 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func TestParseQuoteRoundTrip(t *testing.T) {
@@ -219,7 +219,7 @@ func TestPlanChanges(t *testing.T) {
 			t.Fatalf("list delete: %v %v", got, err)
 		}
 		set, rem := strings.Fields(got[0].Text), strings.Fields(got[1].Text)
-		if set[0] != "LSET" || set[2] != "1" || rem[0] != "LREM" || rem[2] != "1" || set[3] != rem[3] || !strings.HasPrefix(set[3], "__tuidb_deleted_") {
+		if set[0] != "LSET" || set[2] != "1" || rem[0] != "LREM" || rem[2] != "1" || set[3] != rem[3] || !strings.HasPrefix(set[3], "__webtuidb_deleted_") {
 			t.Errorf("list delete must overwrite the index with a marker then remove the marker: %v", got)
 		}
 	}

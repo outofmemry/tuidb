@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func open(t *testing.T) db.Session {
 	t.Helper()
-	if os.Getenv("TUIDB_INTEGRATION") != "1" {
-		t.Skip("set TUIDB_INTEGRATION=1")
+	if os.Getenv("WEBTUIDB_INTEGRATION") != "1" {
+		t.Skip("set WEBTUIDB_INTEGRATION=1")
 	}
-	url := os.Getenv("TUIDB_TEST_URL_CLICKHOUSE")
+	url := os.Getenv("WEBTUIDB_TEST_URL_CLICKHOUSE")
 	if url == "" {
-		url = "clickhouse://tuidb:tuidb@127.0.0.1:59000/tuidb"
+		url = "clickhouse://webtuidb:webtuidb@127.0.0.1:59000/webtuidb"
 	}
 	c, err := config.ParseURL(url)
 	if err != nil {
@@ -34,7 +34,7 @@ func open(t *testing.T) db.Session {
 	return s
 }
 
-func tmpName() string { return fmt.Sprintf("tuidb_test_%d", rand.Intn(1e9)) }
+func tmpName() string { return fmt.Sprintf("webtuidb_test_%d", rand.Intn(1e9)) }
 
 // tmpTable creates a MergeTree table and drops it at the end.
 func tmpTable(t *testing.T, s db.Session, cols string) string {
@@ -57,11 +57,11 @@ func TestSeedMetadata(t *testing.T) {
 	if err := s.Ping(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("db %q", s.CurrentDatabase())
 	}
 	dbs, err := s.Databases(ctx)
-	if err != nil || !contains(dbs, "tuidb") {
+	if err != nil || !contains(dbs, "webtuidb") {
 		t.Errorf("%v %v", dbs, err)
 	}
 	objs, err := s.Objects(ctx, "")
@@ -83,7 +83,7 @@ func TestSeedMetadata(t *testing.T) {
 		t.Errorf("%+v", cols)
 	}
 	ddl, err := s.DDL(ctx, db.ObjRef{Name: "customers"})
-	if err != nil || !strings.Contains(ddl, "CREATE TABLE tuidb.customers") {
+	if err != nil || !strings.Contains(ddl, "CREATE TABLE webtuidb.customers") {
 		t.Errorf("%q %v", ddl, err)
 	}
 	if ddl, err = s.DDL(ctx, db.ObjRef{Name: "paid_orders", Kind: db.KindView}); err != nil || !strings.Contains(ddl, "VIEW") {
@@ -393,13 +393,13 @@ func TestDatabasesAdminAndUse(t *testing.T) {
 	if err != nil || len(objs) != 1 || objs[0].Name != "x" {
 		t.Errorf("objects after use: %+v %v", objs, err)
 	}
-	if err := s.UseDatabase(ctx, "tuidb"); err != nil {
+	if err := s.UseDatabase(ctx, "webtuidb"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UseDatabase(ctx, "no_such_db_xyz"); err == nil {
 		t.Error("use of missing db must fail")
 	}
-	if s.CurrentDatabase() != "tuidb" {
+	if s.CurrentDatabase() != "webtuidb" {
 		t.Errorf("current after failed use: %q", s.CurrentDatabase())
 	}
 	run(s.PlanAdmin(db.OpDropDatabase, db.ObjRef{Name: d + "_r"}, nil))
@@ -426,7 +426,7 @@ func TestProcesses(t *testing.T) {
 		for _, p := range ps {
 			if strings.Contains(p.Query, "sleepEachRow") {
 				id = p.ID
-				if p.User != "tuidb" || p.DB != "tuidb" || p.State != "Running" {
+				if p.User != "webtuidb" || p.DB != "webtuidb" || p.State != "Running" {
 					t.Errorf("%+v", p)
 				}
 			}
@@ -462,11 +462,11 @@ func TestExecUseSwitchesSession(t *testing.T) {
 			t.Fatalf("currentDatabase %v %v", r, err)
 		}
 	}
-	if _, err := s.Exec(ctx, "USE tuidb_test_missing_db", 0); err == nil || s.CurrentDatabase() != "system" {
+	if _, err := s.Exec(ctx, "USE webtuidb_test_missing_db", 0); err == nil || s.CurrentDatabase() != "system" {
 		t.Errorf("bad USE: %v current %s", err, s.CurrentDatabase())
 	}
 	done := make(chan error, 2)
-	for _, name := range []string{"tuidb", "system"} {
+	for _, name := range []string{"webtuidb", "system"} {
 		go func() { done <- s.UseDatabase(ctx, name) }()
 	}
 	for range 2 {

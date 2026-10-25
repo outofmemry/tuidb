@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"tuidb/internal/config"
+	"webtuidb/internal/config"
 )
 
 // DialFunc lets drivers connect through an SSH tunnel. Nil means net.Dialer.

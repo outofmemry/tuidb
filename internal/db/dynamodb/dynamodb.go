@@ -63,8 +63,8 @@ import (
 	"github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/logging"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func init() { db.Register(drv{}) }
@@ -202,7 +202,7 @@ func (drv) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (db.
 	retryer := func() aws.Retryer {
 		return retry.AddWithMaxBackoffDelay(retry.NewStandard(func(o *retry.StandardOptions) { o.MaxAttempts = 8 }), 5*time.Second)
 	}
-	opts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(hc), awsconfig.WithRetryer(retryer), awsconfig.WithAppID("tuidb"), awsconfig.WithLogger(logging.Nop{})}
+	opts := []func(*awsconfig.LoadOptions) error{awsconfig.WithHTTPClient(hc), awsconfig.WithRetryer(retryer), awsconfig.WithAppID("webtuidb"), awsconfig.WithLogger(logging.Nop{})}
 	if region != "" {
 		opts = append(opts, awsconfig.WithRegion(region))
 	}

@@ -17,7 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"tuidb/internal/safemode"
+	"webtuidb/internal/safemode"
 )
 
 // Driver names. Aliases accepted in URLs are mapped in ParseURL.
@@ -304,7 +304,7 @@ var urlSchemes = map[string]string{
 // SSLModes are the values of Connection.SSLMode.
 var SSLModes = []string{"disable", "prefer", "require", "verify-ca", "verify-full", "verify-identity"}
 
-// sslFromQuery reads TLS settings from a URL query in tuidb's own spelling (sslmode=) and the
+// sslFromQuery reads TLS settings from a URL query in webtuidb's own spelling (sslmode=) and the
 // engines' native ones, so a URL pasted from another tool does not silently connect in plaintext.
 // It returns the mode and the query keys it consumed.
 func sslFromQuery(driver string, q url.Values) (string, []string, error) {
@@ -459,7 +459,7 @@ func (c Connection) FormatURL() string {
 		q.Set(k, v)
 	}
 	if c.SSLMode != "" {
-		q.Set("sslmode", c.SSLMode) // tuidb's own spelling; ParseURL also reads the native ones
+		q.Set("sslmode", c.SSLMode) // webtuidb's own spelling; ParseURL also reads the native ones
 	}
 	q.Set("name", c.Name)
 	if c.Tag != "" {

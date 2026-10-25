@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func quote(ident string) string { return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"` }

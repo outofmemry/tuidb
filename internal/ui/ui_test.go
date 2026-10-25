@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"tuidb/internal/config"
+	"webtuidb/internal/config"
 
 	tea "charm.land/bubbletea/v2"
 )

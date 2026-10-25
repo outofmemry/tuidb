@@ -1,0 +1,62 @@
+import { useImperativeHandle, useState, type CSSProperties, type Ref } from 'react'
+
+// Select is the app's own drop-down: a caret button that opens the same popover menu the connection
+// switcher uses, so nothing in the UI falls back to the browser's native widget. The menu is fixed to
+// the viewport (and flips upward near the bottom), so a scrolling dialog never clips it.
+export type Opt = { value: string; label: string }
+export type SelectHandle = { open: () => void }
+
+const MENU = 'popover fixed z-[41] w-max min-w-[160px] max-w-[min(480px,calc(100vw-24px))] max-h-[60vh] overflow-auto m-0 p-1.5'
+const ITEM = 'flex items-center gap-2.5 w-full text-left border-transparent hover:border-ink-3'
+
+type Props = {
+  value: string
+  options: (string | Opt)[]
+  onChange: (v: string) => void
+  className?: string
+  'aria-label'?: string
+  title?: string
+  ref?: Ref<SelectHandle>
+}
+
+export function Select({ value, options, onChange, className = '', title, ref, ...a }: Props) {
+  const [at, setAt] = useState<CSSProperties | null>(null) // null = closed
+  const [btn, setBtn] = useState<HTMLButtonElement | null>(null)
+  const open = () => {
+    const r = btn?.getBoundingClientRect(); if (!r) return
+    const below = window.innerHeight - r.bottom
+    setAt(below < 260 && r.top > below ? { left: r.left, bottom: window.innerHeight - r.top + 4 } : { left: r.left, top: r.bottom + 4 })
+  }
+  useImperativeHandle(ref, () => ({ open }))
+  const opts = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o))
+  const cur = opts.find((o) => o.value === value)
+  // arrows move between items, Escape closes; focus starts on the current item
+  const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role=menuitem]')]
+    const i = items.indexOf(document.activeElement as HTMLButtonElement)
+    if (e.key === 'ArrowDown') items[(i + 1) % items.length]?.focus()
+    else if (e.key === 'ArrowUp') items[(i - 1 + items.length) % items.length]?.focus()
+    else if (e.key === 'Escape') { setAt(null); btn?.focus() }
+    else return
+    e.preventDefault(); e.stopPropagation()
+  }
+  return (
+    <>
+      <button ref={setBtn} type="button" className={`inline-flex items-center gap-1.5 px-2 ${className}`} onClick={() => (at ? setAt(null) : open())} aria-haspopup="menu" aria-expanded={!!at} aria-label={a['aria-label']} title={title}>
+        <span className="flex-1 min-w-0 truncate text-left">{cur?.label ?? value}</span><span className="text-[10px] opacity-70" aria-hidden>▾</span>
+      </button>
+      {at && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setAt(null)} aria-hidden />
+          <div className={MENU} style={at} role="menu" aria-label={a['aria-label']} onKeyDown={onKey}>
+            {opts.map((o) => (
+              <button key={o.value} type="button" role="menuitem" autoFocus={o.value === value} className={`${ITEM} ${o.value === value ? 'btn-on' : ''}`} onClick={() => { setAt(null); if (o.value !== value) onChange(o.value) }}>
+                <span className="flex-1 min-w-0 truncate">{o.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  )
+}

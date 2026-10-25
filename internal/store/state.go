@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 // TableState is remembered per connection/database/table.

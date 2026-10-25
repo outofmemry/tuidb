@@ -17,8 +17,8 @@ import (
 
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func init() { db.Register(drv{}) }

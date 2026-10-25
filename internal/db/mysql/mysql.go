@@ -20,8 +20,8 @@ import (
 
 	gomysql "github.com/go-sql-driver/mysql"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func init() { db.Register(drv{}) }

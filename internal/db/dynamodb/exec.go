@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // maxTransaction is DynamoDB's limit of statements in one ExecuteTransaction.

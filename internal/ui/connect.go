@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 // Opened is a live connection plus whatever must be closed with it.

@@ -11,7 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 type pos struct{ row, col int }

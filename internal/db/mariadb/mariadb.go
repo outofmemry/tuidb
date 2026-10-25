@@ -6,9 +6,9 @@ package mariadb
 import (
 	"strings"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
-	"tuidb/internal/db/mysql"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
+	"webtuidb/internal/db/mysql"
 )
 
 func init() { db.Register(mysql.New(config.MariaDB, adjust)) }

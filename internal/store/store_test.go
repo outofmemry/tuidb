@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func TestHistory(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func (s *session) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string) ([]db.Statement, error) {

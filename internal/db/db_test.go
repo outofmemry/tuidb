@@ -234,16 +234,16 @@ func TestIsReadOnlyAdversarial(t *testing.T) {
 		{"mongo", `show collections`, true},
 		{"mongo", `{"find":"c","filter":{"a":1}}`, true},
 		// PostgreSQL: lexical rules that decide what is a comment or string
-		{"postgres", `SELECT 6 # 3 INTO tuidb_review_t`, false},                 // # is an operator, not a comment
-		{"postgres", `SELECT '\' AS a, 1 AS b INTO tuidb_review_t -- '`, false}, // '\' is a complete string
-		{"postgres", `SELECT $$'$$ AS a, 1 AS b INTO tuidb_review_t`, false},    // dollar quote hides the apostrophe
-		{"postgres", `SELECT E'\'' AS a INTO tuidb_review_t`, false},
+		{"postgres", `SELECT 6 # 3 INTO webtuidb_review_t`, false},                 // # is an operator, not a comment
+		{"postgres", `SELECT '\' AS a, 1 AS b INTO webtuidb_review_t -- '`, false}, // '\' is a complete string
+		{"postgres", `SELECT $$'$$ AS a, 1 AS b INTO webtuidb_review_t`, false},    // dollar quote hides the apostrophe
+		{"postgres", `SELECT E'\'' AS a INTO webtuidb_review_t`, false},
 		{"postgres", `/* a /* b */ INTO */ SELECT 1`, true}, // nested comment: INTO is inside it
 		{"postgres", `SELECT 'INTO' AS x, "into" FROM t`, true},
 		{"postgres", `SELECT $q$ INTO $q$ AS x`, true},
 		// MySQL: executable comments are code
-		{"mysql", `SELECT 1 /*! INTO @tuidb_x */`, false},
-		{"mysql", `SELECT 1 /*!50000 INTO @tuidb_x */`, false},
+		{"mysql", `SELECT 1 /*! INTO @webtuidb_x */`, false},
+		{"mysql", `SELECT 1 /*!50000 INTO @webtuidb_x */`, false},
 		{"mysql", `SELECT 1 /*+ MAX_EXECUTION_TIME(1) */`, true},
 		{"mysql", `SELECT 1 -- INTO @x`, true},
 		{"mysql", `SELECT 1 --1 INTO @x`, false}, // --1 is arithmetic in MySQL, so INTO is real code
@@ -257,7 +257,7 @@ func TestIsReadOnlyAdversarial(t *testing.T) {
 		{"mysql", `WITH x AS (SELECT 1) SELECT NEXTVAL(s) FROM x`, false},
 		{"mysql", `SELECT LASTVAL(s)`, true},
 		{"mysql", `SELECT 'NEXTVAL(s)' AS x /* NEXTVAL */ -- NEXTVAL`, true},
-		{"mysql", `SELECT 1 /*M!100100 INTO @tuidb_x */`, false}, // MariaDB executable comment
+		{"mysql", `SELECT 1 /*M!100100 INTO @webtuidb_x */`, false}, // MariaDB executable comment
 		{"mysql", `SET STATEMENT max_statement_time=1 FOR DELETE FROM t`, false},
 		{"mysql", `ANALYZE DELETE FROM t`, false},
 		{"mysql", `DELETE FROM t RETURNING id`, false},
@@ -341,7 +341,7 @@ func TestMongoPlainDocument(t *testing.T) {
 	for in, want := range map[string]bool{
 		`{status: 'paid', _id: ObjectId('507f1f77bcf86cd799439011')}`: true,
 		`{"a": {"$gt": 5}, "d": ISODate("2024-01-01")}`:               true,
-		`{a: db.tuidb_review_c.deleteMany({}).deletedCount}`:          false,
+		`{a: db.webtuidb_review_c.deleteMany({}).deletedCount}`:          false,
 		`{a: (function(){ return 1 })()}`:                             false,
 		`{$where: "sleep(1)"}`:                                        false,
 		`{a: x["y"]()}`:                                               false,

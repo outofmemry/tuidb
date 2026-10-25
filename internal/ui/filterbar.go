@@ -6,8 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tuidb/internal/db"
-	"tuidb/internal/keymap"
+	"webtuidb/internal/db"
+	"webtuidb/internal/keymap"
 )
 
 // fields of one filter row

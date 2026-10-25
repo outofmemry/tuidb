@@ -2,7 +2,7 @@
   "_comment": "Loaded by internal/db/dynamodb/dynamodb_integration_test.go. spec is the driver's CREATE TABLE json; items use plain JSON plus {\"$binary\": base64}, {\"$ss\"|\"$ns\"|\"$bs\": [...]} for what JSON cannot say. Numbers are kept as exact decimal text.",
   "tables": [
     {
-      "name": "tuidb_users",
+      "name": "webtuidb_users",
       "spec": {
         "keys": [{"name": "id", "type": "N"}],
         "indexes": [{"name": "by_email", "keys": [{"name": "email", "type": "S"}]}]
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "name": "tuidb_orders",
+      "name": "webtuidb_orders",
       "spec": {
         "keys": [{"name": "customer", "type": "S"}, {"name": "ts", "type": "N"}],
         "indexes": [{"name": "by_status", "kind": "LSI", "keys": [{"name": "customer", "type": "S"}, {"name": "status", "type": "S"}], "projection": "KEYS_ONLY"}]
@@ -33,7 +33,7 @@
       ]
     },
     {
-      "name": "tuidb_events",
+      "name": "webtuidb_events",
       "spec": {"keys": [{"name": "event_id", "type": "S"}]},
       "items": [
         {"event_id": "e1", "kind": "login", "payload": {"ip": "10.0.0.1"}},

@@ -11,8 +11,8 @@ import (
 	gocql "github.com/apache/cassandra-gocql-driver/v2"
 	"gopkg.in/inf.v0"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func unitSession() *session {

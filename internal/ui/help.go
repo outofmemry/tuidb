@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"tuidb/internal/keymap"
+	"webtuidb/internal/keymap"
 )
 
 type helpRow struct {
@@ -250,7 +250,7 @@ func (h *helpDlg) View(th Theme, maxW, maxH int) string {
 	if len(rows) == 0 {
 		body = append(body, th.Dim.Render("  no command matches"))
 	}
-	body = append(body, "", th.Dim.Render("Rebind any key in ~/.config/tuidb/config.toml under [keys]"))
+	body = append(body, "", th.Dim.Render("Rebind any key in ~/.config/webtuidb/config.toml under [keys]"))
 	hint := "/: search   ↑↓: move   Enter: run   Esc: close"
 	if h.searching {
 		hint = "↑↓: move   Enter: run   Esc: clear/stop"

@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result, error) {

@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"tuidb/internal/config"
+	"webtuidb/internal/config"
 )
 
 // Query is a saved query ("favorite"): a plain .sql file whose first lines may be

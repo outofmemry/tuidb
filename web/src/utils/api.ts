@@ -1,5 +1,5 @@
 // Types use the Go field names of the db/config structs (the API serializes them as-is).
-const KEY = 'tuidb-token'
+const KEY = 'webtuidb-token'
 
 // The server prints http://host/#token=...; the fragment never reaches the server or logs.
 export function initToken() {

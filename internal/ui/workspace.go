@@ -10,11 +10,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
-	"tuidb/internal/keymap"
-	"tuidb/internal/safemode"
-	"tuidb/internal/store"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
+	"webtuidb/internal/keymap"
+	"webtuidb/internal/safemode"
+	"webtuidb/internal/store"
 )
 
 // tabber is one tab in a workspace: a table (data/structure/index/ddl) or a SQL editor.

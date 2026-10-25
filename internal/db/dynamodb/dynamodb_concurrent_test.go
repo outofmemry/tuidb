@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // The UI loads rows, columns and counts of one table at the same time, and keeps pinging.
@@ -17,7 +17,7 @@ func TestConcurrentUse(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			r := ref("tuidb_events")
+			r := ref("webtuidb_events")
 			switch i % 4 {
 			case 0:
 				if _, err := s.Rows(ctx, db.RowQuery{ObjRef: r, Filters: flt(db.AnyColumn, "Contains", "log")}); err != nil {

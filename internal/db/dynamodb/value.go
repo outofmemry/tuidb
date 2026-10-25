@@ -15,7 +15,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // typeName is the DynamoDB attribute type shown as the column type.

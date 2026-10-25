@@ -1,4 +1,4 @@
-const d = db.getSiblingDB('tuidb');
+const d = db.getSiblingDB('webtuidb');
 d.customers.insertMany([
   {_id: 1, name: 'Ann Lee', email: 'ann@example.com', notes: 'vip', balance: 120.5, tags: ['a','b'], address: {city: 'Oslo', zip: '0150'}, created_at: new Date('2024-01-02T03:04:05Z')},
   {_id: 2, name: "Bob O'Neil", email: 'bob@example.com', notes: null, balance: 0},

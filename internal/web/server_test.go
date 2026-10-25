@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
-	"tuidb/internal/store"
-	"tuidb/internal/ui"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
+	"webtuidb/internal/store"
+	"webtuidb/internal/ui"
 )
 
 // fakeSess implements just the Session methods the API touches; the rest panic if called.

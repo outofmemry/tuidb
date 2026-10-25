@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { clip, type ResultCol, type Sort, type Val } from './api'
+import { clip, type ResultCol, type Sort, type Val } from '../utils/api'
 import type { CellTarget } from './CellEditor'
 
 export type GridRow = { key: string; cells: (string | null)[]; state: 'clean' | 'new' | 'deleted' }
@@ -24,6 +24,12 @@ type Props = {
 
 const ROW_H = 28
 const COL_W = 160
+
+// one ledger cell: hairline right and bottom rules, clipped to a single line
+const CELL = 'px-[9px] h-[28px] leading-[27px] overflow-hidden text-ellipsis whitespace-nowrap flex-none border-r border-b border-rule'
+// the sticky row-number column
+const LN = 'sticky left-0 z-[2] w-[48px] text-right cursor-pointer pr-[8px] text-[11px]'
+const SEL_BG = 'bg-[color-mix(in_srgb,var(--accent)_12%,var(--canvas))]'
 
 export const show = (v: Val | undefined, server: string | null): string | null => {
   if (v === undefined) return server
@@ -53,7 +59,13 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
       const rr = Math.max(0, Math.min(rows.length - 1, r)), cc = Math.max(0, Math.min(columns.length - 1, c))
       if (rows[rr] && rows[rr].key !== selected) onSelect?.(rows[rr].key)
       setCol(cc); virt.scrollToIndex(rr)
-      scroller.current?.querySelector<HTMLElement>(`[data-c="${cc}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      // horizontal: keep the cursor column in view (the sticky row-number column covers the first 48px)
+      const el = scroller.current
+      if (el) {
+        const left = 48 + cc * COL_W
+        if (left - 48 < el.scrollLeft) el.scrollLeft = left - 48
+        else if (left + COL_W > el.scrollLeft + el.clientWidth) el.scrollLeft = left + COL_W - el.clientWidth
+      }
     }
     switch (e.key) {
       case 'ArrowDown': case 'j': go(idx < 0 ? 0 : idx + 1, col); break
@@ -72,16 +84,16 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
   }
 
   return (
-    <div className="grid" ref={scroller} data-ctx={ctx} tabIndex={0} onKeyDown={onKey} role="grid" aria-rowcount={rows.length} aria-colcount={columns.length}>
-      <div className="hdr" style={{ width }}>
-        <div className="h ln" aria-hidden>#</div>
+    <div className="flex-1 min-h-0 overflow-auto relative text-[12px] bg-canvas font-mono outline-none" ref={scroller} data-ctx={ctx} tabIndex={0} onKeyDown={onKey} role="grid" aria-rowcount={rows.length} aria-colcount={columns.length}>
+      <div className="sticky top-0 z-[3] flex bg-panel border-b border-rule-2" style={{ width }}>
+        <div className={`${CELL} ${LN} border-b-0 font-sans font-medium text-ink-3 bg-panel cursor-pointer select-none hover:text-ink hover:bg-raised`} aria-hidden>#</div>
         {table.getHeaderGroups()[0]?.headers.map((h) => {
           const i = sortOf(h.column.id)
           return (
-            <div key={h.id} className="h" style={{ width: COL_W }} title={`${h.column.id} (${columns[h.index]?.type})`}
+            <div key={h.id} className={`${CELL} border-b-0 font-sans font-medium text-[12px] text-ink-2 cursor-pointer select-none hover:text-ink hover:bg-raised`} style={{ width: COL_W }} title={`${h.column.id} (${columns[h.index]?.type})`}
               onClick={(e) => onSort?.(h.column.id, e.shiftKey)}>
-              {columns[h.index]?.pk ? <span className="pk" title="primary key" aria-label="primary key">◆</span> : null}{flexRender(h.column.columnDef.header, h.getContext())}
-              {i >= 0 && <span className="dir" aria-label={sort![i].Desc ? 'descending' : 'ascending'}>{sort![i].Desc ? '▼' : '▲'}</span>}
+              {columns[h.index]?.pk ? <span className="text-accent mr-1" title="primary key" aria-label="primary key">◆</span> : null}{flexRender(h.column.columnDef.header, h.getContext())}
+              {i >= 0 && <span className="text-accent ml-1 text-[10px]" aria-label={sort![i].Desc ? 'descending' : 'ascending'}>{sort![i].Desc ? '▼' : '▲'}</span>}
             </div>
           )
         })}
@@ -90,15 +102,19 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
         {virt.getVirtualItems().map((v) => {
           const row = rows[v.index]
           const sel = selected === row.key
+          const del = row.state === 'deleted', isNew = row.state === 'new'
           return (
-            <div key={row.key} className={`r ${row.state === 'deleted' ? 'del' : row.state === 'new' ? 'new' : ''} ${sel ? 'sel' : ''}`}
+            <div key={row.key} className="group flex absolute left-0"
               style={{ top: v.start, height: ROW_H, width }} role="row">
-              <div className="c ln" onClick={() => onSelect?.(row.key)}>{row.state === 'new' ? '+' : v.index + 1}</div>
+              <div className={`${CELL} ${LN} ${del ? 'line-through decoration-1' : ''} ${sel ? SEL_BG : 'bg-panel'} ${
+                isNew ? 'text-new font-bold shadow-[inset_3px_0_0_var(--new)]' : `${sel ? 'text-accent' : del ? 'text-del' : 'text-ink-3'} ${sel ? 'font-semibold shadow-[inset_3px_0_0_var(--accent)]' : ''}`}`} onClick={() => onSelect?.(row.key)}>{row.state === 'new' ? '+' : v.index + 1}</div>
               {columns.map((c, i) => {
                 const ed = edited?.[row.key]?.[c.name]
                 const val = show(ed, row.cells[i])
                 return (
-                  <div key={c.name} data-c={i} role="gridcell" className={`c ${val === null ? 'null' : ''} ${ed !== undefined ? 'edited' : ''} ${sel && col === i ? 'cur' : ''}`} style={{ width: COL_W }}
+                  <div key={c.name} data-c={i} role="gridcell" className={`${CELL} ${del ? 'text-del line-through decoration-1' : val === null ? 'text-ink-3' : ''} ${
+                      ed !== undefined ? 'bg-[color-mix(in_srgb,var(--edit)_22%,var(--canvas))]' : sel ? SEL_BG : 'group-hover:bg-panel'} ${
+                      sel && col === i ? 'shadow-[inset_0_0_0_2px_var(--accent)]' : ed !== undefined ? 'shadow-[inset_0_-2px_0_var(--edit)]' : ''}`} style={{ width: COL_W }}
                     title={clip(ed !== undefined ? `was: ${row.cells[i] ?? 'NULL'}` : (val ?? 'NULL'), 200)}
                     onClick={() => { onSelect?.(row.key); setCol(i) }}
                     onDoubleClick={() => open(row, i)}>

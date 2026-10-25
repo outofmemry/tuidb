@@ -1,16 +1,16 @@
-# tuidb
+# webtuidb
 
 A terminal TablePlus: connect to **PostgreSQL, MySQL, ClickHouse, Redis and MongoDB**, browse and edit
 data with pending changes, run queries, and drive everything with tmux-style key bindings:
 **prefix, then a key**. The default prefix is `Ctrl+d`; every prefixed action can be rebound in
-`~/.config/tuidb/config.toml`. The plain keys inside a pane (`j`/`k`, `/`, `s`, `p` …) are fixed.
+`~/.config/webtuidb/config.toml`. The plain keys inside a pane (`j`/`k`, `/`, `s`, `p` …) are fixed.
 
 ```
-make build          # go build -o tuidb .
-./tuidb             # connection list
-./tuidb pg-local    # connect to a saved connection
-./tuidb postgresql://user:pw@host/db?name=Prod&env=production
-./tuidb -keys       # print every binding as it applies with your config
+make build          # go build -o webtuidb .
+./webtuidb             # connection list
+./webtuidb pg-local    # connect to a saved connection
+./webtuidb postgresql://user:pw@host/db?name=Prod&env=production
+./webtuidb -keys       # print every binding as it applies with your config
 ```
 
 ## Keys
@@ -28,7 +28,7 @@ Move between panes with `Ctrl+h/j/k/l` (no prefix). Common prefixed ones (defaul
 ### Rebinding
 
 ```toml
-# ~/.config/tuidb/config.toml
+# ~/.config/webtuidb/config.toml
 [general]
 prefix = "C-a"                 # tmux-style key names: C-x, M-x, S-Tab, F5, Enter, Space, ]
 
@@ -47,7 +47,7 @@ is editable when it is a plain `SELECT ... FROM table` that includes the primary
 
 ## Connections
 
-`~/.config/tuidb/connections.toml` (created with mode 0600, edited from the connection list with
+`~/.config/webtuidb/connections.toml` (created with mode 0600, edited from the connection list with
 `n`/`e`/`c`/`d`, or import a URL with `i`). **Passwords are stored in plain text**; to keep them out of
 the file use `password_cmd`, whose stdout becomes the password. It is run directly, not through a shell: quotes group
 arguments, but pipes and variables do not work:
@@ -77,10 +77,10 @@ Safe modes ask for the database password. Mode 2 lets `SELECT`/`EXPLAIN`/`SHOW` 
 
 ```sh
 make web build        # builds web/ into the binary (needs Node 20+; plain `make build` works without it, API only)
-tuidb --frontend --open
+webtuidb --frontend --open
 ```
 
-`--frontend` is opt-in: without it tuidb starts the terminal UI and never opens a port. With it, tuidb serves the same engine over a local HTTP API plus a browser app (TanStack Router, Query, Table and Virtual, CodeMirror). It shares `connections.toml`, query history, saved queries, pinned and recent tables and per-table filters/sort with the terminal UI, and enforces each connection's Safe Mode on the server.
+`--frontend` is opt-in: without it webtuidb starts the terminal UI and never opens a port. With it, webtuidb serves the same engine over a local HTTP API plus a browser app (TanStack Router, Query, Table and Virtual, CodeMirror). It shares `connections.toml`, query history, saved queries, pinned and recent tables and per-table filters/sort with the terminal UI, and enforces each connection's Safe Mode on the server.
 
 | Flag (with `--frontend`) | Meaning |
 |---|---|
@@ -88,17 +88,17 @@ tuidb --frontend --open
 | `--open` | open the browser at the printed URL |
 | `--token t` | API token; default is random, printed once as `http://.../#token=...` |
 
-The token travels in the URL fragment (never sent to the server or logged) and is kept in `sessionStorage`. For frontend development run `tuidb --frontend --token dev` and `cd web && npm run dev`, which proxies `/api` to port 7788.
+The token travels in the URL fragment (never sent to the server or logged) and is kept in `sessionStorage`. For frontend development run `webtuidb --frontend --token dev` and `cd web && npm run dev`, which proxies `/api` to port 7788.
 
 ## Data and state
 
-Query history, saved queries and UI state live under `~/.local/share/tuidb/`
+Query history, saved queries and UI state live under `~/.local/share/webtuidb/`
 (`history/<connection>.jsonl`, `queries/*.sql`, `state.json`).
 
 ## Development
 
 ```
-make up        # five test databases in docker compose on 127.0.0.1 (ports 55432 53306 59000 56379 57017), user/password tuidb, seeded
+make up        # five test databases in docker compose on 127.0.0.1 (ports 55432 53306 59000 56379 57017), user/password webtuidb, seeded
 make test      # unit tests
 make smoke     # + driver integration tests for all five engines and end-to-end UI tests on PostgreSQL and MySQL
 make down

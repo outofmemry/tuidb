@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"tuidb/internal/config"
+	"webtuidb/internal/config"
 )
 
 type HistoryEntry struct {

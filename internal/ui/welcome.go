@@ -10,9 +10,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"tuidb/internal/config"
-	"tuidb/internal/keymap"
-	"tuidb/internal/safemode"
+	"webtuidb/internal/config"
+	"webtuidb/internal/keymap"
+	"webtuidb/internal/safemode"
 )
 
 // welcome is the connection list shown at startup.
@@ -618,7 +618,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			head = append(head, line)
 		}
 	} else {
-		head = append(head, "  "+th.LogoStyle(0, 1).Render("tuidb")+"  "+tag[0])
+		head = append(head, "  "+th.LogoStyle(0, 1).Render("webtuidb")+"  "+tag[0])
 	}
 	head = append(head, "")
 	// ---- engine strip: one logo tile per driver; the cursor filters the list and pre-fills n
@@ -693,7 +693,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			"  "+th.chips("n", "create one"),
 			"  "+th.chips("i", "import a URL such as postgresql://user:pw@host/db"),
 			"",
-			"  "+th.Dim.Render("or start with one:  tuidb postgresql://user:pw@host:5432/db"))
+			"  "+th.Dim.Render("or start with one:  webtuidb postgresql://user:pw@host:5432/db"))
 	} else {
 		list = append(list, "   "+th.Section.Render(fit("NAME", 26)+fit("DRIVER", 12)+fit("HOST", addrW)+"TAG"))
 	}
@@ -768,9 +768,9 @@ func (w *welcome) view(th Theme, W, H int) string {
 			"  " + th.chips(pre+" f", "filter rows") + "  " + th.chips(pre+" S", "safe mode"),
 			"",
 			" " + th.Section.Render("Files"),
-			"  " + th.Dim.Render("~/.config/tuidb/connections.toml"),
-			"  " + th.Dim.Render("~/.config/tuidb/config.toml   keys and prefix"),
-			"  " + th.Dim.Render("tuidb -keys prints your bindings"),
+			"  " + th.Dim.Render("~/.config/webtuidb/connections.toml"),
+			"  " + th.Dim.Render("~/.config/webtuidb/config.toml   keys and prefix"),
+			"  " + th.Dim.Render("webtuidb -keys prints your bindings"),
 		}
 		side := frame(th, "Quick start", "", strings.Join(qs, "\n"), sideW, bodyH, false)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, listFrame, " ", side)

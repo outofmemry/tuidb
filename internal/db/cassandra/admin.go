@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func stmts(texts ...string) []db.Statement {

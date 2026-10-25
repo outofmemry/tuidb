@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 )
 
 func TestSSLMode(t *testing.T) {
@@ -25,7 +25,7 @@ func TestSSLMode(t *testing.T) {
 
 func TestConnString(t *testing.T) {
 	c := config.Connection{Host: "h", Port: 5433, User: "u@x", Password: "p/w:d", SSLMode: "verify-full",
-		Options: map[string]string{"application_name": "tuidb"}}
+		Options: map[string]string{"application_name": "webtuidb"}}
 	cs, err := connString(c, "my db")
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestConnString(t *testing.T) {
 	if cfg.Host != "h" || cfg.Port != 5433 || cfg.User != "u@x" || cfg.Password != "p/w:d" || cfg.Database != "my db" {
 		t.Errorf("parsed %+v", cfg.Config)
 	}
-	if cfg.RuntimeParams["application_name"] != "tuidb" {
+	if cfg.RuntimeParams["application_name"] != "webtuidb" {
 		t.Errorf("options lost: %v", cfg.RuntimeParams)
 	}
 	if cfg.TLSConfig == nil || cfg.TLSConfig.InsecureSkipVerify {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // Split and IsReadOnly must read a statement the way the server does, or a write can hide in what looks like a string or a comment.

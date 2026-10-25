@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 // Definitions (views, functions, procedures, triggers) are edited as SQL in a query tab:
@@ -49,7 +49,7 @@ func editableDDL(dialect string, ref db.ObjRef, ddl string) string {
 			// Create the new body under a temporary name first; the original is only dropped and
 			// renamed once the CREATE has succeeded, so a failed edit never destroys the routine.
 			kind := strings.ToUpper(string(ref.Kind))
-			tmp := ref.Name + "__tuidb_new"
+			tmp := ref.Name + "__webtuidb_new"
 			body := strings.Replace(ddl, "`"+ref.Name+"`", "`"+tmp+"`", 1)
 			body = regexp.MustCompile(`(?i)^CREATE\s+DEFINER=[^ ]+\s+`).ReplaceAllString(body, "CREATE ")
 			return fmt.Sprintf("-- Definition of %s. The routine body may contain ';', so the terminator is switched to $$.\n"+

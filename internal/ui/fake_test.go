@@ -13,9 +13,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"tuidb/internal/config"
-	"tuidb/internal/db"
-	"tuidb/internal/store"
+	"webtuidb/internal/config"
+	"webtuidb/internal/db"
+	"webtuidb/internal/store"
 )
 
 // fakeSession is an in-memory db.Session with one table, "customers".

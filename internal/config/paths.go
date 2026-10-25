@@ -13,21 +13,21 @@ func xdg(name string) string {
 	return ""
 }
 
-// ConfigDir is ~/.config/tuidb (or $XDG_CONFIG_HOME/tuidb). With no usable home it is relative;
+// ConfigDir is ~/.config/webtuidb (or $XDG_CONFIG_HOME/webtuidb). With no usable home it is relative;
 // callers must check filepath.IsAbs (main does) rather than trust a CWD-relative file.
 func ConfigDir() string {
 	if x := xdg("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "tuidb")
+		return filepath.Join(x, "webtuidb")
 	}
 	h, _ := os.UserHomeDir()
-	return filepath.Join(h, ".config", "tuidb")
+	return filepath.Join(h, ".config", "webtuidb")
 }
 
-// DataDir is ~/.local/share/tuidb (or $XDG_DATA_HOME/tuidb): history, saved queries, state.
+// DataDir is ~/.local/share/webtuidb (or $XDG_DATA_HOME/webtuidb): history, saved queries, state.
 func DataDir() string {
 	if x := xdg("XDG_DATA_HOME"); x != "" {
-		return filepath.Join(x, "tuidb")
+		return filepath.Join(x, "webtuidb")
 	}
 	h, _ := os.UserHomeDir()
-	return filepath.Join(h, ".local", "share", "tuidb")
+	return filepath.Join(h, ".local", "share", "webtuidb")
 }

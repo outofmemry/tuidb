@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"tuidb/internal/db"
+	"webtuidb/internal/db"
 )
 
 func (s *session) Schemas(ctx context.Context) ([]string, error) {

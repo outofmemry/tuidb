@@ -10,12 +10,12 @@ export const LABELS: Record<string, string> = {
   clickhouse: 'ClickHouse', cassandra: 'Cassandra', dynamodb: 'DynamoDB', d1: 'Cloudflare D1', redis: 'Redis', mongodb: 'MongoDB',
 }
 
-// Logo renders the engine's mark in the current text colour; `brand` uses the engine's own colour.
-export function Logo({ driver, size = 20, brand }: { driver: string; size?: number; brand?: boolean }) {
+// Logo renders the engine's mark in ink-2; `className` replaces that colour (e.g. text-current), `brand` uses the engine's own colour.
+export function Logo({ driver, size = 20, brand, className = 'text-ink-2' }: { driver: string; size?: number; brand?: boolean; className?: string }) {
   const i = ICONS[driver]
-  if (!i) return <span className="logo fallback" style={{ width: size, height: size, fontSize: size * 0.42 }} aria-label={LABELS[driver] ?? driver}>{driver.slice(0, 2)}</span>
+  if (!i) return <span className={`flex-none inline-flex items-center justify-center border border-current rounded-[2px] [font:600_1em_var(--font-mono)] uppercase ${className}`} style={{ width: size, height: size, fontSize: size * 0.42 }} aria-label={LABELS[driver] ?? driver}>{driver.slice(0, 2)}</span>
   return (
-    <svg className="logo" width={size} height={size} viewBox="0 0 24 24" role="img" aria-label={i.title} style={brand ? { color: '#' + i.hex } : undefined}>
+    <svg className={`flex-none ${className}`} width={size} height={size} viewBox="0 0 24 24" role="img" aria-label={i.title} style={brand ? { color: '#' + i.hex } : undefined}>
       <path d={i.path} fill="currentColor" />
     </svg>
   )
