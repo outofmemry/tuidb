@@ -1146,11 +1146,11 @@ func (w *Workspace) view(th Theme, W, H int) string {
 		if w.focusDetail {
 			hint = th.chips("↵", "edit", "jk", "field", "Esc", "back")
 		}
-		cols = append(cols, " ", frame(th, "Row details", hint, w.detailView(th, detW-4, mainH-2), detW, mainH, w.focusDetail))
+		cols = append(cols, " ", w.frame(th, "Row details", hint, w.detailView(th, detW-4, mainH-2), detW, mainH, w.focusDetail))
 	}
 	out := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	if conH > 0 {
-		out += "\n" + frame(th, fmt.Sprintf("Console · %d statements", len(w.console.Lines())), th.chips(keymap.Display(w.a.d.Keys.Prefix)+" C-c", "hide"), w.consoleView(th, W-4, conH-2), W, conH, false)
+		out += "\n" + w.frame(th, w.consoleTitle(), w.consoleHint(th), w.consoleView(th, W-4, conH-2), W, conH, w.focusConsole)
 	}
 	return out
 }
