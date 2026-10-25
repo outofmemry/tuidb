@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -294,5 +295,66 @@ func TestRelativeXDGIsIgnored(t *testing.T) {
 	}
 	if strings.HasPrefix(ConfigDir(), "rel") {
 		t.Error("relative XDG_CONFIG_HOME must be ignored")
+	}
+}
+
+func TestMigrateLegacyDirs(t *testing.T) {
+	cfg, data := t.TempDir(), t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("XDG_DATA_HOME", data)
+	if err := os.MkdirAll(filepath.Join(cfg, "tuidb"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg, "tuidb", "connections.toml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(data, "tuidb", "history"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateLegacy(); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		filepath.Join(cfg, "webtuidb", "connections.toml"),
+		filepath.Join(data, "webtuidb", "history"),
+	} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s must exist after the migration: %v", p, err)
+		}
+	}
+	for _, p := range []string{filepath.Join(cfg, "tuidb"), filepath.Join(data, "tuidb")} {
+		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s must be gone after the migration", p)
+		}
+	}
+
+	if err := MigrateLegacy(); err != nil { // a second run has nothing to do and must not fail
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateLegacyKeepsNewDir(t *testing.T) {
+	cfg, data := t.TempDir(), t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	t.Setenv("XDG_DATA_HOME", data)
+	for _, d := range []string{"tuidb", "webtuidb"} {
+		if err := os.MkdirAll(filepath.Join(cfg, d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfg, d, "config.toml"), []byte(d), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := MigrateLegacy(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(cfg, "webtuidb", "config.toml"))
+	if err != nil || string(got) != "webtuidb" {
+		t.Errorf("existing webtuidb config must win, got %q (%v)", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "tuidb", "config.toml")); err != nil {
+		t.Errorf("legacy dir must be left untouched when webtuidb exists: %v", err)
 	}
 }

@@ -95,6 +95,10 @@ The token travels in the URL fragment (never sent to the server or logged) and i
 Query history, saved queries and UI state live under `~/.local/share/webtuidb/`
 (`history/<connection>.jsonl`, `queries/*.sql`, `state.json`).
 
+The rename from `tuidb` keeps existing data: the first run moves `~/.config/tuidb` and
+`~/.local/share/tuidb` to the new names, so connections, history and state carry over. If a `webtuidb`
+directory already exists it wins, and the old one is left untouched.
+
 ## Development
 
 ```
