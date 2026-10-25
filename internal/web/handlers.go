@@ -12,6 +12,7 @@ import (
 
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
+	"webtuidb/internal/menus"
 	"webtuidb/internal/safemode"
 	"webtuidb/internal/store"
 )
