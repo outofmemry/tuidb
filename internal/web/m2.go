@@ -592,23 +592,25 @@ func (s *Server) importStart(ss *session, r *http.Request) (any, error) {
 		if o, err = s.importOpts(req); err != nil {
 			return err
 		}
+		o.Driver = ss.conn.Driver
 		if o.Source != "sql" && req.Ref.Name == "" {
 			return bad("ref.name is required")
 		}
 		if err := ss.jobSlot(); err != nil {
 			return err
 		}
-		if err := ss.readOnlyViolation([]db.Statement{{Text: "INSERT"}}); err != nil {
+		stmts := importGate(req)
+		if err := ss.readOnlyViolation(stmts); err != nil {
 			return err
 		}
 		// an import writes, so it passes the same safe-mode gate as any other write
-		return ss.check(ss.gate([]db.Statement{{Text: "INSERT"}}), req.Confirmed, req.Password)
+		return ss.check(ss.gate(stmts), req.Confirmed, req.Password)
 	})
 	if err != nil {
 		cleanup()
 		return nil, err
 	}
-	j := &job{}
+	j := &job{kind: "import", title: "Import into " + req.Ref.Name}
 	start := time.Now()
 	id := ss.startJob(j, func(ctx context.Context) error {
 		defer cleanup()
