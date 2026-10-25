@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,7 +25,7 @@ func (a *App) runM678(action string) (tea.Cmd, bool) {
 	case "open_recent":
 		return a.openRecent(), true
 	case "settings":
-		return a.settings(), true
+		return a.settingsDialog(), true
 	case "close_other_connections":
 		return a.closeOthers(), true
 	}
@@ -171,6 +172,11 @@ func (w *welcome) sortKey(c config.Connection) string {
 	switch w.sortBy() {
 	case "driver":
 		return c.Driver
+	case "recent": // newest first; never connected sorts last
+		if t, ok := w.a.d.State.LastConnected()[c.Name]; ok {
+			return fmt.Sprintf("%020d", math.MaxInt64-t.Unix())
+		}
+		return strings.Repeat("9", 20)
 	case "tag":
 		rank := 99 // untagged last; known tags in the order of the tag list
 		for i, t := range w.a.tagNames() {
@@ -185,7 +191,7 @@ func (w *welcome) sortKey(c config.Connection) string {
 
 func (w *welcome) pickSort() tea.Cmd {
 	var items []pickItem
-	for _, by := range []string{"name", "tag", "driver"} {
+	for _, by := range []string{"name", "tag", "driver", "recent"} {
 		mark := "  "
 		if by == w.sortBy() {
 			mark = "• "
