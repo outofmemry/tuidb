@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -204,6 +205,7 @@ func (s *Server) putTableState(r *http.Request) (any, error) {
 			ts.Hidden = nil
 		case "sort":
 			ts.Sort = nil
+			ts.SortNone = string(bytes.TrimSpace(v)) == "[]" || string(bytes.TrimSpace(v)) == "null" // P2-34
 		case "show_filters":
 			ts.ShowBar = false
 		default:
