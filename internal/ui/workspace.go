@@ -345,7 +345,8 @@ func (w *Workspace) executeOn(sess db.Session, original string, stmts []db.State
 	}
 	return w.gate(stmts, func() tea.Cmd {
 		w.applying = true
-		id, atomic := w.id, w.caps.Transactions && !hasDDL(stmts)
+		// a MySQL pin runs the batch without a BEGIN of its own (it would commit the user's transaction), so it is not atomic
+		id, atomic := w.id, w.caps.Transactions && !hasDDL(stmts) && !(sess != w.sess && (w.conn.Driver == config.MySQL || w.conn.Driver == config.MariaDB))
 		return func() tea.Msg { // no deadline: a commit must never be cut off half way
 			start := time.Now()
 			err := sess.Apply(context.Background(), stmts)
@@ -548,6 +549,9 @@ func (w *Workspace) handleGlobal(msg tea.Msg) (tea.Cmd, bool) {
 // ---- input & actions --------------------------------------------------------------------
 
 func (w *Workspace) input(msg tea.Msg) tea.Cmd {
+	if w.consoleFocused() {
+		return w.consoleInput(msg)
+	}
 	if w.focusSB || w.tab() == nil {
 		return w.sb.input(msg)
 	}
