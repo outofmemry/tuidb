@@ -369,7 +369,13 @@ func (ss *session) startJob(j *job, fn func(ctx context.Context) error) string {
 		}
 	}()
 	go func() {
-		err := fn(ctx)
+		var err error
+		func() {
+			defer crashlog.Catch(ss.srv.con.tail, func(p any) {
+				err = fmt.Errorf("internal error: %v (see %s)", p, crashlog.Path())
+			})
+			err = fn(ctx)
+		}()
 		j.mu.Lock()
 		j.done = true
 		if err != nil {
@@ -395,9 +401,24 @@ func (s *Server) jobStop(ss *session, r *http.Request) (any, error) {
 	ss.mu.Lock()
 	j := ss.jobs[r.PathValue("jid")]
 	ss.mu.Unlock()
-	if j != nil {
-		j.cancel()
+	if j == nil {
+		return nil, nil
 	}
+	j.mu.Lock()
+	done := j.done
+	j.mu.Unlock()
+	if !done { // running: stop it (the job stays listed as failed/cancelled)
+		j.cancel()
+		return nil, nil
+	}
+	// finished: dismiss it from the jobs centre, and the kept export file with it
+	ss.mu.Lock()
+	delete(ss.jobs, r.PathValue("jid"))
+	ss.mu.Unlock()
+	j.mu.Lock()
+	j.removeFile()
+	j.file = ""
+	j.mu.Unlock()
 	return nil, nil
 }
 
