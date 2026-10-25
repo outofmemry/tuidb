@@ -355,13 +355,15 @@ func (w *Workspace) backupAction(restore bool) tea.Cmd {
 	pre := strings.ToLower(verb) + "." // the options last used are remembered per connection and per direction
 	mem := w.a.d.State.BackupOptions(w.conn.Name)
 	val := func(key, def string) string {
-		if v, ok := mem[pre+key]; ok {
+		if v, ok := mem[pre+key]; ok && v != "" {
 			return v
 		}
 		return def
 	}
 	f := newForm(verb+" "+dbName, []formField{
-		{Key: "file", Label: "File", Kind: fText, Value: val("file", dbName+".sql")},
+		{Key: "file", Label: "File", Kind: fText, Value: val("file", w.backupDefaultFile(dbName, restore))},
+		{Key: "pattern", Label: "File-name pattern", Kind: fText, Value: val("pattern", ""), Hint: "{connection} {database} {tag} {date} {time}; empty: use File", Show: func(map[string]string) bool { return !restore }},
+		{Key: "extra", Label: "Extra options", Kind: fText, Value: val("extra", ""), Hint: "tool arguments; Ctrl+o: common options"},
 		{Key: "gzip", Label: "Gzip", Kind: fBool, Value: val("gzip", "false")},
 		{Key: "format", Label: "Format", Kind: fChoice, Options: []string{"plain", "custom"}, Value: val("format", "plain"), Show: func(map[string]string) bool { return pg }},
 		{Key: "data", Label: "Data only", Kind: fBool, Value: val("data", "false"), Show: func(v map[string]string) bool { return !restore && v["schema"] != "true" }},
