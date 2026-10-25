@@ -333,6 +333,7 @@ func (w *Workspace) exportTables(refs []db.ObjRef) tea.Cmd {
 			if err := os.MkdirAll(folder, 0o755); err != nil {
 				return w.a.fail(err)
 			}
+			w.jobFile = paths[0]
 			return w.job("export "+plural(len(refs), "table"), func(ctx context.Context, sess db.Session, report func(func() tea.Cmd)) error {
 				for i, r := range refs {
 					o := base
