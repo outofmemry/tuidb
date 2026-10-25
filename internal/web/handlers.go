@@ -576,7 +576,7 @@ func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit 
 
 // execOne runs one statement; a failure is the item's Error, not a request error.
 func (ss *session) execOne(r *http.Request, sess db.Session, st db.Stmt, limit int) execItem {
-	ctx, cancel := ss.ctx(r)
+	ctx, cancel := ss.ctxNoTimeout(r) // the client's keep-waiting/cancel prompt replaces the hard timeout (M12.6)
 	start := time.Now()
 	res, err := sess.Exec(ctx, st.Text, limit)
 	cancel()
@@ -586,7 +586,8 @@ func (ss *session) execOne(r *http.Request, sess db.Session, st db.Stmt, limit i
 		ss.srv.con.add(ss.conn.Name, "ERROR: "+err.Error()+"\n"+st.Text)
 		return item
 	}
-	item.resultJSON = toJSON(res, nil) // not cached: exec results are never editable
+	item.resultJSON = toJSON(res, nil)
+	ss.editableResult(r.Context(), sess, st.Text, res, &item.resultJSON)
 	item.NoticeID = ss.putNotice(res.Message)
 	if !db.IsReadOnly(ss.o.Sess.Caps().Dialect, st.Text) {
 		ss.clearColCache() // DDL may have changed table structure
