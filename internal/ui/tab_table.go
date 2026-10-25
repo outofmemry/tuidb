@@ -591,17 +591,7 @@ func (t *tableTab) Input(msg tea.Msg) tea.Cmd {
 		if !ok {
 			return nil
 		}
-		switch k.Keystroke() {
-		case "enter":
-			g.FinishEdit(true)
-		case "tab":
-			g.FinishEdit(true)
-			g.Move(0, 1, false)
-		case "esc":
-			g.FinishEdit(false)
-		default:
-			g.edit.Handle(k)
-		}
+		g.EditKey(k)
 		return nil
 	}
 	k, ok := msg.(tea.KeyPressMsg)
@@ -644,11 +634,11 @@ func (t *tableTab) Input(msg tea.Msg) tea.Cmd {
 	case "s":
 		return t.cycleSort()
 	case "/":
-		return t.findPrompt(g, &t.findText)
+		return t.findPrompt(g)
 	case "n":
-		return t.findNext(g, t.findText, 1)
+		return t.ws.a.findAgain(g, t.find, 1)
 	case "N":
-		return t.findNext(g, t.findText, -1)
+		return t.ws.a.findAgain(g, t.find, -1)
 	case ">":
 		t.resizeCol(2)
 	case "<":
