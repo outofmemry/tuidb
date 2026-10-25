@@ -794,6 +794,22 @@ func (t *tableTab) Action(name string) (bool, tea.Cmd) {
 		return true, t.applyFilters()
 	case "filter_sql":
 		return true, t.showFilterSQL()
+	case "filter_clear_all":
+		return true, t.clearFilters()
+	case "filter_add_copy":
+		if !t.showFilters {
+			return true, nil
+		}
+		t.addFilterCopy()
+		return true, nil
+	case "find":
+		return true, t.findPrompt(g)
+	case "find_next":
+		return true, t.ws.a.findAgain(g, t.find, 1)
+	case "find_prev":
+		return true, t.ws.a.findAgain(g, t.find, -1)
+	case "filter_export":
+		return true, t.exportFiltered()
 	case "columns":
 		return true, t.columnsPicker()
 	case "sort_columns":
