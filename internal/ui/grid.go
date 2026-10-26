@@ -11,7 +11,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"webtuidb/internal/config"
 	"webtuidb/internal/db"
+	"webtuidb/internal/export"
 )
 
 type rowState int
@@ -527,6 +529,18 @@ func plain(v any) string {
 	return db.FormatValue(v) // Empty -> "", Default -> "DEFAULT", Expr -> its text
 }
 
+// copyCSV is [csv] from the config (set by NewApp), so copied CSV matches exported CSV.
+var copyCSV = config.CSV{Delimiter: ",", Quote: `"`, LineBreak: "\n"}
+
+func csvLine(cells []string) string {
+	d, lb := orDefault(copyCSV.Delimiter, ","), orDefault(copyCSV.LineBreak, "\n")
+	out := make([]string, len(cells))
+	for i, c := range cells {
+		out[i] = export.CSVField(copyCSV, c) // [csv] quote_mode applies to copied CSV as it does to exported CSV
+	}
+	return strings.Join(out, d) + lb
+}
+
 // FormatRect renders rows r0..r1, cols c0..c1 in the given format.
 func (g *Grid) FormatRect(r0, c0, r1, c1 int, f CopyFormat, table string) string {
 	names := make([]string, 0, c1-c0+1)
@@ -537,18 +551,16 @@ func (g *Grid) FormatRect(r0, c0, r1, c1 int, f CopyFormat, table string) string
 	var b strings.Builder
 	switch f {
 	case FmtCSV, FmtCSVHeader:
-		w := csv.NewWriter(&b)
 		if f == FmtCSVHeader {
-			w.Write(names)
+			b.WriteString(csvLine(names))
 		}
 		for r := r0; r <= r1; r++ {
 			rec := make([]string, 0, len(names))
 			for c := c0; c <= c1; c++ {
 				rec = append(rec, plain(cell(r, c)))
 			}
-			w.Write(rec)
+			b.WriteString(csvLine(rec))
 		}
-		w.Flush()
 	case FmtJSON:
 		var docs []map[string]any
 		for r := r0; r <= r1; r++ {
@@ -612,7 +624,7 @@ func (g *Grid) FormatRect(r0, c0, r1, c1 int, f CopyFormat, table string) string
 			b.WriteByte('\n')
 		}
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(b.String(), "\r\n")
 }
 
 // CopyRows is the selected rows with all columns; CopyCells is just the selected rectangle.
@@ -721,7 +733,7 @@ func (g *Grid) View(th Theme, focused bool) string {
 				sb.WriteString(sep + g.edit.View(c.Width, th, true))
 				continue
 			}
-			cell := fit(cellText(v), c.Width)
+			cell := fit(gridCellText(v, c.Width), c.Width)
 			if isNumber(v) {
 				cell = padLeft(strings.TrimRight(cell, " "), c.Width)
 			}
@@ -831,17 +843,26 @@ func (g *Grid) PasteCells(data [][]string) bool {
 }
 
 // Find moves the cursor to the next (dir=1) or previous (dir=-1) cell whose text contains text.
-func (g *Grid) Find(text string, dir int) bool {
+func (g *Grid) Find(text string, dir int) bool { return g.FindCase(text, dir, false) }
+
+// FindCase is Find with an optional case-sensitive match.
+func (g *Grid) FindCase(text string, dir int, matchCase bool) bool {
 	if text == "" || len(g.Rows) == 0 || len(g.Cols) == 0 {
 		return false
 	}
-	text = strings.ToLower(text)
+	fold := func(s string) string {
+		if matchCase {
+			return s
+		}
+		return strings.ToLower(s)
+	}
+	text = fold(text)
 	n := len(g.Rows) * len(g.Cols)
 	pos := g.row*len(g.Cols) + g.col
 	for i := 1; i <= n; i++ {
 		p := ((pos+dir*i)%n + n) % n
 		r, c := p/len(g.Cols), p%len(g.Cols)
-		if strings.Contains(strings.ToLower(cellText(g.Rows[r].Cur[c])), text) {
+		if strings.Contains(fold(cellText(g.Rows[r].Cur[c])), text) {
 			g.row, g.col, g.selecting = r, c, false
 			g.scroll()
 			return true
