@@ -390,6 +390,41 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     if (v === null || v === undefined) return notify('The value is NULL')
     onFollow({ Schema: fk.RefSchema, Name: fk.RefTable, Kind: 'table' }, { Filters: [{ Column: fk.RefColumns[0], Op: '=', Value: v, Enabled: true }], Or: false })
   }
+  // find / replace over the loaded rows (M9.1). The cursor moves to the match; replace edits through the same pending-change path as typing.
+  const colNames2 = res?.columns.map((c) => c.name) ?? []
+  const stepFind = (dir: 1 | -1, f = find) => {
+    if (!f || !res) return
+    if (!f.text) return notify('Type what to find')
+    const at = Math.max(0, rows.findIndex((r) => r.key === selected))
+    const hit = findNext((r, c) => cellValue(rows[r], c), rows.length, colNames2, f, { r: at, c: cc() }, dir)
+    if (!hit) return notify(`"${f.text}" is not in the loaded rows`)
+    setSelected(rows[hit.r].key); setFocusCell({ row: rows[hit.r].key, col: hit.c, n: ++focusN.current })
+  }
+  const replaceCell = (r: GridRow, ci: number, f: FindState) => {
+    if (r.state === 'deleted' || !res) return false
+    const v = cellValue(r, ci)
+    const out = v === null ? null : replaceIn(v, f, f.replace)
+    if (out === null) return false
+    onEdit(r.key, res.columns[ci].name, out); return true
+  }
+  const replaceOne = () => {
+    if (!find || !res?.editable || !selRow) return
+    if (!(find.col === '' || find.col === res.columns[cc()]?.name) || !replaceCell(selRow, cc(), find)) return stepFind(1) // not on a match: move to the next one
+    stepFind(1)
+  }
+  const replaceAll = () => {
+    if (!find || !res?.editable) return
+    let n = 0, skipped = 0
+    for (const r of rows) res.columns.forEach((c, ci) => {
+      if (!(find.col === '' || find.col === c.name)) return
+      if (find.col === '' && c.pk) { if (r.state !== 'deleted' && cellMatches(cellValue(r, ci), find)) skipped++; return } // Any column leaves primary keys alone
+      if (replaceCell(r, ci, find)) n++
+    })
+    const sk = skipped ? ` (skipped ${skipped} primary-key cell${skipped === 1 ? '' : 's'})` : ''
+    notify(n ? `Replaced in ${n} cell${n === 1 ? '' : 's'}${sk}` : skipped ? `Nothing replaced${sk}` : `"${find.text}" is not in the loaded rows`)
+  }
+  const openFind = () => setFind((f) => f ?? newFind())
+  const gridFind = (dir: 0 | 1 | -1) => (dir === 0 || !find ? openFind() : stepFind(dir))
   // [sidebar] matching picks how the field search matches, like the sidebar search: fuzzy (the best subsequence match) or contains
   const best = (() => {
     const q = fieldQ.trim(); if (!q || !res) return ''
