@@ -70,17 +70,19 @@ func (s *Server) mcpAddr() string {
 
 // ---- export file names ----------------------------------------------------------------------------------
 
-// exportName expands [export] filename ({connection} {database} {table} {tag} {date} {time}) plus the extension,
-// like the terminal UI's export.
-func (ss *session) exportName(table, ext string) string {
-	now := time.Now()
-	clean := strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace
-	pat := ss.srv.o.Cfg.Export.Filename
-	if pat == "" {
-		pat = "{table}"
+// exportName expands a file name pattern (default [export] filename; {connection} {database} {table} {tag}
+// {date} {time}) with export.Filename and adds the extension unless the pattern already ends with it.
+func (ss *session) exportName(pattern, table, ext string) string {
+	if pattern == "" {
+		pattern = ss.srv.o.Cfg.Export.Filename
 	}
-	name := strings.NewReplacer("{connection}", clean(ss.conn.Name), "{database}", clean(ss.o.Sess.CurrentDatabase()), "{table}", clean(table),
-		"{tag}", clean(ss.conn.Tag), "{date}", now.Format("2006-01-02"), "{time}", now.Format("15-04-05")).Replace(pat)
+	if pattern == "" {
+		pattern = "{table}-{date}"
+	}
+	name := export.Filename(pattern, map[string]string{"connection": ss.conn.Name, "database": ss.o.Sess.CurrentDatabase(), "table": table, "tag": ss.conn.Tag})
+	if strings.HasSuffix(strings.ToLower(name), "."+strings.ToLower(ext)) {
+		return name
+	}
 	return name + "." + ext
 }
 
