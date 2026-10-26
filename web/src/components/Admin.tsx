@@ -35,10 +35,12 @@ export function UsersDialog({ sid, info, onPlan, onClose }: { sid: string; info:
   const [picked, setPicked] = useState<string[]>([])
   const [object, setObject] = useState('')
   const [columns, setColumns] = useState('') // grant / revoke on just these columns (SELECT, INSERT, UPDATE, REFERENCES)
+  const [limits, setLimits] = useState<Record<string, string>>({}) // MySQL resource limits; 0 = unlimited
   const [err, setErr] = useState('')
   const pg = info.driver === 'postgres'
+  const lims = pg ? PG_LIMITS : MY_LIMITS
   const choices = pg ? PG_ATTRS : MY_PRIVS
-  const open = (f: Form) => { setForm(f); setErr(''); setPw(''); setObject(''); setColumns(''); setPicked(f.kind === 'attrs' && pg ? f.user?.Attrs ?? [] : []); if (f.user) setName(f.user.Name) }
+  const open = (f: Form) => { setForm(f); setErr(f.kind === 'limits' && !pg && f.user && !f.user.Limits ? LIMITS_UNREADABLE : ''); setPw(''); setObject(''); setColumns(''); setPicked(f.kind === 'attrs' && pg ? f.user?.Attrs ?? [] : []); if (f.user) setName(f.user.Name); if (f.kind === 'limits') setLimits(Object.fromEntries(lims.map(([k]) => [k, String(f.user?.Limits?.[k] ?? (pg ? -1 : 0))]))) }
   const plan = async (body: Record<string, unknown>) => {
     setErr('')
     try { const p = await api<Plan>('POST', `/sessions/${sid}/users/plan`, body); onClose(); onPlan(p) } catch (e) { setErr(msg(e)) }
