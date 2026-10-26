@@ -478,70 +478,73 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
   })
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <div className="toolbar bg-canvas">
-        <button onClick={reload}>Reload</button>
-        <button onClick={() => setShowBar(!showBar)}>{showBar ? 'Hide filters' : 'Filters'}{hasActive ? ' (on)' : ''}</button>
-        <ColumnsMenu all={colNames} hidden={hidden} onChange={change<string[]>(setHidden)} menuRef={colsMenu} />
+    <div className="flex-1 min-h-0 flex flex-col" ref={root}>
+      <div className="toolbar bg-canvas" role="toolbar" aria-label="Table toolbar">
+        <button onClick={reload} title="Reload the rows">Reload</button>
+        {view === 'data' && <button className={showBar ? 'btn-on' : ''} aria-pressed={showBar} onClick={() => setShowBar(!showBar)} title={showBar ? 'Hide the filter bar' : 'Show the filter bar'}>Filters{nActive > 0 && <span className="ml-1.5 inline-block min-w-[16px] px-1 rounded-[2px] bg-accent text-on-accent text-[10.5px] leading-[15px] text-center font-semibold align-[1px]">{nActive}</span>}</button>}
+        {view === 'data' && <ColumnsMenu all={colNames} hidden={hidden} onChange={change<string[]>(setHidden)} menuRef={colsMenu} />}
         <Select className="bg-raised border-transparent" aria-label="View" value={view} onChange={(v) => setView(v as View)} options={[{ value: 'data', label: 'Data' }, { value: 'structure', label: 'Structure' }, { value: 'ddl', label: 'DDL' }, ...(info.caps.Document ? [{ value: 'json', label: 'JSON' }, { value: 'tree', label: 'Tree' }] : [])]} />
-        <button onClick={() => setDlg('export')}>Export</button>
-        {view === 'data' && res?.editable && <button onClick={keyActions.bulk_update} title="Set columns on every row the filter matches">Bulk update</button>}
-        {obj.Kind === 'table' && <button onClick={() => setDlg('import')}>Import</button>}
+        {view === 'data' && <button onClick={openFind} title="Find in the loaded rows (/)">Find</button>}
+        <button onClick={() => { setExpFilters(null); setDlg('export') }} title="Export this table">Export</button>
+        <button className="btn-icon text-[15px] leading-none" aria-label="More actions" aria-haspopup="menu" title="Import, bulk update, sorting, paging, copying" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMore({ x: r.left, y: r.bottom + 2 }) }}>⋯</button>
         <span className="flex-1 min-w-0" />
         {view === 'data' && res?.editable && !stale && <>
-          <button onClick={addRow}>Add row</button>
-          <button onClick={duplicate} disabled={!selected}>Duplicate row</button>
-          <button onClick={del} disabled={!selected}>{selected && deletes.has(selected) ? 'Keep row' : 'Delete row'}</button>
+          <button onClick={addRow} title="Add a row (saved on Send changes)">Add row</button>
+          <button onClick={duplicate} disabled={!selected} title="Duplicate the selected row">Duplicate</button>
+          <button onClick={del} disabled={!selected} className={selected && deletes.has(selected) ? '' : 'hover:text-del'} title={selected && deletes.has(selected) ? 'Keep the selected row' : 'Mark the selected row for deletion'}>{selected && deletes.has(selected) ? 'Keep row' : 'Delete row'}</button>
         </>}
+        {view === 'data' && res && !res.editable && <span className="chip" title="This result has no usable primary key, or the connection is read only">read only</span>}
       </div>
-      {showBar && view === 'data' && <FilterBar key={JSON.stringify(filters)} sid={sid} obj={obj} value={filters} columns={meta.config.table.FilterColumnSort === 'name' ? [...colNames].sort((a, b) => a.localeCompare(b)) : colNames} operators={ops} onApply={change<FilterSet>(setFilters)} active={active} />}
+      {more && <TabMenu x={more.x} y={more.y} onClose={() => setMore(null)} items={([
+        view === 'data' && res?.editable ? ['Bulk update…', keyActions.bulk_update] : null,
+        obj.Kind === 'table' ? ['Import…', () => setDlg('import')] : null,
+        ['-', () => {}],
+        ['Sort by several columns…', () => setDlg('sort')],
+        ['Row limit and offset…', () => setDlg('page')],
+        hidden.length ? ['Show all columns', () => change<string[]>(setHidden)([])] : null,
+        ['-', () => {}],
+        ['Copy rows', () => copyRows('Plain')],
+        ['Copy rows as…', () => setDlg('copyas')],
+      ] as ([string, () => void] | null)[]).filter((x): x is [string, () => void] => !!x)} />}
+      {showBar && view === 'data' && <FilterBar menu={meta.menus?.filter_bar} key={JSON.stringify(filters)} sid={sid} obj={obj} value={filters} columns={meta.config.table.FilterColumnSort === 'name' ? [...colNames].sort((a, b) => a.localeCompare(b)) : colNames} operators={ops} onApply={change<FilterSet>(setFilters)} onExport={(f) => { setExpFilters(f); setDlg('export') }} active={active} defaults={{ column: cfg<string>(meta, 'table', 'filterDefaultColumn', ''), operator: cfg<string>(meta, 'table', 'filterDefaultOperator', '') }} pk={cols.data?.find((c) => c.PK)?.Name} />}
+      {find && view === 'data' && res && <FindBar value={find} columns={colNames2} editable={!!res.editable && !stale} onChange={setFind} onStep={stepFind} onReplace={replaceOne} onReplaceAll={replaceAll} onClose={() => setFind(null)} />}
       {(rowsQ.isFetching || cols.isLoading) && <div className="relative h-[2px] -mb-[2px] z-[4] overflow-hidden bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] after:absolute after:inset-0 after:w-[40%] after:bg-accent after:animate-slide motion-reduce:after:animate-none motion-reduce:after:w-full motion-reduce:after:opacity-60" role="progressbar" aria-label="Loading rows" />}
       {!res && !rowsQ.error && <div className="p-2.5 text-[12.5px] text-ink-2">Loading rows…</div>}
       {rowsQ.error && <div className="p-2.5 text-[12.5px] text-del">{rowsQ.error.message}</div>}
       {view === 'data' && res && res.cells.length === 0 && inserts.length === 0 && (
-        <div className="py-14 px-8 max-w-[46ch] text-ink-2 text-[15px] leading-normal">{hasActive ? 'No rows match these filters.' : res.editable ? 'This table has no rows yet. Add one to start.' : 'This table has no rows yet.'}</div>
+        <div className="py-14 px-8 max-w-[46ch] text-ink-2 text-[15px] leading-normal">
+          <p className="m-0">{hasActive ? 'No rows match these filters.' : res.editable ? 'This table has no rows yet.' : 'This table has no rows.'}</p>
+          <p className="mt-3 mb-0 flex gap-2">{hasActive ? <button onClick={() => change<FilterSet>(setFilters)({ Filters: [], Or: false })}>Clear the filters</button> : res.editable ? <button className="btn-primary" onClick={addRow}>Add a row</button> : null}</p>
+        </div>
       )}
       {view === 'data' && res && (res.cells.length > 0 || inserts.length > 0) && (
         <div className="flex-1 min-h-0 flex">
           <Grid colRef={colRef} columns={res.columns} rows={rows} sort={sort} onSort={onSort} edited={editedAll} editable={res.editable && !stale} onOpen={setCell} pretty={!!meta.config.table.AutoPrettyJSON}
-            selected={selected} onSelect={setSelected} onSpace={() => setDetail(!detail)} onHeaderMenu={(col, x, y) => setHmenu({ col, x, y })} />
-          {detail && (
-            <div className="w-[340px] flex-none border-l border-rule flex flex-col min-h-0 bg-canvas font-mono max-[760px]:fixed max-[760px]:inset-0 max-[760px]:z-30 max-[760px]:w-full" role="region" aria-label="Row details" data-ctx="detail" tabIndex={0}>
-              <div className="toolbar bg-canvas"><strong className="flex-1 min-w-0 font-medium">Row details</strong><button className="btn-ghost" onClick={() => setDetail(false)} aria-label="Close">✕</button></div>
-              <input className="mx-2.5 mt-2 mb-1 bg-panel border-transparent" aria-label="Search for field" placeholder="Search for field…" value={fieldQ} onChange={(e) => setFieldQ(e.target.value)} />
-              <div className="overflow-auto flex-1">
-                {!selRow && <div className="p-2.5 text-[12.5px] text-ink-2">Select a row to see its fields.</div>}
-                {selRow && res.columns.map((c, i) => {
-                  const ed = editedAll[selRow.key]?.[c.name], hit = best === c.name
-                  const val = show(ed, selRow.cells[i])
-                  return (
-                    <div key={c.name} ref={hit ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined} className={`px-3 py-2 border-b border-rule cursor-pointer hover:bg-panel ${ed !== undefined ? 'shadow-[inset_3px_0_0_var(--edit)]' : ''} ${hit ? 'bg-raised' : ''}`} onClick={() => setCell({ row: selRow.key, col: c.name, readOnly: !res.editable || selRow.state === 'deleted' })}
-                      title={res.editable ? 'Click to edit' : undefined}>
-                      <div className="text-[12px] text-ink-2 mb-[3px]">{c.pk && <span className="text-accent mr-1">◆</span>}{c.name}<span className="text-ink-3 text-[11px]"> {c.type}</span></div>
-                      <div className={`font-mono text-[12px] whitespace-pre-wrap wrap-anywhere max-h-[9em] overflow-hidden ${val === null ? 'text-ink-3' : ''}`}>{val === null ? 'NULL' : meta.config.table.AutoPrettyJSON ? prettyJson(val) : val}</div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
+            selected={selected} onSelect={setSelected} onSpace={() => setDetail(!detail)} onHeaderMenu={(col, x, y) => setHmenu({ col, x, y })}
+            zebra={!!cfg(meta, 'table', 'alternatingRows', false)} spatial={cfg<boolean>(meta, 'table', 'decodeSpatial', true) !== false} colTips={colTips} onCellMenu={(x, y) => setCmenu({ x, y })} onAddRow={() => res.editable && !stale && addRow()} onAddColumn={addColumn}
+            widths={pxWidths} onResize={onResize} focusCell={focusCell} onCursor={(col, r) => setCursor((c) => (c.col === col && JSON.stringify(c.range) === JSON.stringify(r) ? c : { col, range: r }))} onFind={gridFind} />
+          {detail && <RowDetail columns={res.columns} cells={selRow?.cells ?? []} edited={selRow ? editedAll[selRow.key] : undefined} rows={selRows.length} editable={!!res.editable && !stale && !!selRow && selRow.state !== 'deleted'}
+            cursorCol={cc()} fieldQ={fieldQ} onFieldQ={setFieldQ} best={best} pretty={!!meta.config.table.AutoPrettyJSON} hasRow={!!selRow}
+            onSet={(col, v) => selRows.forEach((r) => onEdit(r.key, col, v))} onOpen={(col) => selRow && setCell({ row: selRow.key, col, readOnly: !res.editable || selRow.state === 'deleted' })} onClose={() => setDetail(false)} />}
         </div>
       )}
       {cell && res && (() => {
         const r = rows.find((x) => x.key === cell.row); const ci = res.columns.findIndex((c) => c.name === cell.col)
-        return r && ci >= 0 ? <CellEditor col={cell.col} readOnly={cell.readOnly} value={show(editedAll[r.key]?.[cell.col], r.cells[ci])}
-          onDone={(v) => { setCell(null); if (v !== undefined) onEdit(cell.row, cell.col, v) }} /> : null
+        return r && ci >= 0 ? <CellEditor key={`${cell.row}:${cell.col}`} col={cell.col} readOnly={cell.readOnly} value={show(editedAll[r.key]?.[cell.col], r.cells[ci])}
+          imagePreview={cfg<boolean>(meta, 'table', 'imagePreview', true) !== false} decodeSpatial={cfg<boolean>(meta, 'table', 'decodeSpatial', true) !== false}
+          onDone={(v, move) => { setCell(null); if (v !== undefined) onEdit(cell.row, cell.col, v); if (move) nextCell(cell, move) }} /> : null
       })()}
       {view === 'json' && <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] max-w-[100ch]">{(res?.docs ?? []).map((d) => { try { return JSON.stringify(JSON.parse(d), null, 2) } catch { return d } }).join('\n')}</pre>}
       {view === 'tree' && <Tree docs={res?.docs ?? []} />}
       {view === 'ddl' && <Ddl sid={sid} refQ={refQ} />}
-      {view === 'structure' && <Structure sid={sid} refQ={refQ} caps={info.caps} columns={cols.data ?? []} section={section} obj={obj} total={total} notify={notify} onPlan={toolPlan} selected={structCol} onSelect={setStructCol} onEdit={(c) => setColForm(c)} />}
+      {view === 'structure' && obj.Kind === 'table' && info.caps.Editor === 'sql' && <StructureEditor sid={sid} caps={info.caps} obj={obj} notify={notify} onPlan={toolPlan} columns={cols.data ?? []} total={total} section={section} selected={structCol} onSelect={setStructCol} nonce={nonce} ctl={structCtl} onDirty={setStructDirty} />}
+      {view === 'structure' && !(obj.Kind === 'table' && info.caps.Editor === 'sql') && <Structure sid={sid} refQ={refQ} caps={info.caps} columns={cols.data ?? []} section={section} obj={obj} total={total} notify={notify} onPlan={toolPlan} selected={structCol} onSelect={setStructCol} onEdit={(c) => setColForm(c)} />}
       {colForm && <ColumnDialog sid={sid} obj={obj} col={colForm} onPlan={toolPlan} onClose={() => setColForm(null)} />}
       {view === 'data' && marks.length > 0 && (
         <div className="border-t border-rule-2 bg-panel flex flex-col max-h-[42%] font-mono motion-safe:animate-rise" role="region" aria-label="Staged changes">
           <div className="flex items-center gap-2 px-2.5 py-2">
             <strong className="font-medium text-[13px]"><b className="inline-block min-w-[22px] px-1.5 mr-1.5 rounded-[2px] bg-edit text-on-accent text-center font-semibold">{marks.length}</b>staged change{marks.length === 1 ? '' : 's'}</strong>
-            <span className="flex-1 min-w-0 text-ink-2">Not sent to the database yet.</span>
+            <span className="flex-1 min-w-0 text-ink-2 truncate">Nothing is sent until you choose Send changes.</span>
             <button onClick={() => setTrayOpen(!trayOpen)} aria-expanded={trayOpen}>{trayOpen ? 'Hide list' : 'Show list'}</button>
             <button onClick={previewSql}>Preview SQL</button>
             <button onClick={clearPending}>Discard all</button>
