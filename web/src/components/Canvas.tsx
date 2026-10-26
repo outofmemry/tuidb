@@ -122,7 +122,7 @@ export function DiagramCanvas({ tables, storageKey, query, centerOn, canLink, co
     const a = pos[tk(t.ref)], b = pos[tk(to.ref)]; if (!a || !b) return null
     const right = a.x + BW / 2 <= b.x + BW / 2 && to !== t // leave by the side that faces the other table
     const s = anchor(t, f.columns[0], right ? 'r' : 'l'), e = anchor(to, f.refColumns[0], right ? 'l' : 'r'), dx = (right ? 1 : -1) * Math.max(40, Math.abs(e.x - s.x) / 2)
-    return { id: tk(t.ref) + i, d: `M${s.x},${s.y} C${s.x + dx},${s.y} ${e.x - dx},${e.y} ${e.x},${e.y}`, h: hue(t), dim: !!q && !t.ref.Name.toLowerCase().includes(q) && !to.ref.Name.toLowerCase().includes(q) }
+    return { id: tk(t.ref) + i, d: `M${s.x},${s.y} C${s.x + dx},${s.y} ${e.x - dx},${e.y} ${e.x},${e.y}`, stroke: edge(t, tint(t)), dim: !!q && !t.ref.Name.toLowerCase().includes(q) && !to.ref.Name.toLowerCase().includes(q) }
   })).filter((x) => x !== null)
 
   return (
