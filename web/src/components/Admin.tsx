@@ -1,10 +1,12 @@
 // Milestone 3 dialogs: users, backup / restore, plugins, MCP activity.
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ApiError, api, download, etags, qs, saveBlob, watchJob, type Connection, type DbUser, type Gate, type Job, type ObjRef, type Plan, type PluginInfo, type SessionInfo } from '../utils/api'
+import { ApiError, api, download, etags, qs, saveBlob, watchJob, type Connection, type DbUser, type Gate, type Job, type ObjRef, type Plan, type PluginEffect, type PluginInfo, type SessionInfo } from '../utils/api'
 import { Dialog, GateFields, ask, confirm } from './Dialogs'
+import { copyText } from '../utils/copy'
 import { Select } from './Select'
 import { askNotify, desktopNotify } from '../utils/theme'
+import { commonBackupOptions, enterSubmits, extraArgs, limitHint, type BackupOption } from '../utils/m13'
 
 const ACTIONS = 'flex justify-end gap-2 mt-[18px]'
 const ROW = 'flex items-center gap-2.5 my-2 text-[12.5px]'
