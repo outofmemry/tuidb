@@ -455,50 +455,59 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
     }
     notify(`Exported ${list.length} result tab${list.length === 1 ? '' : 's'}`)
   }
-  const save = async () => {
-    const name = await ask('Save query as'); if (!name) return
-    try { await postQuery('/queries', { Name: name, SQL: text }); notify('Saved to Queries') } catch (e) { notify(String(e)) }
+  // Save query asks for a name each time; :w writes to the name this tab already has (asking the first time); [editor] auto_save_queries keeps writing it on every change
+  const writeAs = async (name: string): Promise<boolean> => {
+    try {
+      await (savedAs.current === name ? api('POST', '/queries', { Name: name, SQL: text, Overwrite: true }) : postQuery('/queries', { Name: name, SQL: text }))
+      savedAs.current = name; lastSaved.current = text; return true
+    } catch (e) { notify(String(e)); return false }
   }
+  const save = async () => {
+    const name = await ask('Save query as', savedAs.current || undefined); if (!name) return false
+    const ok = await writeAs(name); if (ok) notify('Saved to Queries')
+    return ok
+  }
+  const writeQuery = async () => { if (!savedAs.current) return save(); const ok = await writeAs(savedAs.current); if (ok) notify('Saved to Queries'); return ok }
+  const autoSave = !!cfg(meta, 'editor', 'autoSaveQueries', false)
+  useEffect(() => {
+    if (!autoSave || !savedAs.current || text === lastSaved.current) return
+    const t = setTimeout(() => { writeAs(savedAs.current) }, 1000)
+    return () => clearTimeout(t)
+  }, [text, autoSave]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const dialect = info.caps.Dialect
-  // Autocomplete sources follow [editor] complete_tables / complete_functions / complete_keywords; add_space and prefix_schema shape the inserted text.
-  const sqlSupport = () => {
-    const d = dialect === 'postgres' ? PostgreSQL : dialect === 'mysql' ? MySQL : StandardSQL
-    const comps: Completion[] = (objs.data ?? []).flatMap((o) => {
-      const fn = o.Kind === 'function' || o.Kind === 'procedure'
-      if (fn ? !ed.CompleteFunctions : !ed.CompleteTables || !['table', 'view', 'matview'].includes(o.Kind)) return []
-      const label = ed.PrefixSchema && o.Schema ? `${o.Schema}.${o.Name}` : o.Name
-      return [{ label, type: fn ? 'function' : o.Kind === 'table' ? 'class' : 'type', detail: o.Kind, apply: ed.AddSpace ? label + ' ' : label }]
-    })
-    const colsOf = (table: string): Promise<string[]> => {
-      const o = (objs.data ?? []).find((x) => x.Name.toLowerCase() === table && ['table', 'view', 'matview'].includes(x.Kind))
+  // Autocomplete: one source (Completion.ts) that ranks like the terminal's queryTab.complete. [editor] complete_tables / complete_functions /
+  // complete_keywords / prefix_schema / add_space / uppercase_keywords shape the candidates, complete_key the accept keys, close_braces the brackets.
+  const d = dialect === 'postgres' ? PostgreSQL : dialect === 'mysql' ? MySQL : StandardSQL
+  const envRef = useRef<Env>(null as unknown as Env)
+  const schemaCache = useRef(new Map<string, Promise<DbObject[]>>())
+  envRef.current = {
+    kind: info.caps.Editor === 'mongo' ? 'mongo' : info.caps.Editor === 'redis' ? 'redis' : 'sql',
+    objects: objs.data ?? [], saved: saved.data ?? [], keywords: info.caps.Editor === 'sql' ? (d.spec.keywords ?? '').split(/\s+/).filter(Boolean) : [],
+    opts: { tables: ed.CompleteTables !== false, functions: ed.CompleteFunctions !== false, keywords: ed.CompleteKeywords !== false, prefixSchema: !!ed.PrefixSchema, addSpace: !!ed.AddSpace, upper: !!ed.UppercaseKeywords },
+    colsOf: (schema, table) => {
+      const o = (objs.data ?? []).find((x) => x.Name.toLowerCase() === table && (!schema || x.Schema.toLowerCase() === schema) && ['table', 'view', 'matview'].includes(x.Kind))
       if (!o) return Promise.resolve([])
       const k = (o.Schema ?? '') + '.' + o.Name
       if (!colCache.current.has(k)) colCache.current.set(k, api<Column[]>('GET', `/sessions/${sid}/object/columns` + qs({ schema: o.Schema, name: o.Name, kind: o.Kind })).then((l) => l.map((c) => c.Name), () => { colCache.current.delete(k); return [] }))
       return colCache.current.get(k)!
-    }
-    // columns of the tables the statement reads (alias. narrows to one), and the saved queries whose keywords expand (snippet:<trigger> expands from <trigger>)
-    const smart = async (ctx: CompletionContext): Promise<CompletionResult | null> => {
-      const w = ctx.matchBefore(/(?:[\w"]+\.)?[\w"]*/)
-      if (!w || (w.from === w.to && !ctx.explicit)) return null
-      const dot = w.text.lastIndexOf('.'), qual = dot >= 0 ? w.text.slice(0, dot).replace(/"/g, '').toLowerCase() : ''
-      const als = aliasesIn(ctx.state.doc.toString()), opts: Completion[] = []
-      const tables = qual ? (als[qual] ? [als[qual]] : []) : [...new Set(Object.values(als))]
-      for (const t of tables) for (const c of await colsOf(t)) opts.push({ label: c, type: 'property', detail: t })
-      if (!qual) for (const q of saved.data ?? []) for (const k of q.Keywords ?? []) {
-        const sn = k.startsWith('snippet:')
-        opts.push({ label: sn ? k.slice(8) : k, type: 'text', detail: sn ? 'snippet' : 'saved query', apply: q.SQL, boost: -1 })
-      }
-      return opts.length ? { from: dot >= 0 ? w.from + dot + 1 : w.from, options: opts, validFor: /^[\w"]*$/ } : null
-    }
-    return new LanguageSupport(d.language, [
-      d.language.data.of({ autocomplete: smart }),
-      ...(comps.length ? [d.language.data.of({ autocomplete: schemaCompletionSource({ dialect: d, schema: {}, tables: comps }) })] : []),
-      ...(ed.CompleteKeywords !== false ? [d.language.data.of({ autocomplete: keywordCompletionSource(d, !!ed.UppercaseKeywords) })] : []),
-    ])
+    },
+    schemaObjects: (schema) => { // schema.table for a schema other than the current one
+      if (!schemaCache.current.has(schema)) schemaCache.current.set(schema, api<DbObject[]>('GET', `/sessions/${sid}/objects` + qs({ schema })).catch(() => []))
+      return schemaCache.current.get(schema)!
+    },
   }
+  const completion = useMemo(() => {
+    const src = completionSource(() => envRef.current)
+    return [
+      autocompletion({ defaultKeymap: false, activateOnTyping: cfg<boolean>(meta, 'editor', 'autocomplete', true) !== false }),
+      completionKeys(String(cfg(meta, 'editor', 'completeKey', 'enter_or_tab'))),
+      info.caps.Editor === 'sql' ? new LanguageSupport(d.language, [d.language.data.of({ autocomplete: src })]) : EditorState.languageData.of(() => [{ autocomplete: src }]),
+    ]
+  }, [d, info.caps.Editor, meta])
   const ext = [
-    ...(vimOn ? [Prec.high(vim())] : []),
+    ...(vimOn ? (defineVimEx(), [Prec.high(vim())]) : []),
+    EditorState.allowMultipleSelections.of(true), // select_next_occurrence adds carets
     ...(invis ? [highlightWhitespace()] : []),
     Prec.highest(keymap.of([
       { key: 'Mod-Enter', run: () => { runRef.current(false); return true } },
