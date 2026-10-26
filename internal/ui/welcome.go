@@ -27,9 +27,9 @@ type welcome struct {
 
 // engineName is the display name on an engine tile; engineArt its four-line, eight-cell logo.
 var engineName = map[string]string{
-	config.Postgres: "Postgres", config.MySQL: "MySQL", config.MariaDB: "MariaDB", config.Cockroach: "Cockroach",
-	config.SQLite: "SQLite", config.DuckDB: "DuckDB", config.ClickHouse: "ClickHouse", config.Cassandra: "Cassandra",
-	config.DynamoDB: "DynamoDB", config.D1: "Cloudflare", config.Redis: "Redis", config.Mongo: "MongoDB",
+	config.Postgres: "Postgres", config.MySQL: "MySQL", config.MariaDB: "MariaDB", config.ClickHouse: "ClickHouse", config.Cassandra: "Cassandra",
+	config.DynamoDB: "DynamoDB", config.Redis: "Redis", config.Mongo: "MongoDB",
+	config.Redshift: "Redshift", config.Greenplum: "Greenplum", config.Vertica: "Vertica", config.SingleStore: "SingleStore",
 }
 
 var engineArt = map[string][]string{
@@ -93,6 +93,26 @@ var engineArt = map[string][]string{
 		` /_____\ `,
 		` \_____/ `,
 		`  \___/  `},
+	config.Redshift: { // box with arrows
+		` .-----. `,
+		` |>>>>>| `,
+		` |>>>>>| `,
+		` ` + "`" + `-----' `},
+	config.Greenplum: { // plum
+		`   ,/    `,
+		`  .--.   `,
+		` (    )  `,
+		`  ` + "`" + `--'   `},
+	config.Vertica: { // V
+		` \     / `,
+		`  \   /  `,
+		`   \ /   `,
+		`    v    `},
+	config.SingleStore: { // one store
+		`  .---.  `,
+		` | 1 1 | `,
+		` | 1 1 | `,
+		`  ` + "`" + `---'  `},
 	config.Mongo: { // leaf
 		`    ,    `,
 		`   /|\   `,
@@ -160,6 +180,9 @@ func (w *welcome) rows() []connRow {
 		if a.Group != b.Group {
 			return a.Group < b.Group
 		}
+		if ka, kb := w.sortKey(a), w.sortKey(b); ka != kb {
+			return ka < kb
+		}
 		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
 	})
 	var out []connRow
@@ -188,6 +211,17 @@ func (w *welcome) current() (connRow, bool) {
 	return connRow{}, false
 }
 
+// selectConn puts the cursor on the row of a.d.Conns[idx] (or the nearest connection when it is hidden).
+func (w *welcome) selectConn(idx int) {
+	for i, r := range w.rows() {
+		if r.header == "" && r.idx == idx {
+			w.sel = i
+			return
+		}
+	}
+	w.move(0)
+}
+
 // move steps over group headers; d==0 snaps onto the nearest connection at or after sel.
 func (w *welcome) move(d int) {
 	rows := w.rows()
@@ -213,8 +247,12 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 		if k, ok := msg.(tea.KeyPressMsg); ok {
 			switch k.Keystroke() {
 			case "esc":
+				cur, ok := w.current() // sel indexes the filtered list: keep the same connection selected
 				w.searching = false
 				w.search.Set("")
+				if ok {
+					w.selectConn(cur.idx)
+				}
 				return nil
 			case "enter":
 				w.searching = false
@@ -252,6 +290,10 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 		}
 	case "/":
 		w.searching = true
+	case "esc":
+		if w.a.cancelConnecting() > 0 {
+			return w.a.say("cancelling…")
+		}
 	case "n":
 		return w.action("new_connection")
 	case "e":
@@ -262,18 +304,26 @@ func (w *welcome) input(msg tea.Msg) tea.Cmd {
 		return w.remove()
 	case "i":
 		return w.importURL()
+	case "x":
+		return w.exportConns()
+	case "I":
+		return w.importConns()
+	case "g":
+		return w.groupMenu()
+	case "s":
+		return w.pickSort()
 	case "u": // the clipboard is shared and often synced: no password unless asked for with U
 		if r, ok := w.current(); ok {
 			c := r.conn
 			c.Password = ""
-			return tea.Batch(tea.SetClipboard(c.FormatURL()), w.a.say("copied %s as URL without the password (U includes it)", c.Name))
+			return tea.Batch(setClip(c.FormatURL()), w.a.say("copied %s as URL without the password (U includes it)", c.Name))
 		}
 	case "U":
 		if r, ok := w.current(); ok {
 			c := r.conn
 			w.a.push(&confirmDlg{title: "Copy the URL with the password to the clipboard?", lines: []string{"Clipboard managers and synced clipboards keep what is copied."}, yes: "Copy", danger: true,
 				onYes: func() tea.Cmd {
-					return tea.Batch(tea.SetClipboard(c.FormatURL()), w.a.say("copied %s with its password", c.Name))
+					return tea.Batch(setClip(c.FormatURL()), w.a.say("copied %s with its password", c.Name))
 				}})
 		}
 	case "tab":
@@ -301,8 +351,19 @@ func (w *welcome) action(action string) tea.Cmd {
 	return nil
 }
 
+// readOnlySource refuses to change a connection that comes from a [[source]] folder.
+func (w *welcome) readOnlySource(c config.Connection) (tea.Cmd, bool) {
+	if c.Source == "" {
+		return nil, false
+	}
+	return w.a.say("%s comes from %s: edit that file (duplicate makes a local copy)", c.Name, c.Source), true
+}
+
 func (w *welcome) edit() tea.Cmd {
 	if r, ok := w.current(); ok {
+		if cmd, ro := w.readOnlySource(r.conn); ro {
+			return cmd
+		}
 		return w.form(r.conn, r.idx)
 	}
 	return nil
@@ -314,6 +375,7 @@ func (w *welcome) duplicate() tea.Cmd {
 		return nil
 	}
 	c := r.conn
+	c.Source = "" // a copy of a source connection is a local, editable one
 	c.Name += " copy"
 	for _, o := range w.a.d.Conns {
 		if o.Name == c.Name {
@@ -331,6 +393,9 @@ func (w *welcome) remove() tea.Cmd {
 	r, ok := w.current()
 	if !ok {
 		return nil
+	}
+	if cmd, ro := w.readOnlySource(r.conn); ro {
+		return cmd
 	}
 	w.a.push(&confirmDlg{title: "Delete connection " + r.conn.Name + "?", lines: []string{"This removes it from connections.toml. The database itself is untouched."}, yes: "Delete", danger: true,
 		onYes: func() tea.Cmd {
@@ -371,7 +436,7 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 	if c.SSH != nil && c.SSH.Host != "" {
 		sshOn = "true"
 	}
-	tags := append([]string{""}, config.DefaultTags...)
+	tags := append([]string{""}, w.a.tagNames()...)
 	if c.Tag != "" && !contains(tags, c.Tag) {
 		tags = append(tags, c.Tag)
 	}
@@ -409,10 +474,17 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		{Key: "safe_mode", Label: "Safe mode", Kind: fChoice, Value: c.SafeMode, Options: safe},
 		{Key: "group", Label: "Group", Kind: fText, Value: c.Group},
 		{Kind: fHeading, Value: "Transport"},
+		{Key: "encoding", Label: "Encoding", Kind: fText, Value: c.Encoding, Hint: "server default (UTF8, latin1…)", Show: server},
 		{Key: "ssl_mode", Label: "SSL mode", Kind: fChoice, Value: c.SSLMode, Options: sslModes},
 		{Key: "ssl_ca", Label: "  CA cert", Kind: fText, Value: c.SSLCA, Show: showSSL},
 		{Key: "ssl_cert", Label: "  Client cert", Kind: fText, Value: c.SSLCert, Show: showSSL},
 		{Key: "ssl_key", Label: "  Client key", Kind: fText, Value: c.SSLKey, Show: showSSL},
+		{Key: "socks_proxy", Label: "SOCKS5 proxy", Kind: fText, Value: c.SocksProxy, Hint: "host:port", Show: server},
+		{Key: "iam_auth", Label: "AWS IAM auth", Kind: fBool, Value: strconv.FormatBool(c.IAMAuth), Show: func(v map[string]string) bool {
+			d := v["driver"]
+			return server(v) && (d == "" || d == config.Postgres || d == config.MySQL || d == config.MariaDB)
+		}},
+		{Key: "read_only", Label: "Read only", Kind: fBool, Value: strconv.FormatBool(c.ReadOnly)},
 		{Key: "ssh", Label: "Over SSH", Kind: fBool, Value: sshOn, Show: server},
 		{Key: "ssh_host", Label: "  SSH host", Kind: fText, Value: ssh.Host, Show: showSSH},
 		{Key: "ssh_port", Label: "  SSH port", Kind: fText, Value: strconv.Itoa(orInt(ssh.Port, 22)), Show: showSSH},
@@ -421,7 +493,7 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 		{Key: "ssh_password", Label: "  SSH password", Kind: fSecret, Value: ssh.Password, Show: showSSH},
 		{Kind: fHeading, Value: "After connecting"},
 		{Key: "options", Label: "Options", Kind: fText, Value: optionsText(c.Options)},
-		{Key: "options_note", Label: "", Kind: fLabel, Value: "driver extras as key=value, separated by ' ;; ' (D1: account via host; DynamoDB: region=..., Cassandra: keyspace=...)"},
+		{Key: "options_note", Label: "", Kind: fLabel, Value: "driver extras as key=value, separated by ' ;; ' (DynamoDB: region=..., Cassandra: keyspace=...)"},
 		{Key: "bootstrap", Label: "Bootstrap SQL", Kind: fText, Value: strings.Join(c.Bootstrap, " ;; ")},
 		{Key: "note", Label: "", Kind: fLabel, Value: "statements run on every new connection, separated by ' ;; '"},
 	}, func(v map[string]string) tea.Cmd { return w.save(v, idx) })
@@ -505,6 +577,13 @@ func (w *welcome) build(v map[string]string, idx int) (config.Connection, error)
 		Name: strings.TrimSpace(v["name"]), Driver: v["driver"], Host: strings.TrimSpace(v["host"]), User: v["user"], Password: v["password"],
 		PasswordCmd: v["password_cmd"], Database: v["database"], Tag: v["tag"], Color: v["color"], SafeMode: v["safe_mode"], Group: strings.Trim(v["group"], "/ "),
 		SSLMode: v["ssl_mode"], SSLCA: v["ssl_ca"], SSLCert: v["ssl_cert"], SSLKey: v["ssl_key"],
+		Encoding: strings.TrimSpace(v["encoding"]), SocksProxy: strings.TrimSpace(v["socks_proxy"]), IAMAuth: v["iam_auth"] == "true", ReadOnly: v["read_only"] == "true",
+	}
+	var old config.Connection // settings the form has no field for survive an edit
+	if idx >= 0 && idx < len(w.a.d.Conns) {
+		old = w.a.d.Conns[idx]
+		c.DriverVersion, c.LazyLoad = old.DriverVersion, old.LazyLoad
+		c.Tools, c.Options, c.Source = old.Tools, old.Options, old.Source
 	}
 	if p := strings.TrimSpace(v["port"]); p != "" {
 		n, err := strconv.Atoi(p)
@@ -533,6 +612,9 @@ func (w *welcome) build(v map[string]string, idx int) (config.Connection, error)
 			return c, fmt.Errorf("ssh host is required when Over SSH is on")
 		}
 		c.SSH = &config.SSH{Host: strings.TrimSpace(v["ssh_host"]), Port: p, User: v["ssh_user"], Key: v["ssh_key"], Password: v["ssh_password"]}
+		if old.SSH != nil {
+			c.SSH.ProxyJump = old.SSH.ProxyJump
+		}
 	}
 	if err := c.Validate(); err != nil {
 		return c, err
@@ -630,9 +712,9 @@ func (w *welcome) view(th Theme, W, H int) string {
 		tile := make([]string, 7)
 		for i := w.tileTop; i < min(len(tiles), w.tileTop+fitTiles); i++ {
 			d := tiles[i]
-			name, count := "All", n
+			name := "All"
 			if d != "" {
-				name, count = engineName[d], byDriver[d]
+				name = engineName[d]
 			}
 			edge, art := th.Border, th.DriverStyle(d)
 			if d == "" {
@@ -641,11 +723,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			if i == w.engine {
 				edge = th.Accent
 			}
-			label := name
-			if count > 0 {
-				label += " ·" + strconv.Itoa(count)
-			}
-			label = center(label, tileW-2)
+			label := center(name, tileW-2)
 			if i == w.engine {
 				label = th.Bold.Render(label)
 			}
@@ -714,9 +792,15 @@ func (w *welcome) view(th Theme, W, H int) string {
 		c := r.conn
 		tagS := ""
 		if c.Tag != "" {
-			tagS = th.TagStyle(c.Tag, c.Color).Render(" " + strings.ToUpper(c.Tag) + " ")
+			tagS = th.TagStyle(c.Tag, w.a.tagColor(c)).Render(" " + strings.ToUpper(c.Tag) + " ")
 		} else if c.Color != "" {
 			tagS = th.TagStyle("", c.Color).Render(" ")
+		}
+		if c.ReadOnly {
+			tagS += th.Dim.Render(" RO")
+		}
+		if c.Source != "" {
+			tagS += th.Dim.Render(" source")
 		}
 		cursor := " "
 		if i == w.sel {
@@ -760,6 +844,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			"  " + th.chips("↵", "connect to the highlighted one"),
 			"  " + th.chips("n", "new") + "  " + th.chips("e", "edit") + "  " + th.chips("c", "duplicate") + "  " + th.chips("d", "delete"),
 			"  " + th.chips("i", "import a URL") + "  " + th.chips("u", "copy as URL"),
+			"  " + th.chips("g", "groups") + "  " + th.chips("s", "sort by"),
 			"",
 			" " + th.Section.Render("Once connected"),
 			"  " + th.chips("↵", "open a table from the sidebar"),
