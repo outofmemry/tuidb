@@ -249,6 +249,7 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
           )
         })}
       </div>
+      <div data-fill="1" style={{ height: 40, width }} aria-hidden />
     </div>
   )
 }
