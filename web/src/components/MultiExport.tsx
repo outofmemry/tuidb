@@ -67,6 +67,9 @@ export function MultiExportDialog({ sid, info, initial, onClose, notify }: { sid
       <div className="flex items-center gap-2.5 my-2 text-[12.5px]"><label className="w-28 text-ink-2">Format</label><Select aria-label="Format" value={format} onChange={setFormat} options={[{ value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }, { value: 'sql', label: 'SQL INSERTs' }, { value: 'xlsx', label: 'Excel (xlsx)' }]} />
         {format !== 'xlsx' && <label className="flex items-center gap-1.5"><input type="checkbox" checked={gzip} onChange={(e) => setGzip(e.target.checked)} />gzip</label>}
         {format === 'sql' && <label className="flex items-center gap-1.5"><input type="checkbox" checked={structure} onChange={(e) => setStructure(e.target.checked)} />structure</label>}</div>
+      {format === 'csv' && <label className="flex items-center gap-1.5 text-[12.5px] my-1"><input type="checkbox" checked={header} onChange={(e) => setHeader(e.target.checked)} />Header row</label>}
+      <div className="flex items-center gap-2.5 my-2 text-[12.5px]"><label className="w-28 text-ink-2">File name</label><input className="flex-1 min-w-0" aria-label="File name" placeholder={`${meta?.export?.filename || '{table}'} (per table)`} value={pattern} onChange={(e) => setPattern(e.target.value)} onKeyDown={(e) => enterSubmits(e, () => !busy && list.length > 0 && go())} /></div>
+      <div className="text-ink-2 text-[12px]">Tokens: {'{connection} {database} {table} {tag} {date} {time}'}.</div>
       {format === 'csv' && meta?.csvWarning && <div className="text-edit text-[12px]" role="alert">{meta.csvWarning}</div>}
       <p className="text-ink-2 text-[12px]">{list.length} table{list.length === 1 ? '' : 's'} chosen. Each one is a separate download{several ? ', named schema.table' : ''}; the browser may ask to allow several downloads.</p>
       {state && <div className="text-[12.5px]" role="status">{state}</div>}
