@@ -133,16 +133,18 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
 
   const send = async (body: Record<string, unknown>) => {
     if (running) return
+    if (pendingTotal > 0 && !(await confirm('Discard pending changes in the result tabs?'))) return
+    setPends({}); hist.current = []
     const mine = ctrl.current = new AbortController()
     setRunning(true); setError(''); setGate(null)
     const t0 = performance.now()
     try {
-      const keep = meta.config.editor.ResultMode === 'append' ? results : [] // append: earlier result tabs stay
-      const req = { ...body, limit, pin: pinned ? pinId : undefined }
+      const keep = meta.config.editor.ResultMode === 'append' ? results : results.filter((r) => r.pinned) // append: earlier result tabs stay; a pinned one always does
+      const req = { ...body, limit, pin: pinned ? pinId : undefined, syntax: info.caps.Editor === 'mongo' ? syntax : undefined }
       // a big result streams in, so the first rows show while the rest arrives; small ones keep the one-shot path
       const items = (limit < 0 || (limit || info.rowLimit || -1) > 1000) ? await runStream(req, mine.signal, keep) : (await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, req, mine.signal)).results
       const at = items.findIndex((x) => x.error)
-      setResults([...keep, ...items]); setJson(false); setChart(false); setFind(null); setActive(keep.length + Math.max(0, at)); setPassword('')
+      setResults([...keep, ...items]); setJson(false); setChart(false); setFind(null); setFocusCell(null); setActive(keep.length + Math.max(0, at)); setPassword('')
       if (!items.length) setError('Nothing ran. Type a statement first.')
     } catch (e) {
       if (e instanceof DOMException && e.name === 'AbortError') setError(`Cancelled after ${Math.round(performance.now() - t0)} ms.`)
