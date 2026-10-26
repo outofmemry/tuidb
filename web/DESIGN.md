@@ -24,6 +24,11 @@ Concept: the connection's colour runs the room.
 - **Type:** Martian Mono (narrow width axis) for the whole workspace chrome, data, the editor and
   connection strings, and for controls; Bricolage Grotesque only for prose (start page lede, dialog
   copy, empty states). The start page heading carries a blinking block cursor. Sentence case throughout, no all-caps labels, no middle-dot joins.
-- **Grid:** a ledger. Hairline column rules, sticky row numbers, the header one step lighter.
+- **Grid:** a ledger. Hairline column rules, sticky row numbers, the header one step lighter. Columns
+  start at the width of their name and first rows (a saved width wins), numbers sit flush right,
+  NULL is dim italic.
+- **Menus:** one popover style everywhere (`popover` + `menu-item`): the connection switcher, Select,
+  the tab, row and ⋯ menus. Less frequent actions go behind a ⋯ button rather than widening a toolbar.
+  Motion is a short rise or pop, and `motion-safe:` keeps it off when the user asked for less.
 - **Quality floor:** visible keyboard focus, reduced motion respected, usable at phone width (the
   object list becomes a drawer, connection rows stack).
