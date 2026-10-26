@@ -362,30 +362,7 @@ func completionScript(shell string, fs *flag.FlagSet) (string, error) {
 	return b.String(), nil
 }
 
-func printKeys(prefix string, km *keymap.Map) {
-	fmt.Printf("prefix: %s   (every action below is: prefix, then the key; \"-n\" bindings need no prefix)\n\n", prefix)
-	for _, ctx := range []string{keymap.Global, keymap.Sidebar, keymap.Grid, keymap.FilterBar, keymap.Structure, keymap.Editor, keymap.Results} {
-		var rows []keymap.Binding
-		for _, b := range km.All() {
-			if b.Context == ctx {
-				rows = append(rows, b)
-			}
-		}
-		if len(rows) == 0 {
-			continue
-		}
-		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Action < rows[j].Action })
-		fmt.Printf("[%s]\n", ctx)
-		for _, b := range rows {
-			k := keymap.Display(b.Key)
-			if b.NoPrefix {
-				k = "-n " + k
-			}
-			fmt.Printf("  %-26s %-10s %s\n", b.Action, k, b.Desc)
-		}
-		fmt.Println()
-	}
-}
+func printKeys(prefix string, km *keymap.Map) { fmt.Print(keymap.Listing(prefix, km)) }
 
 // pick resolves the CLI argument: a saved connection name, or a URL (kept in memory, not saved).
 func pick(d *ui.Deps, arg string) (config.Connection, error) {
