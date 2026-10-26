@@ -222,19 +222,21 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
           <div className={ACTIONS}>
             <button className="mr-auto" onClick={() => setPaths(true)} title="Where the dump and restore programs are, for this connection">Tool paths…</button>
             <button onClick={onClose}>Cancel</button>
-            {!rev?.display || !rev.tool.Found ? <button className="btn-primary" disabled={!file || (restore && newDb && !dbName.trim())} onClick={() => call(false)}>Review command</button>
+            {!rev?.display || !rev.tool.Found ? <button className="btn-primary" disabled={(!file && !pattern.trim()) || (restore && newDb && !dbName.trim())} onClick={() => call(false)}>Review command</button>
               : <button className="btn-primary" disabled={!!rev.gate?.password && !password} onClick={() => call(true)}>{restore ? 'Restore' : 'Back up'}</button>}
           </div>
         </>
       )}
       {job && (
         <>
-          <pre ref={logEnd} className="min-h-[8em]">{job.data.lines.join('\n') || (job.data.done ? '(no output)' : 'Starting…')}</pre>
+          <pre ref={logEnd} className="min-h-[8em] max-h-[40vh] overflow-auto" role="log" aria-live="polite" aria-label="Output">{job.data.lines.join('\n') || (job.data.done ? '(no output)' : 'Starting…')}</pre>
           {job.data.error && <div className="text-del mt-2">{job.data.error}</div>}
           {job.data.done && !job.data.error && <div className="mt-2">Done.</div>}
           {err && <div className="text-del mt-2">{err}</div>}
           <div className={ACTIONS}>
-            {running ? <button className="btn-danger" onClick={() => api('DELETE', `/sessions/${sid}/jobs/${job.id}`).catch(() => {})}>Cancel</button> : <button className="btn-primary" onClick={onClose}>Close</button>}
+            {running ? <button className="btn-danger" onClick={() => api('POST', `/sessions/${sid}/jobs/${job.id}/cancel`).catch((e) => setErr(msg(e)))}>Cancel</button> : <>
+              {job.data.file && !job.data.error && <button onClick={async () => { try { const f = await download(`/sessions/${sid}/jobs/${job.id}/file`); saveBlob(f.blob, f.name) } catch (e) { setErr(msg(e)) } }}>Download {job.data.file}</button>}
+              <button className="btn-primary" autoFocus onClick={onClose}>Close</button></>}
           </div>
         </>
       )}
