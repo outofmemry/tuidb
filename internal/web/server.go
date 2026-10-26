@@ -50,19 +50,25 @@ type Options struct {
 	Open     bool
 	Insecure bool           // allow a non-loopback Listen
 	Connect  ui.ConnectFunc // nil = ui.DefaultConnect; tests inject a fake
+	Version  string         // shown in /api/meta
 }
 
 type Server struct {
-	o        Options
-	connMu   sync.Mutex // guards o.Conns
-	queryMu  sync.Mutex // serialises the check-and-write of a saved query update
-	mu       sync.Mutex // guards sessions
-	sessions map[string]*session
-	mcp      *mcp.Server // nil unless [mcp] enabled
-	ap       approvals
-	stamp    string // guarded by connMu: mtimes of the connection files at the last (re)load
-	logins   logins
-	con      consoleLog
+	o         Options
+	connMu    sync.Mutex // guards o.Conns
+	queryMu   sync.Mutex // serialises the check-and-write of a saved query update
+	mu        sync.Mutex // guards sessions
+	sessions  map[string]*session
+	mcp       *mcp.Server // nil unless [mcp] enabled
+	ap        approvals
+	stamp     string // guarded by connMu: mtimes of the connection files at the last (re)load
+	logins    logins
+	con       consoleLog
+	liveMu    sync.Mutex
+	live      *config.Config // see cfg()
+	pass      passFails
+	chatOnce  sync.Once
+	chatStore *store.Chats // the default under the data dir, made on first use (chats())
 }
 
 func New(o Options) *Server {
