@@ -73,6 +73,7 @@ func (t *tableTab) syncEdit() {
 
 func (t *tableTab) applyFilters() tea.Cmd {
 	return t.guard(func() tea.Cmd {
+		t.markApplied()
 		t.offset, t.toTop = 0, true
 		t.saveState()
 		return t.load()
@@ -81,7 +82,7 @@ func (t *tableTab) applyFilters() tea.Cmd {
 
 func (t *tableTab) columnPicker(onPick func(col string)) {
 	items := []pickItem{{Label: "Any column", Value: db.AnyColumn}, {Label: "Raw SQL", Value: db.RawColumn}}
-	for _, c := range t.cols {
+	for _, c := range t.filterColumns() {
 		items = append(items, pickItem{Label: c.Name, Detail: c.Type, Value: c.Name})
 	}
 	t.ws.a.push(&pickerDlg{title: "Filter column", filter: true, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
@@ -220,15 +221,15 @@ func (t *tableTab) showFilterSQL() tea.Cmd {
 	for _, c := range t.cols {
 		names = append(names, c.Name)
 	}
-	sql, args, err := t.filters.Where(d, names, 1)
+	sql, err := db.WhereText(d, t.filters, names)
 	if err != nil {
 		return t.ws.a.fail(err)
 	}
-	sql = inlineArgs(d, sql, args)
+	lines := []string{"WHERE " + sql}
 	if sql == "" {
-		sql = "(no active filters)"
+		lines = []string{"(no active filters)"}
 	}
-	t.ws.a.push(&textViewDlg{title: "Filter SQL", lines: []string{"WHERE " + sql}})
+	t.ws.a.push(&textViewDlg{title: "Filter SQL", lines: lines, actions: []viewAction{{Key: "c", Label: "c: copy", Do: func() tea.Cmd { return setClip(strings.Join(lines, "\n")) }}}})
 	return nil
 }
 
