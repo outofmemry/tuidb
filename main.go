@@ -171,7 +171,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	km, err := cfg.Keymap()
+	km, pluginConflicts, err := cfg.KeymapChecked(plugin.Bindings()) // the same map as the help screens (plugin shortcuts included)
 	if err != nil {
 		return fmt.Errorf("%s: %w", *cfgPath, err)
 	}
@@ -180,6 +180,9 @@ func run() error {
 		return nil
 	}
 	if *keys {
+		for _, c := range pluginConflicts {
+			fmt.Fprintln(os.Stderr, "webtuidb: plugin shortcut skipped:", c)
+		}
 		printKeys(cfg.General.Prefix, km)
 		return nil
 	}
@@ -212,6 +215,7 @@ func run() error {
 		srv.Boards = true
 		return srv.ServeStdio(context.Background())
 	}
+	defer crashlog.Recover(nil) // shortcut: the console log lives in each workspace, so no console lines here; wire store.Console when it is reachable
 	state, err := store.LoadState(filepath.Join(data, "state.json"))
 	if err != nil {
 		return err
