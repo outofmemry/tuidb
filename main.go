@@ -81,6 +81,8 @@ func run() error {
 	if err := checkModes(map[string]bool{
 		"frontend": *frontend, "mcp": *mcpStdio, "keys": *keys, "theme": *theme, "man": *man,
 		"completion": *completion != "", "mcp-config": *mcpConfig != "", "list-connections": *listConns, "version": *version,
+		"changelog": *changelogF, "bugreport": *bugreport, "check-update": *checkUpd, "set-passcode": *setPass,
+		"theme-install": *themeInst != "", "theme-update": *themeUpd,
 	}, flag.NArg()); err != nil {
 		return err
 	}
@@ -91,6 +93,25 @@ func run() error {
 	case *man:
 		fmt.Print(manPage)
 		return nil
+	case *changelogF:
+		changelog(os.Stdout)
+		return nil
+	case *bugreport:
+		bugReport(os.Stdout, versionString(), *cfgPath)
+		return nil
+	case *checkUpd:
+		msg, err := checkUpdate(&http.Client{}, latestAPIURL, versionString())
+		if err != nil {
+			return err
+		}
+		fmt.Println(msg)
+		return nil
+	case *setPass:
+		return setPasscode(os.Stdout)
+	case *themeInst != "":
+		return themeInstall(os.Stdout, *themeInst)
+	case *themeUpd:
+		return themeUpdate(os.Stdout)
 	case *mcpConfig != "":
 		exe, err := os.Executable()
 		if err != nil {
