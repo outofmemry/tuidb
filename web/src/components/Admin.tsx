@@ -278,7 +278,7 @@ function ToolPathsDialog({ info, onClose, onSaved }: { info: SessionInfo; onClos
 
 // ---- plugins -----------------------------------------------------------------------------------
 
-export type PluginCtx = { context: string; object?: ObjRef; selection: string }
+export type PluginCtx = { context: string; object?: ObjRef; selection: string; cell: string }
 
 export function PluginsDialog({ sid, ctx, onClose, onSql, notify }: { sid: string; ctx: PluginCtx; onClose: () => void; onSql: (t: string) => void; notify: (m: string) => void }) {
   const q = useQuery({ queryKey: ['plugins'], queryFn: () => api<PluginInfo[]>('GET', '/plugins'), gcTime: 0 })
