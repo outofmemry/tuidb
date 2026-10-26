@@ -112,6 +112,7 @@ export function DiagramCanvas({ tables, storageKey, query, centerOn, canLink, co
   }
 
   const q = query.trim().toLowerCase()
+  const tint = (t: DiagramTable) => validColour(colors[tk(t.ref)])
   const anchor = (t: DiagramTable, col: string | undefined, side: 'l' | 'r'): Pos => {
     const p = pos[tk(t.ref)] ?? { x: 0, y: 0 }, i = col ? t.columns.findIndex((c) => c.name === col) : -1
     return { x: p.x + (side === 'r' ? BW : 0), y: p.y + (i >= 0 ? HEAD + i * ROWH + ROWH / 2 : HEAD / 2) }
