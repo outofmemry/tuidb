@@ -38,6 +38,9 @@ func (f *fakeSess) Objects(_ context.Context, schema string) ([]db.Object, error
 	}
 	return []db.Object{{ObjRef: db.ObjRef{Schema: "public", Name: "t1", Kind: db.KindTable}}, {ObjRef: db.ObjRef{Schema: "public", Name: "t2", Kind: db.KindTable}}}, nil
 }
+func (f *fakeSess) Schemas(context.Context) ([]string, error) {
+	return []string{"public", "other", "pg_catalog"}, nil
+}
 func (f *fakeSess) Count(_ context.Context, q db.RowQuery, _ bool) (db.Count, error) {
 	if q.ObjRef.Name == "t2" {
 		return db.Count{N: 2, Exact: true}, nil
@@ -90,6 +93,9 @@ func (f *fakeSess) Exec(_ context.Context, stmt string, limit int) (*db.Result, 
 	}
 	if strings.Contains(stmt, "raise") {
 		return &db.Result{Message: "DO\nNOTICE: hello\nWARNING: careful"}, nil
+	}
+	if stmt == "select * from t1" {
+		return &db.Result{Columns: []db.ResultColumn{{Name: "id"}, {Name: "name"}}, Rows: [][]any{{int64(1), "ann"}}, HasRows: true}, nil
 	}
 	if strings.HasPrefix(strings.ToLower(stmt), "select") {
 		return &db.Result{Columns: []db.ResultColumn{{Name: "x"}}, Rows: [][]any{{int64(1)}}, HasRows: true}, nil
