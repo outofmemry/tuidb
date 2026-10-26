@@ -151,6 +151,9 @@ func (t *queryTab) resultEditKeys(g *Grid, msg tea.Msg) bool {
 
 // Dirty / Statements / Commit / Discard make results behave like a table tab for the workspace commit keys.
 func (t *queryTab) Dirty() bool {
+	if t.other != nil && strings.TrimSpace(t.other.Text()) != "" { // the unfocused pane's text is not saved with the tab: ask before closing
+		return true
+	}
 	for _, r := range t.res {
 		if r.grid != nil && r.grid.HasPending() {
 			return true
@@ -164,7 +167,7 @@ func (t *queryTab) Statements() ([]db.Statement, error) {
 	if rv == nil {
 		return nil, nil
 	}
-	return t.ws.sess.Plan(rv.grid.Changes(*rv.ref))
+	return t.sess().Plan(rv.grid.Changes(*rv.ref))
 }
 
 func (t *queryTab) Commit() tea.Cmd {
@@ -184,8 +187,11 @@ func (t *queryTab) Commit() tea.Cmd {
 	if err != nil {
 		return t.ws.a.fail(err)
 	}
-	idx := t.rc
-	return t.ws.execute(stmts, func(err error) tea.Cmd {
+	idx, original := t.rc, ""
+	if t.ws.a.d.Cfg.General.LogOriginalValues {
+		original = db.Preimage(rv.grid.Changes(*rv.ref))
+	}
+	return t.ws.executeOn(t.sess(), original, stmts, func(err error) tea.Cmd {
 		if err != nil || t.closed {
 			return nil
 		}
@@ -221,7 +227,8 @@ func (t *queryTab) resultAction(name string) (bool, tea.Cmd) {
 		g.DeleteRows()
 	case "set_value":
 		items := []pickItem{{Label: "NULL", Value: db.Null}, {Label: "DEFAULT", Value: db.Default}, {Label: "EMPTY", Value: db.Empty}}
-		t.ws.a.push(&pickerDlg{title: "Set value", items: items, onPick: func(it pickItem, _ bool) tea.Cmd { g.SetCell(it.Value); return nil }})
+		items = append(items, setValueExtras()...)
+		t.ws.a.push(&pickerDlg{title: "Set value", items: items, onPick: func(it pickItem, _ bool) tea.Cmd { return t.ws.a.pickSetValue(g, it.Value) }})
 	case "paste_rows", "paste_cells":
 		return true, t.ws.a.say("paste into the table tab; results take typed edits")
 	default:
