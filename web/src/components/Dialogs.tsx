@@ -111,10 +111,11 @@ export function PlanDialog({ sid, plan, onClose, onApplied }: { sid: string; pla
       <pre>{plan.statements.map((s) => s.display).join('\n')}</pre>
       {!plan.transactions && <div className="text-ink-2">This database applies statements one at a time. If one fails, the ones before it stay applied.</div>}
       <GateFields gate={plan.gate} label={plan.levelLabel} password={password} setPassword={setPassword} />
-      {err && <div className="text-del" style={{ marginTop: 8 }}>{err}</div>}
+      {err && <div className="text-del mt-2" role="alert">{err}</div>}
       <div className="flex justify-end gap-2 mt-[18px]">
+        <button className="btn-ghost" onClick={() => openInWindow('SQL preview', plan.statements.map((s) => s.display).join('\n'))} title="Open the SQL preview in its own window">Open in window</button>
         <button onClick={onClose}>Cancel</button>
-        <button className="btn-primary" disabled={busy || (plan.gate.password && !password)} onClick={send}>Send changes</button>
+        <button className="btn-primary" disabled={busy || (plan.gate.password && !password)} onClick={send}>{busy ? 'Sending…' : 'Send changes'}</button>
       </div>
     </Dialog>
   )
