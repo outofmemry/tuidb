@@ -460,9 +460,16 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
       setColForm(c)
     },
     export: () => setDlg('export'), import: () => (obj.Kind === 'table' ? setDlg('import') : notify('Only tables can be imported into')),
-    copy_rows: () => copyRows('Plain'), copy_rows_as: () => setDlg('copyas'), copy_cells: copyCell,
-    quick_look: () => { if (selRow) setCell({ row: selRow.key, col: res!.columns[0].name, readOnly: true }) },
+    copy_rows: () => copyRows('Plain'), copy_rows_as: () => setDlg('copyas'), copy_cells: copyCell, copy_cells_as: () => (selRow ? setDlg('cellsas') : notify('Select a cell first')), copy_column: () => copyColumn(),
+    column_menu: () => { if (view === 'data' && res) headerAt(cc()) },
+    quick_look: () => { if (selRow) setCell({ row: selRow.key, col: res!.columns[cc()]?.name ?? res!.columns[0].name, readOnly: true }) },
   }
+  useEffect(() => { // webtuidb:cell: a plugin asks for the grid cursor's value (the TUI's Cell)
+    if (!active) return
+    const h = (e: Event) => { if (selRow && res && view === 'data') (e as CustomEvent).detail.v = shown(selRow)[cc()] ?? '' }
+    window.addEventListener('webtuidb:cell', h)
+    return () => window.removeEventListener('webtuidb:cell', h)
+  })
   useEffect(() => {
     if (!active) return
     const h = (e: Event) => { if (e.defaultPrevented) return; const f = keyActions[(e as CustomEvent).detail.action]; if (f) { e.preventDefault(); f() } } // the sidebar answers first when it holds the marked tables
