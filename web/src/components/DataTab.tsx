@@ -553,7 +553,7 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
           {trayOpen && (
             <div className="overflow-auto border-t border-rule px-2.5 pt-1.5 pb-2.5 text-[11.5px] font-mono">
               {marks.map((m) => (
-                <div className="flex gap-2.5 items-baseline py-[3px]" key={m.id}>
+                <div className="flex gap-2.5 items-baseline py-[3px] px-1 -mx-1 rounded-[2px] hover:bg-raised" key={m.id}>
                   <span className="flex-1 min-w-0 wrap-anywhere whitespace-nowrap overflow-hidden text-ellipsis">
                     {m.kind === 'insert' && <><span className="text-new font-bold">+ </span>{clip(m.detail ?? '', 160)}</>}
                     {m.kind === 'delete' && <del className="text-del decoration-1">remove {m.where}</del>}
