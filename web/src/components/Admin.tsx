@@ -103,15 +103,22 @@ export function UsersDialog({ sid, info, onPlan, onClose }: { sid: string; info:
           </div>
           {!form && <div className={ACTIONS}><button onClick={() => open({ kind: 'create' })}>New user</button></div>}
           {form && (
-            <div className="mt-3 border-t border-rule pt-2">
+            <div className="mt-3 border-t border-rule pt-2" role="group" aria-label="User form" onKeyDown={(e) => enterSubmits(e, submit)}>
               <strong className="font-medium">{form.kind === 'create' ? 'New user' : `${form.kind[0].toUpperCase() + form.kind.slice(1)}: ${form.user!.Name}`}</strong>
               {form.kind === 'create' && <div className={ROW}><input autoFocus placeholder="name" aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} />{!pg && <input placeholder="host" aria-label="Host" value={host} onChange={(e) => setHost(e.target.value)} />}</div>}
               {(form.kind === 'create' || form.kind === 'password') && <div className={ROW}><input type="password" placeholder="password" aria-label="Password" value={pw} onChange={(e) => setPw(e.target.value)} /></div>}
               {(form.kind === 'grant' || form.kind === 'revoke') && <div className={ROW}><input autoFocus className="flex-1" placeholder={pg ? 'schema.table' : 'db.table or db.*'} aria-label="Object" value={object} onChange={(e) => setObject(e.target.value)} /></div>}
               {(form.kind === 'grant' || form.kind === 'revoke') && <div className={ROW}><input className="flex-1" placeholder="columns, comma separated (optional: only for SELECT, INSERT, UPDATE, REFERENCES)" aria-label="Columns" value={columns} onChange={(e) => setColumns(e.target.value)} /></div>}
               {(form.kind === 'attrs' || form.kind === 'grant' || form.kind === 'revoke' || (form.kind === 'create' && pg)) && (
-                <div className="flex flex-wrap gap-x-4 gap-y-1 my-2 text-[12.5px]">{privs.map((a) => <label key={a} className="flex items-center gap-1.5"><input type="checkbox" checked={picked.includes(a)} onChange={() => toggle(a)} />{a}</label>)}</div>
+                <>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[12.5px]" role="group" aria-label={pg && form.kind !== 'grant' && form.kind !== 'revoke' ? 'Attributes' : 'Privileges'}>{privs.map((a) => <label key={a} className="flex items-center gap-1.5"><input type="checkbox" checked={picked.includes(a)} onChange={() => toggle(a)} />{a}</label>)}</div>
+                  <div className="flex gap-2 mb-2 mt-1"><button type="button" className="btn-ghost" onClick={() => setPicked([...privs])}>Check all</button><button type="button" className="btn-ghost" onClick={() => setPicked([])}>Uncheck all</button></div>
+                </>
               )}
+              {form.kind === 'limits' && (pg || form.user?.Limits) && <div className="grid grid-cols-[200px_1fr] gap-x-3 gap-y-2 items-center my-2 text-[12.5px]">
+                {lims.map(([k, label], i) => <Fragment key={k}><label className="text-ink-2" htmlFor={`lim-${k}`}>{label}</label><input id={`lim-${k}`} autoFocus={i === 0} type="number" min={pg ? -1 : 0} inputMode="numeric" className="w-32" value={limits[k] ?? '0'} onChange={(e) => setLimits({ ...limits, [k]: e.target.value })} /></Fragment>)}
+                <span /><span className="text-ink-3 text-[12px]">{lims.map(([k, label]) => `${label}: ${limitHint(k, pg)}`).join('. ')}.</span>
+              </div>}
               {err && <div className="text-del">{err}</div>}
               <div className={ACTIONS}><button onClick={() => setForm(null)}>Cancel</button><button className="btn-primary" onClick={submit}>Preview</button></div>
             </div>
