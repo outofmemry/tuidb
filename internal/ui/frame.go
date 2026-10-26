@@ -6,16 +6,16 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Logo is the welcome-page wordmark (figlet "standard" face). Five lines, 26 cells wide.
+// Logo is the welcome-page wordmark (figlet "standard" face). Five lines, 44 cells wide.
 var Logo = []string{
-	` _         _     _ _      `,
-	`| |_ _   _(_) __| | |__   `,
-	`| __| | | | |/ _` + "`" + ` | '_ \  `,
-	`| |_| |_| | | (_| | |_) | `,
-	` \__|\__,_|_|\__,_|_.__/  `,
+	`              _     _         _     _ _     `,
+	`__      _____| |__ | |_ _   _(_) __| | |__  `,
+	`\ \ /\ / / _ \ '_ \| __| | | | |/ _` + "`" + ` | '_ \ `,
+	` \ V  V /  __/ |_) | |_| |_| | | (_| | |_) |`,
+	`  \_/\_/ \___|_.__/ \__|\__,_|_|\__,_|_.__/ `,
 }
 
-const logoW = 26
+const logoW = 44
 
 // frame draws content inside a rounded border with the title set into the top edge.
 // The result is exactly w cells wide and h lines tall; content is clipped or padded to fit.
