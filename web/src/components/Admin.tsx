@@ -93,6 +93,7 @@ export function UsersDialog({ sid, info, onPlan, onClose }: { sid: string; info:
                   <td className={`${TD} whitespace-nowrap`}>
                     <button className="btn-ghost" onClick={() => open({ kind: 'password', user: u })}>Password</button>
                     <button className="btn-ghost" onClick={() => open({ kind: 'attrs', user: u })}>{pg ? 'Attributes' : 'Privileges'}</button>
+                    <button className="btn-ghost" onClick={() => open({ kind: 'limits', user: u })}>Limits</button>
                     <button className="btn-ghost" onClick={() => open({ kind: 'grant', user: u })}>Grant</button>
                     <button className="btn-ghost" onClick={() => open({ kind: 'revoke', user: u })}>Revoke</button>
                     <button className="btn-ghost btn-danger" onClick={() => drop(u)}>Drop</button>
