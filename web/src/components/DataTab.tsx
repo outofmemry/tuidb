@@ -79,41 +79,63 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
   const colsMenu = useRef<HTMLDetailsElement>(null)
 
   // restore what the TUI (or an earlier visit) remembered for this table
+  const cols = useQuery({ queryKey: ['cols', sid, obj], queryFn: () => api<Column[]>('GET', `${base}/object/columns${refQ}`), gcTime: 0 })
   const saved = useQuery({ queryKey: ['tstate', sid, obj], queryFn: () => api<any>('GET', '/state/table' + stateQ), staleTime: Infinity, gcTime: 0 })
   useEffect(() => {
     if (saved.isSuccess && !ready) {
       const s = saved.data
+      // [table] default_sort: with nothing saved, the first load sorts by the primary key.
+      const dsort = String(cfg(meta, 'table', 'defaultSort', 'none'))
+      if (dsort !== 'none' && !(s.sort?.length) && !s.sort_none && !cols.isSuccess && !cols.isError) return // wait for the columns, one fetch instead of two
+      const pk = (cols.data ?? []).filter((c) => c.PK).map((c) => ({ Column: c.Name, Desc: dsort === 'pk_desc' }))
       setFilters(initFilters ?? { Filters: s.filters?.Filters ?? [], Or: !!s.filters?.Or }) // a search hit brings its own filters
-      setSort(s.sort ?? []); setHidden(s.hidden ?? []); setShowBar(!!initFilters || !!s.show_filters); setReady(true)
+      setSort(s.sort?.length ? s.sort : dsort !== 'none' && !s.sort_none ? pk : []); setHidden(s.hidden ?? []); setWidths(s.widths ?? {})
+      // [table] filter_state: remember (what the table had), show or hide the filter bar on open; a search hit always shows it
+      const fs = String(cfg(meta, 'table', 'filterState', 'remember'))
+      setShowBar(!!initFilters || (fs === 'show' ? true : fs === 'hide' ? false : !!s.show_filters)); setReady(true)
     }
     if (saved.isError && !ready) setReady(true)
-  }, [saved.isSuccess, saved.isError, saved.data, ready])
+  }, [saved.isSuccess, saved.isError, saved.data, ready, cols.isSuccess, cols.isError])
   useEffect(() => {
     if (!ready) return
-    const t = setTimeout(() => api('PUT', '/state/table' + stateQ, { hidden, filters, show_filters: showBar, sort }).catch(() => {}), 500)
+    // widths are sent only after a drag: absent, the saved ones (the TUI's too) are kept
+    const t = setTimeout(() => api('PUT', '/state/table' + stateQ, tableStateBody({ hidden, filters, showBar, sort, sortChosen: sortChosen.current, widths, widthsChosen: resized.current })).catch(() => {}), 500)
     return () => clearTimeout(t)
-  }, [ready, hidden, filters, showBar, sort, stateQ])
+  }, [ready, hidden, filters, showBar, sort, widths, stateQ])
+  const CELL_PX = 8 // shortcut: a terminal cell is taken as 8px, so widths round-trip with the TUI without a font measurement
+  const pxWidths = useMemo(() => Object.fromEntries(Object.entries(widths).map(([k, v]) => [k, v * CELL_PX])), [widths])
+  const onResize = (col: string, px: number | null) => { resized.current = true; setWidths((w) => { const n = { ...w }; if (px === null) delete n[col]; else n[col] = Math.max(4, Math.min(120, Math.round(px / CELL_PX))); return n }) }
 
-  const cols = useQuery({ queryKey: ['cols', sid, obj], queryFn: () => api<Column[]>('GET', `${base}/object/columns${refQ}`), gcTime: 0 })
   const colNames = useMemo(() => (cols.data ?? []).map((c) => c.Name), [cols.data])
+  const colTips = useMemo(() => Object.fromEntries((cols.data ?? []).map((c) => [c.Name, columnTip(c)])), [cols.data]) // header tooltips: type, nullable, default, key
   const visible = useMemo(() => colNames.filter((n) => !hidden.includes(n)), [colNames, hidden])
   const hasActive = filters.Filters.some((f) => f.Enabled)
+  const nActive = filters.Filters.filter((f) => f.Enabled).length
 
   const rowsQ = useQuery({
     queryKey: ['rows', sid, obj, filters, sort, hidden, offset, limit, nonce],
     queryFn: ({ signal }) => api<ResultData>('POST', `${base}/rows`, { ref: obj, filters, sort, columns: hidden.length ? visible : [], limit, offset }, signal),
     enabled: ready && cols.isSuccess, placeholderData: keepPreviousData, gcTime: 0,
   })
+  // [general] estimate_count_over: above that many rows (by the table's estimate) a filtered count is estimated too, shown with ≈
+  const over = Number(cfg(meta, 'general', 'estimateCountOver', 0)) || 0
+  const probe = over > 0 && hasActive && !exact
+  const baseEst = useQuery({
+    queryKey: ['count0', sid, obj, nonce],
+    queryFn: () => api<{ n: number; exact: boolean }>('POST', `${base}/count`, { ref: obj, filters: { Filters: [], Or: false }, estimate: true }),
+    enabled: ready && cols.isSuccess && probe, gcTime: 0,
+  })
+  const skipExact = probe && (baseEst.data?.n ?? 0) > over
   const countQ = useQuery({
-    queryKey: ['count', sid, obj, filters, nonce, exact],
-    queryFn: () => api<{ n: number; exact: boolean }>('POST', `${base}/count`, { ref: obj, filters, estimate: !exact && !hasActive }),
-    enabled: ready && cols.isSuccess, gcTime: 0,
+    queryKey: ['count', sid, obj, filters, nonce, exact, skipExact],
+    queryFn: () => api<{ n: number; exact: boolean }>('POST', `${base}/count`, { ref: obj, filters, estimate: !exact && (!hasActive || skipExact) }),
+    enabled: ready && cols.isSuccess && (!probe || baseEst.isFetched), gcTime: 0,
   })
 
   const res = rowsQ.data
   const stale = rowsQ.isPlaceholderData // the previous page stays on screen while reloading, but its server snapshot may be gone
   const pending = Object.keys(edits).length + deletes.size + inserts.length
-  useEffect(() => { onDirty?.(pending > 0) }, [pending]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onDirty?.(pending > 0 || structDirty) }, [pending, structDirty]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onDirty?.(false), []) // eslint-disable-line react-hooks/exhaustive-deps
   const clearPending = () => { setEdits({}); setDeletes(new Set()); setInserts([]); setSelected(null) }
   const guard = async () => pending === 0 || (await confirm('Discard pending changes?'))
