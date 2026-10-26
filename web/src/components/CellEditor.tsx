@@ -123,7 +123,7 @@ export function CellEditor({ col, value, readOnly, onDone, imagePreview = true, 
           <button onClick={() => onDone({ $: 'empty' })}>Set empty</button>
         </>}
         <button onClick={() => onDone(undefined)}>{readOnly ? 'Close' : 'Cancel'}</button>
-        {!readOnly && <button className="btn-primary" onClick={save} title="Ctrl+Enter">Save</button>}
+        {!readOnly && <button className="btn-primary" onClick={() => save()} title="Ctrl+Enter, Tab saves and moves to the next cell">Save</button>}
       </div>
     </Dialog>
   )
