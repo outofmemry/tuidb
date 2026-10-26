@@ -259,28 +259,44 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
       use_selection_find: useSelectionFind, jump_to_selection: () => { const v = view.current; if (v) { v.focus(); v.dispatch({ effects: View.scrollIntoView(v.state.selection.main.head, { y: 'center' }) }) } },
       complete: () => { if (view.current) { view.current.focus(); startCompletion(view.current) } },
       save_sql_as: saveSqlAs,
-      add_to_queries: () => { if (text.trim()) save() }, set_limit: () => limitBox.current?.open(),
+      add_to_queries: () => { if (text.trim()) void save() }, set_limit: () => limitBox.current?.open(),
       beautify: () => reformat('beautify'), uglify: () => reformat('uglify'), variables: askVars,
-      find: () => { if (contextOf() === 'results' && cur) setFind(find ?? ''); else findInEditor() }, find_replace: findInEditor,
+      find: () => { if (contextOf() === 'results' && cur?.hasRows) setFind((f) => f ?? newFind()); else findInEditor() }, find_replace: findInEditor,
       export: () => { if (cur?.hasRows && !cur.error) setDlg('export'); else notify('Run a query first, then export its result') },
       copy_rows: () => copyRows('Plain'), copy_rows_as: () => { if (cur?.hasRows) setDlg('copyas') }, copy_cells: copyCell,
+      copy_cells_as: () => { if (cur?.hasRows) setDlg('cellsas') }, copy_column: () => copyColumn(), column_menu: () => { if (cur?.hasRows && !chart) headerAt(Math.min(colRef.current, cur.columns.length - 1)) },
       chart: () => { if (cur?.hasRows) setChart(!chart) }, load_more: loadMore,
+      // select_next_occurrence ADDS a caret (CodeMirror keeps the earlier ranges; allowMultipleSelections is on in ext below), unlike the terminal's single jumping cursor
       select_next_occurrence: () => view.current && selectNextOccurrence(view.current), select_all_occurrences: () => view.current && selectSelectionMatches(view.current),
+      select_word: selectWord, select_all: () => { const v = view.current; if (v) { v.focus(); selectAll(v) } },
       vim_mode: () => { setFlag('webtuidb-vim', !vimOn); setVimOn(!vimOn); notify(`Vim keys ${vimOn ? 'off' : 'on'}`) },
       fold: foldStatement,
       split_down: toggleSecond, block_select: toggleBlock,
-      find_next: () => stepFind(findNext), find_prev: () => stepFind(findPrevious),
+      find_next: () => (contextOf() === 'results' && find ? stepRes(1) : stepFind(findNext)), find_prev: () => (contextOf() === 'results' && find ? stepRes(-1) : stepFind(findPrevious)),
       ...(second !== null ? { next_pane: () => focusPane(1 - pane), prev_pane: () => focusPane(1 - pane) } : {}),
       invisibles: () => { setFlag('webtuidb-invisibles', !invis); setInvis(!invis) },
     }
-    const h = (e: Event) => { if (e.defaultPrevented) return; const f = acts[(e as CustomEvent).detail.action]; if (f) { e.preventDefault(); f() } }
+    const h = (e: Event) => { if (e.defaultPrevented) return; const a = (e as CustomEvent).detail.action; const f = acts[a] ?? (canEdit && contextOf() === 'results' ? resActs[a] : undefined); if (f) { e.preventDefault(); f() } }
     // plugin output of type sql lands in the editor of the visible query tab
     const ins = (e: Event) => { const v = view.current; if (v) { e.preventDefault(); v.dispatch(v.state.replaceSelection((e as CustomEvent).detail.text)) } }
+    // :w saves the query (asks for a name the first time), :q closes the tab unless the text changed since the last write, :q! and :wq as in vim
+    const vx = async (e: Event) => {
+      const n = (e as CustomEvent).detail.name as string
+      if (n === 'w' || n === 'wq') { if (!(await writeQuery())) return }
+      if (n === 'q' && text !== lastSaved.current) return notify('No write since the last change (add ! to override)')
+      if (n === 'q' || n === 'q!' || n === 'wq') { if (onClose) onClose(); else window.dispatchEvent(new CustomEvent('webtuidb:global', { detail: { action: 'close_tab' } })) }
+    }
     window.addEventListener('webtuidb:action', h)
     window.addEventListener('webtuidb:insert', ins)
-    return () => { window.removeEventListener('webtuidb:action', h); window.removeEventListener('webtuidb:insert', ins) }
+    window.addEventListener('webtuidb:vim-ex', vx)
+    return () => { window.removeEventListener('webtuidb:action', h); window.removeEventListener('webtuidb:insert', ins); window.removeEventListener('webtuidb:vim-ex', vx) }
   })
 
+  const selectWord = () => { // alt+D: the word under each caret
+    const v = view.current; if (!v) return
+    v.focus()
+    v.dispatch({ selection: EditorSelection.create(v.state.selection.ranges.map((r) => v.state.wordAt(r.head) ?? r), v.state.selection.mainIndex) })
+  }
   const focusPane = (k: number) => { const v = views.current[k]; if (v) { view.current = v; setPane(k); v.focus() } }
   const toggleSecond = () => {
     if (second === null) { setSecond(''); setTimeout(() => focusPane(1), 50) } else { setSecond(null); views.current[1] = null; view.current = views.current[0]; setPane(0); views.current[0]?.focus() }
