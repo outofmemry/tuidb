@@ -3,9 +3,13 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"sort"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/BurntSushi/toml"
 
 	"webtuidb/internal/config"
 )
@@ -39,8 +43,9 @@ var darkPalette = map[string]string{
 	"status_bg": "#292e42", "status_fg": "#c0caf5", "prefix_bg": "#e0af68", "prefix_fg": "#1a1b26", "popup_bg": "#24283b",
 	"tag.local": "#9ece6a", "tag.testing": "#7dcfff", "tag.development": "#7aa2f7", "tag.staging": "#e0af68", "tag.production": "#f7768e",
 	"driver.postgres": "#7aa2f7", "driver.mysql": "#e0af68", "driver.clickhouse": "#f7c948", "driver.redis": "#f7768e", "driver.mongodb": "#9ece6a",
-	"driver.mariadb": "#c49a6c", "driver.cockroachdb": "#bb9af7", "driver.sqlite": "#7dcfff", "driver.duckdb": "#ffd43b",
-	"driver.cassandra": "#73daca", "driver.dynamodb": "#ff9e64", "driver.d1": "#ff966c",
+	"driver.mariadb":   "#c49a6c",
+	"driver.cassandra": "#73daca", "driver.dynamodb": "#ff9e64",
+	"driver.redshift": "#7dcfff", "driver.greenplum": "#9ece6a", "driver.vertica": "#bb9af7", "driver.singlestore": "#ff9e64",
 }
 
 var lightPalette = map[string]string{
@@ -51,21 +56,122 @@ var lightPalette = map[string]string{
 	"status_bg": "#dfe3f0", "status_fg": "#2c3250", "prefix_bg": "#a8680a", "prefix_fg": "#ffffff", "popup_bg": "#eceff8",
 	"tag.local": "#3a7d0a", "tag.testing": "#007c91", "tag.development": "#2e5cb8", "tag.staging": "#a8680a", "tag.production": "#c4264a",
 	"driver.postgres": "#2e5cb8", "driver.mysql": "#a8680a", "driver.clickhouse": "#8a6d00", "driver.redis": "#c4264a", "driver.mongodb": "#3a7d0a",
-	"driver.mariadb": "#7a5a2e", "driver.cockroachdb": "#7b3fc4", "driver.sqlite": "#007c91", "driver.duckdb": "#8a6d00",
-	"driver.cassandra": "#1a7a66", "driver.dynamodb": "#b25000", "driver.d1": "#b24a1a",
+	"driver.mariadb":   "#7a5a2e",
+	"driver.cassandra": "#1a7a66", "driver.dynamodb": "#b25000",
+	"driver.redshift": "#007c91", "driver.greenplum": "#3a7d0a", "driver.vertica": "#7b3fc4", "driver.singlestore": "#b25000",
+}
+
+// variant is base with over laid on top.
+func variant(base, over map[string]string) map[string]string {
+	out := make(map[string]string, len(base))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range over {
+		out[k] = v
+	}
+	return out
+}
+
+// namedPalettes are the built-in themes beside dark and light.
+var namedPalettes = map[string]map[string]string{
+	"silver-dark": variant(darkPalette, map[string]string{
+		"dim": "#8b9099", "accent": "#c0c6d4", "border": "#3d4048", "header_bg": "#2b2e35", "selection": "#3c4150", "sel_cell": "#c0c6d4", "sel_cell_fg": "#1b1d22",
+		"alt_row": "#202328", "keyword": "#a9b4d0", "string": "#b5c7a5", "comment": "#5b6070", "number": "#d4b483", "status_bg": "#2b2e35", "status_fg": "#d6d9e0",
+		"prefix_bg": "#d4b483", "prefix_fg": "#1b1d22", "popup_bg": "#25282e", "modified_row": "#3a3a28", "new_row": "#26382c", "deleted_row": "#43282e"}),
+	"jade-dark": variant(darkPalette, map[string]string{
+		"dim": "#6f8f84", "accent": "#3fd9a0", "border": "#2a4a40", "header_bg": "#1d332c", "selection": "#1f4d3f", "sel_cell": "#3fd9a0", "sel_cell_fg": "#0b1b16",
+		"alt_row": "#14241f", "keyword": "#7ce3c3", "string": "#b9e07a", "comment": "#46695c", "number": "#ffbe6b", "status_bg": "#1d332c", "status_fg": "#cfeee3",
+		"prefix_bg": "#ffbe6b", "prefix_fg": "#0b1b16", "popup_bg": "#172b25", "modified_row": "#3b3a1c", "new_row": "#1c4030", "deleted_row": "#4a2530"}),
+	"polaris-dark": variant(darkPalette, map[string]string{
+		"dim": "#7d8fa3", "accent": "#7fd1ff", "border": "#2e4057", "header_bg": "#1f2d3f", "selection": "#2a4b6d", "sel_cell": "#7fd1ff", "sel_cell_fg": "#0d1824",
+		"alt_row": "#162231", "keyword": "#b4a7ff", "string": "#8fe3c8", "comment": "#53657a", "number": "#ffb48a", "status_bg": "#1f2d3f", "status_fg": "#d3e4f5",
+		"prefix_bg": "#ffd479", "prefix_fg": "#0d1824", "popup_bg": "#1a283a"}),
+	"sunset-dark": variant(darkPalette, map[string]string{
+		"dim": "#9c8a86", "accent": "#ff8c5a", "border": "#4a3436", "header_bg": "#33232a", "selection": "#5a3340", "sel_cell": "#ff8c5a", "sel_cell_fg": "#1f1216",
+		"alt_row": "#261a1f", "keyword": "#ff6f91", "string": "#f9c74f", "comment": "#6e5558", "number": "#ffa86b", "status_bg": "#33232a", "status_fg": "#f2dcd6",
+		"prefix_bg": "#f9c74f", "prefix_fg": "#1f1216", "popup_bg": "#2c1d23"}),
+	"sunset-light": variant(lightPalette, map[string]string{
+		"dim": "#8a7570", "accent": "#d9531e", "border": "#e0c9c0", "header_bg": "#f6e3da", "selection": "#fbd3c0", "sel_cell": "#d9531e", "sel_cell_fg": "#ffffff",
+		"alt_row": "#fcf1ec", "keyword": "#b3224f", "string": "#5e7d12", "comment": "#a78e86", "number": "#c2620a", "status_bg": "#f6e3da", "status_fg": "#4a2a22",
+		"prefix_bg": "#c2620a", "prefix_fg": "#ffffff", "popup_bg": "#faece5"}),
+}
+
+// termDark is what theme.name = "auto" resolves to: dark until the terminal reports a light background.
+var termDark = true
+
+// themeName normalises "Silver Dark" / "silver_dark" to "silver-dark".
+func themeName(n string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(strings.ToLower(strings.TrimSpace(n)), " ", "-"), "_", "-")
+}
+
+// themeFileColors reads the [theme.colors] table of an exported theme file.
+func themeFileColors(path string) (map[string]string, error) {
+	var f struct {
+		Theme struct {
+			Colors map[string]string `toml:"colors"`
+		} `toml:"theme"`
+	}
+	if _, err := toml.DecodeFile(path, &f); err != nil {
+		return nil, fmt.Errorf("theme file %s: %w", path, err)
+	}
+	return f.Theme.Colors, nil
+}
+
+// palette is the named palette, then the colors of theme.file, then the [theme.colors] overrides.
+func palette(t config.Theme) map[string]string {
+	name := themeName(t.Name)
+	if name == "auto" {
+		name = map[bool]string{true: "dark", false: "light"}[termDark]
+	}
+	base, ok := namedPalettes[name]
+	switch {
+	case ok:
+	case name == "light":
+		base = lightPalette
+	default:
+		base = darkPalette
+	}
+	pal := variant(base, nil)
+	if t.File != "" {
+		if c, err := themeFileColors(t.File); err == nil { // a bad file is reported once at startup (themeError)
+			pal = variant(pal, c)
+		}
+	}
+	return variant(pal, t.Colors)
+}
+
+// themeError is the problem with theme.file, "" when there is none.
+func themeError(t config.Theme) string {
+	if t.File == "" {
+		return ""
+	}
+	if _, err := themeFileColors(t.File); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// ThemeTOML is the resolved palette as a [theme.colors] table, ready to paste into config.toml.
+func ThemeTOML(t config.Theme) string {
+	pal := palette(t)
+	keys := make([]string, 0, len(pal))
+	for k := range pal {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("[theme.colors]\n")
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%q = %q\n", k, pal[k])
+	}
+	return b.String()
 }
 
 func NewTheme(t config.Theme) Theme {
-	base := darkPalette
-	if t.Name == "light" {
-		base = lightPalette
-	}
-	pal := make(map[string]string, len(base))
-	for k, v := range base {
-		pal[k] = v
-	}
-	for k, v := range t.Colors {
-		pal[k] = v
+	pal := palette(t)
+	if limitedColors() {
+		pal = ansi16(pal)
 	}
 	fg := func(k string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(pal[k])) }
 	bg := func(k string) lipgloss.Style { return lipgloss.NewStyle().Background(lipgloss.Color(pal[k])) }
@@ -142,4 +248,46 @@ func (t Theme) TagStyle(tag, color string) lipgloss.Style {
 		c = t.pal["dim"]
 	}
 	return lipgloss.NewStyle().Background(lipgloss.Color(c)).Foreground(lipgloss.Color("#1a1b26")).Bold(true)
+}
+
+// limitedColors: the terminal has no truecolor or 256-color support, so #rrggbb would be guessed badly.
+// WEBTUIDB_COLORS=16 forces the 16-color palette, any other value (truecolor, 256) forbids it.
+func limitedColors() bool {
+	if v := os.Getenv("WEBTUIDB_COLORS"); v != "" {
+		return v == "16"
+	}
+	ct, term := os.Getenv("COLORTERM"), os.Getenv("TERM")
+	if ct != "" || term == "" || term == "dumb" {
+		return false
+	}
+	for _, rich := range []string{"256", "direct", "truecolor", "kitty", "ghostty", "wezterm", "alacritty"} {
+		if strings.Contains(term, rich) {
+			return false
+		}
+	}
+	return true
+}
+
+// ansiRGB are the 16 ANSI colors as most terminals draw them.
+var ansiRGB = [16][3]int{{0, 0, 0}, {205, 49, 49}, {13, 188, 121}, {229, 229, 16}, {36, 114, 200}, {188, 63, 188}, {17, 168, 205}, {229, 229, 229},
+	{102, 102, 102}, {241, 76, 76}, {35, 209, 139}, {245, 245, 67}, {59, 142, 234}, {214, 112, 214}, {41, 184, 219}, {255, 255, 255}}
+
+// ansi16 maps every #rrggbb color of pal to the nearest of the 16 ANSI colors ("0".."15").
+func ansi16(pal map[string]string) map[string]string {
+	out := make(map[string]string, len(pal))
+	for k, v := range pal {
+		var r, g, b int
+		if _, err := fmt.Sscanf(v, "#%02x%02x%02x", &r, &g, &b); err != nil {
+			out[k] = v
+			continue
+		}
+		best, bd := 0, 1<<30
+		for i, c := range ansiRGB {
+			if d := (r-c[0])*(r-c[0]) + (g-c[1])*(g-c[1]) + (b-c[2])*(b-c[2]); d < bd {
+				best, bd = i, d
+			}
+		}
+		out[k] = strconv.Itoa(best)
+	}
+	return out
 }

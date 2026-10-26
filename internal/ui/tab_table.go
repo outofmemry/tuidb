@@ -44,6 +44,8 @@ type tableTab struct {
 	grid        *Grid
 	cols        []db.Column
 	filters     db.FilterSet
+	appliedSet  db.FilterSet // what the grid was last loaded with: the bar edits t.filters on every keystroke
+	hasApplied  bool
 	showFilters bool
 	hidden      map[string]bool
 	sort        []db.Sort
@@ -97,6 +99,7 @@ func newTableTab(ws *Workspace, id int, ref db.ObjRef) *tableTab {
 	cfg := ws.a.d.Cfg.Table
 	if ts := ws.a.d.State.Table(t.stateKey()); ts.Sort != nil || len(ts.Filters.Filters) > 0 || len(ts.Hidden) > 0 {
 		t.sort, t.filters, t.showFilters = ts.Sort, ts.Filters, ts.ShowBar
+		t.markApplied()
 		for _, h := range ts.Hidden {
 			t.hidden[h] = true
 		}
@@ -186,6 +189,39 @@ type ddlLoadedMsg struct {
 	err error
 }
 
+// pruneHidden forgets hidden columns the table no longer has (renamed or dropped since the state was
+// saved); left in, they miscount the visible columns and keep a keyless grid read-only.
+func (t *tableTab) pruneHidden() {
+	if len(t.hidden) == 0 || len(t.cols) == 0 {
+		return
+	}
+	have := map[string]bool{}
+	for _, c := range t.cols {
+		have[c.Name] = true
+	}
+	pruned := false
+	for h := range t.hidden {
+		if !have[h] {
+			delete(t.hidden, h)
+			pruned = true
+		}
+	}
+	if pruned {
+		t.saveState()
+	}
+}
+
+// hiddenCount is how many of the table's columns are hidden.
+func (t *tableTab) hiddenCount() int {
+	n := 0
+	for _, c := range t.cols {
+		if t.hidden[c.Name] {
+			n++
+		}
+	}
+	return n
+}
+
 func (t *tableTab) visibleCols() []string {
 	if len(t.hidden) == 0 || len(t.cols) == 0 {
 		return nil
@@ -199,8 +235,23 @@ func (t *tableTab) visibleCols() []string {
 	return out
 }
 
+// applied is the filter set the grid shows (typed-but-unapplied edits excluded); exports and
+// bulk updates use it so they never act on rows the user cannot see.
+func (t *tableTab) applied() db.FilterSet {
+	if t.hasApplied {
+		return t.appliedSet
+	}
+	return t.filters
+}
+
+// markApplied snapshots the filters the next load runs with.
+func (t *tableTab) markApplied() {
+	t.appliedSet = db.FilterSet{Filters: append([]db.Filter(nil), t.filters.Filters...), Or: t.filters.Or}
+	t.hasApplied = true
+}
+
 func (t *tableTab) query() db.RowQuery {
-	return db.RowQuery{ObjRef: t.ref, Filters: t.filters, Sort: t.sort, Limit: t.limit, Offset: t.offset, Columns: t.visibleCols()}
+	return db.RowQuery{ObjRef: t.ref, Filters: t.applied(), Sort: t.sort, Limit: t.limit, Offset: t.offset, Columns: t.visibleCols()}
 }
 
 // load fetches rows, count and (unless cached) column metadata in parallel: a remote server costs
@@ -213,6 +264,7 @@ func (t *tableTab) load() tea.Cmd {
 	t.seq++
 	if t.cols == nil {
 		t.cols = t.ws.meta[t.ref]
+		t.pruneHidden()
 	}
 	if t.cols != nil {
 		t.applyDefaultSort()
@@ -242,7 +294,7 @@ func (t *tableTab) needColsFirst() bool {
 	if len(t.hidden) > 0 {
 		return true
 	}
-	for _, f := range t.filters.Active() {
+	for _, f := range t.applied().Active() {
 		if f.Column == db.AnyColumn {
 			return true
 		}
@@ -304,7 +356,7 @@ func (t *tableTab) CancelWork() tea.Cmd {
 	return t.ws.a.say("load of %s cancelled", t.ref.Name)
 }
 
-func (t *tableTab) loadCount() tea.Cmd { return t.countCmd(len(t.filters.Active()) == 0) }
+func (t *tableTab) loadCount() tea.Cmd { return t.countCmd(len(t.applied().Active()) == 0) }
 
 // loadCountExact replaces an estimated row count with a real COUNT.
 func (t *tableTab) loadCountExact() tea.Cmd {
@@ -335,6 +387,7 @@ func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		t.cols = m.cols
+		t.pruneHidden()
 		t.applyDefaultSort()
 		if t.waitCols && m.seq == t.seq {
 			t.waitCols = false
@@ -376,6 +429,7 @@ func (t *tableTab) Handle(msg tea.Msg) tea.Cmd {
 		}
 		t.structErr = ""
 		t.cols = mergeFKs(m.cols, m.fks)
+		t.pruneHidden()
 		t.ws.meta[t.ref] = t.cols
 		t.buildStructure(m)
 		t.applyCols()
@@ -480,7 +534,7 @@ func (t *tableTab) keyVisible(shown []db.ResultColumn) bool {
 			}
 		}
 	}
-	return hasPK || len(t.hidden) == 0
+	return hasPK || t.hiddenCount() == 0
 }
 
 // ---- input ------------------------------------------------------------------------------
@@ -658,11 +712,11 @@ func (t *tableTab) quickLook() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	text := plain(v)
-	if b, ok := v.([]byte); ok {
-		text = hexDump(b)
+	var save func([]byte) tea.Cmd
+	if t.grid.Editable {
+		save = func(b []byte) tea.Cmd { t.grid.SetCell(b); return nil }
 	}
-	t.ws.a.push(newQuickLook(t.grid.Cols[t.grid.col].Name, text))
+	t.ws.a.push(t.ws.a.newQuickLookValue(t.grid.Cols[t.grid.col].Name, v, save))
 	return nil
 }
 
@@ -754,8 +808,18 @@ func (t *tableTab) Action(name string) (bool, tea.Cmd) {
 		}
 	case "apply_filters":
 		return true, t.applyFilters()
+	case "filter_sql":
+		return true, t.showFilterSQL()
 	case "columns":
 		return true, t.columnsPicker()
+	case "sort_columns":
+		return true, t.sortColumns()
+	case "bulk_update":
+		return true, t.bulkUpdate()
+	case "hide_column":
+		return true, t.hideColumn()
+	case "show_all_columns":
+		return true, t.showAllColumns()
 	case "quick_filter":
 		return true, t.quickFilter()
 	case "follow_fk":
@@ -813,7 +877,7 @@ func (t *tableTab) copy(text, what string) tea.Cmd {
 	if text == "" {
 		return nil
 	}
-	return tea.Batch(tea.SetClipboard(text), t.ws.a.say("copied %s", what))
+	return tea.Batch(setClip(text), t.ws.a.say("copied %s", what))
 }
 
 func (t *tableTab) setValueMenu() tea.Cmd {
@@ -824,10 +888,8 @@ func (t *tableTab) setValueMenu() tea.Cmd {
 	if t.ws.caps.Dialect == "clickhouse" {
 		items[3].Value = db.Expr("now()")
 	}
-	t.ws.a.push(&pickerDlg{title: "Set value", items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
-		t.grid.SetCell(it.Value)
-		return nil
-	}})
+	items = append(items, setValueExtras()...)
+	t.ws.a.push(&pickerDlg{title: "Set value", items: items, onPick: func(it pickItem, _ bool) tea.Cmd { return t.ws.a.pickSetValue(t.grid, it.Value) }})
 	return nil
 }
 
@@ -907,7 +969,7 @@ func (t *tableTab) Commit() tea.Cmd {
 		return t.ws.a.fail(err)
 	}
 	send := func() tea.Cmd {
-		return t.ws.execute(stmts, func(err error) tea.Cmd {
+		return t.ws.executeWith(t.preimage(), stmts, func(err error) tea.Cmd {
 			if err != nil || t.closed {
 				return nil
 			}
@@ -922,6 +984,14 @@ func (t *tableTab) Commit() tea.Cmd {
 		return nil
 	}
 	return send()
+}
+
+// preimage is the CSV of the keys about to be changed, when general.log_original_values is on.
+func (t *tableTab) preimage() string {
+	if !t.ws.a.d.Cfg.General.LogOriginalValues {
+		return ""
+	}
+	return db.Preimage(t.grid.Changes(t.ref))
 }
 
 // keylessWrites: an update or delete is pending on a table without a primary key.
@@ -951,6 +1021,9 @@ func (t *tableTab) DetailKey(key string) tea.Cmd {
 	g := t.grid
 	if detailMove(g, key) {
 		return nil
+	}
+	if key == "/" {
+		return t.searchField()
 	}
 	if key == "enter" {
 		if !g.Editable || g.cur() == nil || g.cur().State == rowDeleted {
@@ -989,7 +1062,7 @@ func (t *tableTab) Detail() []string {
 		if r.Dirty[i] {
 			mark = "*"
 		}
-		out = append(out, fmt.Sprintf("%s%s: %s", mark, c.Name, cellText(r.Cur[i])), "")
+		out = append(out, fmt.Sprintf("%s%s: %s", mark, c.Name, detailText(r.Cur[i])), "")
 	}
 	return out
 }
