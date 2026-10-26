@@ -568,40 +568,53 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
       )}
       {view === 'data' && (
         <div className="toolbar bg-canvas border-b-0! border-t border-rule text-[12px] text-ink-2">
-          <button disabled={offset === 0} onClick={() => change<number>(setOffset)(Math.max(0, offset - limit))} aria-label="Previous page">Prev</button>
-          <span><span className="font-mono text-ink">{from}–{to}</span>{total ? <> of <span className="font-mono text-ink">{total.exact ? '' : '~'}{total.n}</span></> : ''}</span>
-          <button disabled={!res || res.cells.length < limit} onClick={() => change<number>(setOffset)(offset + limit)} aria-label="Next page">Next</button>
-          {total && !total.exact && <button className="btn-ghost" onClick={() => setExact(true)}>Count exactly</button>}
-          <label className="text-ink-2">Rows per page <input type="number" min={1} style={{ width: 70 }} defaultValue={limit}
-            onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== limit) change<number>(setLimit)(n) }} /></label>
-          {res?.truncated && <span className="text-ink-2">Stopped at the row limit.</span>}
-          {rowsQ.isFetching && <span className="text-ink-2">Loading…</span>}
+          <button disabled={offset === 0} onClick={() => change<number>(setOffset)(Math.max(0, offset - limit))} aria-label="Previous page" title="Previous page">‹ Prev</button>
+          <span className="tabular-nums"><span className="text-ink">{from.toLocaleString()}–{to.toLocaleString()}</span>{total ? <> of <span className="text-ink" title={total.exact ? 'Exact count' : 'Estimated from the table statistics'}>{total.exact ? '' : '≈'}{total.n.toLocaleString()}</span></> : ''}</span>
+          <button disabled={!res || res.cells.length < limit} onClick={() => change<number>(setOffset)(offset + limit)} aria-label="Next page" title="Next page">Next ›</button>
+          {total && !total.exact && <button className="btn-ghost" onClick={() => setExact(true)} title="Run a COUNT(*) instead of the estimate">Count exactly</button>}
+          {total && limit > 0 && total.n > limit && <span className="text-ink-3">page {Math.floor(offset / limit) + 1}{total.exact ? ` of ${Math.max(1, Math.ceil(total.n / limit)).toLocaleString()}` : ''}</span>}
+          <span className="flex-1 min-w-0" />
+          {res?.truncated && <span className="chip border-edit text-edit">stopped at the row limit</span>}
+          {rowsQ.isFetching && <span className="text-ink-3">Loading…</span>}
+          <label className="flex items-center gap-1.5 text-ink-2">Rows per page <input className="w-[72px] text-right" type="number" min={1} aria-label="Rows per page" defaultValue={limit} key={limit}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== limit) change<number>(setLimit)(n) }} /></label>
         </div>
       )}
       {plan && <PlanDialog sid={sid} plan={plan} onClose={() => setPlan(null)} onApplied={() => applied(planOwn)} />}
-      {dlg === 'export' && <ExportDialog sid={sid} notify={notify} onClose={() => setDlg('')} source={{ mode: 'table', ref: obj, filters, sort, columns: hidden.length ? visible : [], limit, offset }} />}
+      {dlg === 'export' && <ExportDialog sid={sid} notify={notify} onClose={() => setDlg('')} source={{ mode: 'table', ref: obj, filters: expFilters ?? filters, sort, columns: hidden.length ? visible : [], limit: expFilters ? 0 : limit, offset: expFilters ? 0 : offset }} />}
       {dlg === 'import' && <ImportDialog sid={sid} table={obj} notify={notify} onClose={() => setDlg('')} onDone={() => setNonce((n) => n + 1)} />}
-      {hmenu && <TabMenu x={hmenu.x} y={hmenu.y} onClose={() => setHmenu(null)} items={[
-        ...(visible.length > 1 ? [['Hide this column', () => change<string[]>(setHidden)([...hidden, hmenu.col])] as [string, () => void]] : []),
-        ...(hidden.length ? [['Show all columns', () => change<string[]>(setHidden)([])] as [string, () => void]] : []),
-        ['Sort by several columns…', () => setDlg('sort')]]} />}
+      {hmenu && <ItemMenu x={hmenu.x} y={hmenu.y} label={`Column ${hmenu.col}`} onClose={() => setHmenu(null)} items={menuItems(listOf(meta.menus, 'header'), {}).filter((it) => it.action !== 'show_all_columns' || hidden.length > 0)} onPick={(it) => colAct(it.action, hmenu.col)} />}
+      {cmenu && <ItemMenu x={cmenu.x} y={cmenu.y} label="Cell menu" onClose={() => setCmenu(null)} items={menuItems(listOf(meta.menus, 'grid'), { editable: !!res?.editable && !stale })} onPick={(it) => { const f = keyActions[it.action]; if (f) f(); else notify(`${it.label}: not available here`) }} />}
       {dlg === 'setvalue' && selRow && res && <SetValueDialog sid={sid} schema={obj.Schema} col={res.columns[cc()].name} dialect={info.caps.Dialect} onClose={() => setDlg('')} onPick={(v) => { setDlg(''); onEdit(selRow.key, res.columns[cc()].name, v) }} />}
       {dlg === 'bulk' && res && <BulkUpdateDialog sid={sid} obj={obj} filters={filters} columns={colNames} onPlan={toolPlan} onClose={() => setDlg('')} />}
-      {dlg === 'sort' && <SortDialog columns={colNames} sort={sort} onClose={() => setDlg('')} onApply={(v) => { setDlg(''); change<Sort[]>(setSort)(v) }} />}
+      {dlg === 'sort' && <SortDialog columns={colNames} sort={sort} onClose={() => setDlg('')} onApply={(v) => { setDlg(''); change<Sort[]>(setSortChosen)(v) }} />}
       {dlg === 'page' && <PageDialog limit={limit} offset={offset} onClose={() => setDlg('')} onApply={async (l, o) => { setDlg(''); if (await guard()) { clearPending(); setLimit(l); setOffset(o) } }} />}
       {dlg === 'copyas' && <CopyAsDialog onClose={() => setDlg('')} onPick={(f) => { setDlg(''); copyRows(f) }} />}
+      {dlg === 'cellsas' && <CopyAsDialog onClose={() => setDlg('')} onPick={(f) => { setDlg(''); copyCellsAs(f) }} />}
     </div>
   )
 }
 
-function ColumnsMenu({ all, hidden, onChange, menuRef }: { all: string[]; hidden: string[]; onChange: (h: string[]) => void; menuRef?: React.Ref<HTMLDetailsElement> }) {
+function ColumnsMenu({ all, hidden, onChange, menuRef }: { all: string[]; hidden: string[]; onChange: (h: string[]) => void; menuRef?: React.RefObject<HTMLDetailsElement | null> }) {
+  const [q, setQ] = useState('')
+  useEffect(() => { // an outside click closes the menu, as every other popover does
+    const h = (e: MouseEvent) => { const d = menuRef?.current; if (d?.open && !d.contains(e.target as Node)) d.open = false }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [menuRef])
+  const shown = q ? all.filter((c) => c.toLowerCase().includes(q.toLowerCase())) : all
   return (
-    <details ref={menuRef} style={{ position: 'relative' }}>
-      <summary className="list-none border border-rule-2 rounded-[2px] font-mono px-[11px] py-1 leading-5 cursor-pointer hover:bg-raised [&::-webkit-details-marker]:hidden">Columns{hidden.length ? ` (${all.length - hidden.length}/${all.length})` : ''}</summary>
-      <div className="popover absolute z-20 mt-1 w-60 max-h-[300px] overflow-auto p-2">
-        {all.map((c) => (
-          <label key={c} className="flex items-center gap-1.5"><input type="checkbox" checked={!hidden.includes(c)} onChange={(e) => onChange(e.target.checked ? hidden.filter((h) => h !== c) : [...hidden, c])} />{c}</label>
-        ))}
+    <details ref={menuRef} className="relative" onKeyDown={(e) => { if (e.key === 'Escape' && menuRef?.current) { menuRef.current.open = false } }}>
+      <summary className={`list-none border rounded-[2px] font-mono px-[11px] py-1 leading-5 cursor-pointer hover:bg-raised select-none [&::-webkit-details-marker]:hidden ${hidden.length ? 'border-accent/60' : 'border-rule-2'}`} title="Choose the columns to show">Columns{hidden.length ? <span className="text-ink-2"> {all.length - hidden.length}/{all.length}</span> : ''}</summary>
+      <div className="popover motion-safe:animate-pop absolute z-20 mt-1 w-64 p-2 flex flex-col gap-1">
+        {all.length > 8 && <input className="w-full bg-canvas" placeholder="Find a column" aria-label="Find a column" value={q} onChange={(e) => setQ(e.target.value)} />}
+        <div className="flex gap-1 text-[11.5px]"><button className="btn-ghost" onClick={() => onChange([])} disabled={!hidden.length}>Show all</button><button className="btn-ghost" onClick={() => onChange(all.slice(1))} disabled={all.length < 2} title="Keep only the first column">Hide all</button></div>
+        <div className="max-h-[300px] overflow-auto">
+          {shown.map((c) => (
+            <label key={c} className="flex items-center gap-2 px-1 py-0.5 rounded-[2px] hover:bg-raised cursor-pointer"><input type="checkbox" checked={!hidden.includes(c)} disabled={!hidden.includes(c) && all.length - hidden.length <= 1} onChange={(e) => onChange(e.target.checked ? hidden.filter((h) => h !== c) : [...hidden, c])} /><span className="truncate">{c}</span></label>
+          ))}
+          {!shown.length && <div className="px-1 py-1 text-ink-2">No column matches.</div>}
+        </div>
       </div>
     </details>
   )
