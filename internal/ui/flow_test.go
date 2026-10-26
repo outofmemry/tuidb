@@ -890,6 +890,9 @@ func TestFlowHelpSearch(t *testing.T) {
 	h.prefix("?")
 	h.want("Key bindings")
 	h.want("Grid")
+	for i := 0; i < 4; i++ { // the Grid section fills the window; Global is further down
+		h.press("pgdown")
+	}
 	h.want("Global")
 	h.press("/")
 	h.typeText("comit") // fuzzy: typo still finds it
