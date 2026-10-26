@@ -239,8 +239,8 @@ func run() error {
 			return fmt.Errorf("--insecure-listen without authentication: set WEBTUIDB_PASSWORD or WEBTUIDB_TOKEN (or [web] password / --token), or WEBTUIDB_INSECURE=1 to accept an open server")
 		}
 		return web.Run(web.Options{
-			Cfg: cfg, Conns: conns, ConnPath: connPath, State: state, Hist: d.Hist, Queries: d.Queries,
-			Listen: *listen, Token: *token, Open: *openBrowser, Insecure: *insecure,
+			Cfg: cfg, Conns: conns, ConnPath: connPath, CfgPath: *cfgPath, State: state, Hist: d.Hist, Queries: d.Queries,
+			Listen: *listen, Token: *token, Open: *openBrowser, Insecure: *insecure, Version: versionString(),
 		})
 	}
 	app := ui.NewApp(d)
@@ -252,7 +252,16 @@ func run() error {
 		}
 		app.StartWith(c)
 	}
-	_, err = tea.NewProgram(app).Run()
+	// WithoutCatchPanics lets a panic in Update/View reach crashlog.Recover above; Kill restores the terminal first.
+	// shortcut: a panic inside a tea.Cmd goroutine is not on this stack and still ends the process without a log.
+	prog := tea.NewProgram(app, tea.WithoutCatchPanics())
+	defer func() {
+		if r := recover(); r != nil {
+			prog.Kill()
+			panic(r)
+		}
+	}()
+	_, err = prog.Run()
 	return err
 }
 
