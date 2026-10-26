@@ -217,22 +217,31 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
           const row = rows[v.index]
           const sel = selected === row.key
           const del = row.state === 'deleted', isNew = row.state === 'new'
+          const band = zebra && v.index % 2 === 1 ? ZEBRA : ''
           return (
-            <div key={row.key} className="group flex absolute left-0"
-              style={{ top: v.start, height: ROW_H, width }} role="row">
+            <div key={row.key} data-rk={row.key} className="group flex absolute left-0"
+              style={{ top: v.start, height: ROW_H, width }} role="row" aria-selected={sel}>
               <div className={`${CELL} ${LN} ${del ? 'line-through decoration-1' : ''} ${sel ? SEL_BG : 'bg-panel'} ${
-                isNew ? 'text-new font-bold shadow-[inset_3px_0_0_var(--new)]' : `${sel ? 'text-accent' : del ? 'text-del' : 'text-ink-3'} ${sel ? 'font-semibold shadow-[inset_3px_0_0_var(--accent)]' : ''}`}`} onClick={() => onSelect?.(row.key)}>{row.state === 'new' ? '+' : v.index + 1}</div>
+                isNew ? 'text-new font-bold shadow-[inset_3px_0_0_var(--new)]' : `${sel ? 'text-accent' : del ? 'text-del' : 'text-ink-3 group-hover:text-ink-2'} ${sel ? 'font-semibold shadow-[inset_3px_0_0_var(--accent)]' : ''}`}`} onClick={() => onSelect?.(row.key)}>{row.state === 'new' ? '+' : v.index + 1}</div>
               {columns.map((c, i) => {
                 const ed = edited?.[row.key]?.[c.name]
                 const val = show(ed, row.cells[i])
+                const kind = specialOf(ed, val, isNew)
+                const wkt = spatial && val ? cellWkt(val) : null
                 return (
-                  <div key={c.name} data-c={i} role="gridcell" className={`${CELL} ${del ? 'text-del line-through decoration-1' : val === null ? 'text-ink-3' : ''} ${
-                      ed !== undefined ? 'bg-[color-mix(in_srgb,var(--edit)_22%,var(--canvas))]' : sel ? SEL_BG : 'group-hover:bg-panel'} ${
-                      sel && col === i ? 'shadow-[inset_0_0_0_2px_var(--accent)]' : ed !== undefined ? 'shadow-[inset_0_-2px_0_var(--edit)]' : ''}`} style={{ width: COL_W }}
-                    title={clip(ed !== undefined ? `was: ${row.cells[i] ?? 'NULL'}` : (val ?? 'NULL'), 200)}
-                    onClick={() => { onSelect?.(row.key); setCol(i) }}
-                    onDoubleClick={() => open(row, i)}>
-                    {val === null ? 'NULL' : pretty ? prettyCell(val) : val}
+                  <div key={c.name} data-c={i} role="gridcell" aria-selected={sel && col === i} className={`${CELL} ${numeric[i] ? 'text-right' : ''} ${del ? `text-del line-through decoration-1 ${DEL_BG}` : kind ? 'text-ink-3 italic' : ''} ${
+                      ed !== undefined ? MOD_BG : sel || inRange(v.index, i) ? SEL_BG : isNew ? NEW_BG : band || 'group-hover:bg-panel'} ${
+                      sel && col === i ? CUR : ed !== undefined ? 'shadow-[inset_0_-2px_0_var(--edit)]' : ''}`} style={{ width: colW[i] }}
+                    title={clip(ed !== undefined ? `was: ${row.cells[i] ?? 'NULL'}` : (wkt ?? val ?? 'NULL'), 200)}
+                    onClick={(e) => {
+                      if (e.ctrlKey || e.metaKey) { onSelect?.(row.key); setCol(i); return open(row, i, true) } // ctrl+click: quick look (read only)
+                      if (e.shiftKey && curRow >= 0) { if (!anchor) setAnchor({ r: curRow, c: col }) } else setAnchor(null); onSelect?.(row.key); setCol(i)
+                    }}
+                    onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onSelect?.(row.key); setCol(i); open(row, i, true) } }} // middle-click: quick look
+                    onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
+                    onContextMenu={(e) => { if (!onCellMenu) return; e.preventDefault(); if (!inRange(v.index, i)) { setAnchor(null); onSelect?.(row.key); setCol(i) } onCellMenu(e.clientX, e.clientY) }}
+                    onDoubleClick={(e) => { e.stopPropagation(); open(row, i) }}>
+                    {kind === 'null' ? 'NULL' : kind === 'default' ? 'DEFAULT' : kind === 'empty' ? "''" : wkt ?? (pretty ? prettyCell(val!) : val)}
                   </div>
                 )
               })}
