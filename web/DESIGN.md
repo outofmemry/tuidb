@@ -1,9 +1,10 @@
 # Web UI design notes
 
 Styling is Tailwind v4 utility classes in the components. `web/src/styles.css` is the entry point:
-it holds the palette tokens, element defaults, the CodeMirror hooks and a handful of shared utilities
-(`btn-primary`, `btn-ghost`, `btn-danger`, `btn-on`, `popover`, `toolbar`). Don't add new semantic
-classes there; put utilities on the element.
+it holds the palette tokens (surface, ink, marks, accent and the `--syn-*` syntax colours the SQL
+editor reads through `components/cmtheme.ts`), element defaults, the CodeMirror hooks and a handful of
+shared utilities (`btn-primary`, `btn-ghost`, `btn-danger`, `btn-on`, `btn-icon`, `popover`,
+`menu-item`, `chip`, `toolbar`). Don't add new semantic classes there; put utilities on the element.
 
 Concept: the connection's colour runs the room.
 
