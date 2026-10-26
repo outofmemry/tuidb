@@ -56,7 +56,7 @@ export function MultiExportDialog({ sid, info, initial, onClose, notify }: { sid
   }
   return (
     <Dialog title="Export tables" onClose={() => { abort.current?.abort(); onClose() }}>
-      <div className="max-h-[36vh] overflow-auto border border-rule p-2 text-[12.5px]">
+      <div className="max-h-[36vh] overflow-auto border border-rule p-2 text-[12.5px]" role="group" aria-label="Tables to export" onKeyDown={(e) => enterSubmits(e, () => !busy && list.length > 0 && go())}>
         {schemas.map((s) => (
           <div key={s}>
             {info.caps.Schemas && <button className="btn-ghost" aria-expanded={open.has(s)} onClick={() => setOpen((o) => { const n = new Set(o); n.has(s) ? n.delete(s) : n.add(s); return n })}>{open.has(s) ? '▾' : '▸'} {s}</button>}
