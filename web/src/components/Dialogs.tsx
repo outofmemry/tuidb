@@ -68,6 +68,7 @@ export function Prompts() {
   const ok = () => done(req.kind === 'prompt' ? val : true)
   return (
     <Dialog title={req.title} onClose={cancel}>
+      {req.text && <pre className="m-0 mb-2 max-h-[40vh] overflow-auto whitespace-pre-wrap wrap-anywhere text-[12px]">{req.text}</pre>}
       {req.kind === 'prompt' && <input autoFocus className="w-full" type={req.secret ? 'password' : 'text'} autoComplete="off" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); ok() } }} />}
       <div className="flex justify-end gap-2 mt-[18px]">
         <button onClick={cancel}>Cancel</button>
