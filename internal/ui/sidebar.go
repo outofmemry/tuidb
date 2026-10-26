@@ -24,6 +24,7 @@ const (
 	sbQuery
 	sbHistory
 	sbFolder // a Redis key prefix such as "user:"
+	sbColumn // a column under an expanded table (obj is the table, label the column, text its type)
 )
 
 type sbRow struct {
@@ -35,6 +36,7 @@ type sbRow struct {
 	h      store.HistoryEntry
 	star   bool
 	depth  int
+	group  string // the custom group whose section this row is in
 	label  string // object name relative to its folder
 	path   string // folder path, the key into sidebar.open
 	open   bool
@@ -59,6 +61,10 @@ type sidebar struct {
 	queries     []store.Query
 	hist        []store.HistoryEntry
 	histLoad    bool
+	cols        map[string]bool    // tables whose columns are shown (sidebar.show_columns), by objKey
+	qsort       string             // saved-queries order: name | created | modified
+	marks       map[string]bool    // multi-select (mark): objKey of the ticked tables
+	colsPending map[db.ObjRef]bool // column fetches in flight for expanded tables
 }
 
 func newSidebar(w *Workspace) *sidebar {
@@ -84,8 +90,10 @@ type prefetchMsg struct {
 }
 
 func (s *sidebar) load() tea.Cmd {
+	s.marks = nil // marks are keyed schema.name: they must not outlive a reload or a database switch
 	s.loading = true
 	w, schema, hasSchemas := s.w, s.schema, s.w.caps.Schemas
+	lazy, sysOK := w.a.d.Cfg.Sidebar.LazyLoad, w.a.d.Cfg.Sidebar.LoadSystemSchemas
 	s.loadSeq++
 	seq := s.loadSeq
 	// Schemas and objects in parallel; the database list (only used by Open Anything) arrives on
@@ -98,7 +106,24 @@ func (s *sidebar) load() tea.Cmd {
 			wg.Add(1)
 			go func() { defer wg.Done(); m.schemas, schemaErr = sess.Schemas(ctx) }()
 		}
-		m.objs, m.err = sess.Objects(ctx, schema)
+		if !lazy && hasSchemas { // lazy_load = false: every schema's objects up front
+			wg.Wait()
+			if schemaErr == nil {
+				for _, sc := range m.schemas {
+					if !sysOK && sc != schema && isSystemSchema(sc) {
+						continue
+					}
+					os, err := sess.Objects(ctx, sc)
+					if err != nil {
+						m.err = err
+						break
+					}
+					m.objs = append(m.objs, os...)
+				}
+			}
+		} else {
+			m.objs, m.err = sess.Objects(ctx, schema)
+		}
 		wg.Wait()
 		if m.err == nil {
 			m.err = schemaErr
@@ -123,14 +148,29 @@ func (s *sidebar) handle(msg tea.Msg) tea.Cmd {
 			s.err = m.err.Error()
 			return s.w.a.fail(m.err)
 		}
-		s.err, s.objs, s.schemas = "", m.objs, m.schemas
-		defer s.step(0)
+		keepID := s.selectedID() // the list is re-sorted: the cursor follows the item, not the position
+		s.colsPending = nil
+		s.err, s.objs, s.schemas = "", m.objs, nil
+		for _, sc := range m.schemas {
+			if s.keepSchema(sc) {
+				s.schemas = append(s.schemas, sc)
+			}
+		}
 		sort.SliceStable(s.objs, func(i, j int) bool {
 			if s.objs[i].Kind != s.objs[j].Kind {
 				return kindOrder(s.objs[i].Kind) < kindOrder(s.objs[j].Kind)
 			}
 			return strings.ToLower(s.objs[i].Name) < strings.ToLower(s.objs[j].Name)
 		})
+		s.selectID(keepID)
+		return s.fetchMissingCols() // expanded tables whose columns a reload dropped
+	case colsMetaMsg:
+		delete(s.colsPending, m.ref)
+		if m.err != nil && s.cols[objKey(m.ref)] {
+			delete(s.cols, objKey(m.ref)) // fold it: "loading columns…" would never end
+			return s.w.a.fail(fmt.Errorf("columns of %s: %w", m.ref.Name, m.err))
+		}
+		return nil
 	case dbListMsg:
 		if m.err == nil {
 			s.dbs = m.dbs
@@ -161,6 +201,7 @@ func (s *sidebar) handle(msg tea.Msg) tea.Cmd {
 			}
 		}
 		s.w.tabs, s.w.cur, s.w.focusSB = nil, 0, true
+		s.w.m3.reset()
 		s.sel, s.top = 0, 0
 		s.w.forget(nil)
 		return tea.Batch(s.load(), s.w.a.say("now using %s", m.name))
@@ -169,6 +210,15 @@ func (s *sidebar) handle(msg tea.Msg) tea.Cmd {
 		return cmd
 	}
 	return nil
+}
+
+// keepSchema hides the server's own schemas unless [sidebar] load_system_schemas is set.
+func (s *sidebar) keepSchema(name string) bool {
+	return s.w.a.d.Cfg.Sidebar.LoadSystemSchemas || name == s.schema || !isSystemSchema(name)
+}
+
+func isSystemSchema(name string) bool {
+	return name == "information_schema" || name == "crdb_internal" || strings.HasPrefix(name, "pg_")
 }
 
 func kindOrder(k db.Kind) int {
@@ -237,7 +287,11 @@ func (s *sidebar) rows() []sbRow {
 	var out []sbRow
 	switch s.tab {
 	case 1:
-		for _, x := range s.queries {
+		qs := append([]store.Query(nil), s.queries...)
+		if s.qsort != "" {
+			store.SortQueries(qs, s.qsort)
+		}
+		for _, x := range qs {
 			if _, ok := matchName(q, x.Name, true); ok {
 				out = append(out, sbRow{kind: sbQuery, q: x})
 			}
@@ -318,6 +372,18 @@ func (s *sidebar) rows() []sbRow {
 		s.flattenKeys(buildKeyTree(s.objs), 0, &out)
 		return out
 	}
+	for _, g := range s.w.a.d.State.Groups(s.w.conn.Name) { // custom groups sit above the kind sections
+		var rows []sbRow
+		for _, k := range g.Items {
+			if o, ok := byKey[k]; ok && visible(o) {
+				rows = append(rows, sbRow{kind: sbObject, obj: o, star: pinned[k], group: g.Name})
+			}
+		}
+		if len(rows) > 0 {
+			out = appendSection(out, sbRow{kind: sbHeader, text: "▣ " + g.Name, count: len(rows)})
+			out = append(out, rows...)
+		}
+	}
 	counts := map[db.Kind]int{}
 	for _, o := range s.objs {
 		if visible(o) {
@@ -336,8 +402,107 @@ func (s *sidebar) rows() []sbRow {
 			section = o.Kind
 		}
 		out = append(out, sbRow{kind: sbObject, obj: o, star: pinned[objKey(o.ObjRef)]})
+		out = s.columnRows(out, o)
 	}
 	return out
+}
+
+// columnRows lists the columns of an expanded table (sidebar.show_columns): fetched when first expanded.
+func (s *sidebar) columnRows(out []sbRow, o db.Object) []sbRow {
+	if !s.cols[objKey(o.ObjRef)] {
+		return out
+	}
+	cols, ok := s.w.meta[o.ObjRef]
+	if !ok {
+		return append(out, sbRow{kind: sbHeader, text: "   loading columns…"})
+	}
+	cols = append([]db.Column(nil), cols...)
+	if s.w.a.d.Cfg.Sidebar.SortColumns {
+		sort.SliceStable(cols, func(i, j int) bool { return strings.ToLower(cols[i].Name) < strings.ToLower(cols[j].Name) })
+	}
+	for _, c := range cols {
+		out = append(out, sbRow{kind: sbColumn, obj: o, label: c.Name, text: c.Type, depth: 1})
+	}
+	return out
+}
+
+// toggleColumns expands or folds the columns under the selected table.
+func (s *sidebar) toggleColumns() tea.Cmd {
+	r, ok := s.current()
+	if !ok || r.kind != sbObject || !s.w.a.d.Cfg.Sidebar.ShowColumns {
+		return nil
+	}
+	switch r.obj.Kind {
+	case db.KindTable, db.KindView, db.KindMatView:
+	default:
+		return nil
+	}
+	if s.cols == nil {
+		s.cols = map[string]bool{}
+	}
+	k := objKey(r.obj.ObjRef)
+	s.cols[k] = !s.cols[k]
+	if _, cached := s.w.meta[r.obj.ObjRef]; !s.cols[k] || cached {
+		return nil
+	}
+	return s.fetchCols(r.obj.ObjRef)
+}
+
+// fetchCols loads the columns of ref for the expanded view (one fetch per table at a time).
+func (s *sidebar) fetchCols(ref db.ObjRef) tea.Cmd {
+	if s.colsPending[ref] {
+		return nil
+	}
+	if s.colsPending == nil {
+		s.colsPending = map[db.ObjRef]bool{}
+	}
+	s.colsPending[ref] = true
+	caps := s.w.caps
+	return s.w.async(-1, func(ctx context.Context, sess db.Session) tea.Msg {
+		cols, err := fetchColumns(ctx, sess, caps, ref)
+		return colsMetaMsg{ref: ref, cols: cols, err: err}
+	})
+}
+
+// fetchMissingCols re-requests the columns of every expanded table whose metadata was dropped
+// (a commit or a reload clears it), so the rows never stay on "loading columns…".
+func (s *sidebar) fetchMissingCols() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, o := range s.objs {
+		if !s.cols[objKey(o.ObjRef)] {
+			continue
+		}
+		if _, ok := s.w.meta[o.ObjRef]; !ok {
+			cmds = append(cmds, s.fetchCols(o.ObjRef))
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+// rowID names the row under the cursor independent of its position.
+func rowID(r sbRow) string {
+	return fmt.Sprintf("%d|%s|%s|%s|%s|%s", r.kind, objKey(r.obj.ObjRef), r.label, r.path, r.q.Path, r.h.ID)
+}
+
+// selectedID is the identity of the selected row ("" when none).
+func (s *sidebar) selectedID() string {
+	if r, ok := s.current(); ok {
+		return rowID(r)
+	}
+	return ""
+}
+
+// selectID moves the cursor onto the row with that identity, else onto the nearest selectable row.
+func (s *sidebar) selectID(id string) {
+	if id != "" {
+		for i, r := range s.rows() {
+			if r.kind != sbHeader && rowID(r) == id {
+				s.sel = i
+				return
+			}
+		}
+	}
+	s.step(0)
 }
 
 // appendSection adds a section header, after a blank spacer row when a section came before it.
@@ -396,12 +561,18 @@ func (s *sidebar) switchTab(t int) tea.Cmd {
 }
 
 func (s *sidebar) input(msg tea.Msg) tea.Cmd {
+	return tea.Batch(s.handleInput(msg), s.fetchMissingCols())
+}
+
+func (s *sidebar) handleInput(msg tea.Msg) tea.Cmd {
 	if s.searching {
 		if k, ok := msg.(tea.KeyPressMsg); ok {
 			switch k.Keystroke() {
 			case "esc":
+				id := s.selectedID() // sel indexes the filtered list: keep the same item selected
 				s.searching = false
 				s.q.Set("")
+				s.selectID(id)
 				return nil
 			case "enter":
 				s.searching = false
@@ -490,6 +661,7 @@ func (s *sidebar) key(k string) tea.Cmd {
 		s.searching = true
 	case "esc":
 		s.q.Set("")
+		s.marks = nil
 	case "1":
 		return s.switchTab(0)
 	case "2":
@@ -509,6 +681,8 @@ func (s *sidebar) key(k string) tea.Cmd {
 	case "space":
 		if r, ok := s.current(); ok && r.kind == sbFolder {
 			s.open[r.path] = !s.open[r.path]
+		} else if ok && r.kind == sbObject {
+			return s.toggleColumns()
 		}
 	case "enter":
 		return s.activate(false)
@@ -524,6 +698,12 @@ func (s *sidebar) key(k string) tea.Cmd {
 		return s.pickSchema()
 	case "r":
 		return s.load()
+	case "S":
+		return s.sortOrSave()
+	case "i":
+		return s.importFile()
+	case "f":
+		return s.openFile()
 	}
 	return nil
 }
@@ -539,7 +719,7 @@ func (s *sidebar) activate(newTab bool) tea.Cmd {
 			return s.w.openObject(r.obj.ObjRef, false)
 		}
 		s.open[r.path] = !s.open[r.path]
-	case sbObject:
+	case sbObject, sbColumn:
 		return s.w.openObject(r.obj.ObjRef, newTab)
 	case sbQuery:
 		return s.w.openSaved(r.q)
@@ -592,6 +772,10 @@ func (s *sidebar) action(name string) (bool, tea.Cmd) {
 		return true, s.adminOp(db.OpDropObject)
 	case "truncate":
 		return true, s.adminOp(db.OpTruncate)
+	case "mark":
+		return true, s.toggleMark()
+	case "new_schema":
+		return true, s.newSchema()
 	}
 	return false, nil
 }
@@ -626,7 +810,20 @@ func (s *sidebar) menu() tea.Cmd {
 		items = append(items, pickItem{Label: "Copy script: TRUNCATE", Value: "script:truncate"}, pickItem{Label: "Copy script: SELECT top 100", Value: "script:select100"},
 			pickItem{Label: "Clone…", Value: "clone"}, pickItem{Label: "Rename…", Value: "rename"}, pickItem{Label: "Truncate…", Value: "truncate"})
 	}
-	items = append(items, pickItem{Label: "Delete…", Value: "drop"}, pickItem{Label: "Pin / unpin", Value: "pin"})
+	items = append(items, pickItem{Label: "Delete…", Value: "drop"}, pickItem{Label: "Pin / unpin", Value: "pin"}, pickItem{Label: "Add to group…", Value: "group"})
+	if r.group != "" {
+		items = append(items, pickItem{Label: "Remove from group " + r.group, Value: "ungroup:" + r.group})
+	} else {
+		for _, g := range s.groupsOf(objKey(ref)) {
+			items = append(items, pickItem{Label: "Remove from group " + g, Value: "ungroup:" + g})
+		}
+	}
+	if isTable {
+		items = append(items, pickItem{Label: "Diagram", Value: "diagram"})
+	}
+	if s.w.caps.Schemas {
+		items = append(items, pickItem{Label: "New schema…", Value: "newschema"}, pickItem{Label: "Drop schema…", Value: "dropschema"})
+	}
 	s.w.a.push(&pickerDlg{title: ref.Name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
 		v := it.Value.(string)
 		switch {
@@ -645,7 +842,7 @@ func (s *sidebar) menu() tea.Cmd {
 		case v == "triggers":
 			return s.w.triggerMenu(ref)
 		case v == "name":
-			return tea.Batch(tea.SetClipboard(ref.Name), s.w.a.say("copied %s", ref.Name))
+			return tea.Batch(setClip(ref.Name), s.w.a.say("copied %s", ref.Name))
 		case strings.HasPrefix(v, "script:"):
 			kind := db.ScriptKind(strings.TrimPrefix(v, "script:"))
 			return s.w.async(-1, func(ctx context.Context, sess db.Session) tea.Msg {
@@ -662,6 +859,16 @@ func (s *sidebar) menu() tea.Cmd {
 			return s.adminOp(db.OpTruncate)
 		case v == "drop":
 			return s.adminOp(db.OpDropObject)
+		case v == "group":
+			return s.addToGroup(ref)
+		case strings.HasPrefix(v, "ungroup:"):
+			return s.removeFromGroup(ref, strings.TrimPrefix(v, "ungroup:"))
+		case v == "diagram":
+			return s.w.diagramAction(ref.Name)
+		case v == "newschema":
+			return s.newSchema()
+		case v == "dropschema":
+			return s.dropSchema()
 		}
 		return nil
 	}})
@@ -767,6 +974,9 @@ type scriptMsg struct {
 
 func (s *sidebar) queryMenu(q store.Query) tea.Cmd {
 	items := []pickItem{{Label: "Open in new tab", Value: "open"}, {Label: "Run", Value: "run"}, {Label: "Copy", Value: "copy"}, {Label: "Delete…", Value: "delete"}}
+	if q.Shared { // a shared folder is read-only
+		items = items[:3]
+	}
 	s.w.a.push(&pickerDlg{title: q.Name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
 		switch it.Value.(string) {
 		case "open":
@@ -778,7 +988,7 @@ func (s *sidebar) queryMenu(q store.Query) tea.Cmd {
 			}
 			return cmd
 		case "copy":
-			return tea.SetClipboard(q.SQL)
+			return setClip(q.SQL)
 		case "delete":
 			s.w.a.push(&confirmDlg{title: "Delete saved query " + q.Name + "?", yes: "Delete", danger: true, onYes: func() tea.Cmd {
 				if err := s.w.a.d.Queries.Delete(q.Path); err != nil {
@@ -794,6 +1004,9 @@ func (s *sidebar) queryMenu(q store.Query) tea.Cmd {
 }
 
 func (s *sidebar) adminOp(op db.AdminOp) tea.Cmd {
+	if refs := s.markedRefs(); len(refs) > 0 { // marked tables win over the one under the cursor
+		return s.adminMany(op, refs)
+	}
 	r, ok := s.current()
 	if !ok || r.kind != sbObject {
 		return nil
@@ -891,8 +1104,14 @@ func (s *sidebar) title(th Theme) string {
 }
 
 func (s *sidebar) hint(th Theme) string {
-	if s.tab != 0 {
-		return th.chips("↵", "open", "m", "menu")
+	switch s.tab {
+	case 1:
+		return th.chips("↵", "open", "S", "sort", "i", "import .sql", "f", "open file")
+	case 2:
+		return th.chips("↵", "open", "S", "save as", "i", "import")
+	}
+	if len(s.marks) > 0 {
+		return th.chips(fmt.Sprint(len(s.marks)), "marked", "↵", "open", "m", "menu")
 	}
 	return th.chips("↵", "open", "/", "find", "m", "menu")
 }
@@ -963,6 +1182,9 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 			if r.star {
 				mark = th.Warn.Render("★")
 			}
+			if s.marks[objKey(r.obj.ObjRef)] {
+				mark = th.OK.Render("✓")
+			}
 			detail := ""
 			if r.obj.Detail != "" {
 				detail = th.Dim.Render(" " + r.obj.Detail)
@@ -971,7 +1193,19 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 			if r.label != "" {
 				name = r.label
 			}
-			line = fit(" "+strings.Repeat("  ", r.depth)+mark+objStyle(th, r.obj.Kind).Render(objIcon(r.obj.Kind))+" "+name+detail, W)
+			arrow := ""
+			if s.w.a.d.Cfg.Sidebar.ShowColumns && r.obj.Kind != db.KindFunction && r.obj.Kind != db.KindProcedure && r.obj.Kind != db.KindSequence && r.obj.Kind != db.KindType {
+				arrow = th.Dim.Render("▸ ")
+				if s.cols[objKey(r.obj.ObjRef)] {
+					arrow = th.Dim.Render("▾ ")
+				}
+			}
+			if !s.w.a.d.Cfg.Sidebar.LazyLoad && r.obj.Schema != "" && s.w.caps.Schemas {
+				name += th.Dim.Render(" " + r.obj.Schema)
+			}
+			line = fit(" "+strings.Repeat("  ", r.depth)+mark+arrow+objStyle(th, r.obj.Kind).Render(objIcon(r.obj.Kind))+" "+name+detail, W)
+		case sbColumn:
+			line = fit("     "+th.Dim.Render("· ")+r.label+th.Dim.Render("  "+r.text), W)
 		case sbFolder:
 			arrow := "▸"
 			if r.open {
@@ -987,7 +1221,11 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 			if len(r.q.Keywords) > 0 {
 				kw = th.Dim.Render("  " + strings.Join(r.q.Keywords, ", "))
 			}
-			line = fit(" "+th.Accent.Render("≡")+" "+name+kw, W)
+			icon := th.Accent.Render("≡")
+			if r.q.Shared {
+				icon = th.Dim.Render("⇄")
+			}
+			line = fit(" "+icon+" "+name+kw, W)
 		case sbHistory:
 			when := r.h.Time.Format("Jan 02")
 			if r.h.Time.Format(time.DateOnly) == time.Now().Format(time.DateOnly) { // today: the time is enough
