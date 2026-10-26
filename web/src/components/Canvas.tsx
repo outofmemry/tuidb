@@ -3,6 +3,8 @@
 // column onto another table to add a foreign key (the caller opens the add-foreign-key flow).
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DiagramTable, ObjRef } from '../utils/api'
+import { validColour } from '../utils/m13'
+import { copyText } from '../utils/copy'
 
 const BW = 230, HEAD = 28, ROWH = 20, GAP = 60
 type Pos = { x: number; y: number }
@@ -15,6 +17,8 @@ type Drag =
 const tk = (r: ObjRef) => r.Schema + '.' + r.Name
 const boxH = (t: DiagramTable) => HEAD + t.columns.length * ROWH + 6
 const hue = (t: DiagramTable) => (t.cluster * 67) % 360
+// a colour the user picked for a table (right-click) beats the cluster tint
+const edge = (t: DiagramTable, c?: string) => c ?? `hsl(${hue(t)} 55% 55%)`
 
 // tables of one FK cluster sit together, in rows of about sqrt(n) boxes
 function autoLayout(tables: DiagramTable[]): Record<string, Pos> {
