@@ -112,24 +112,67 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
   )
   const table = useReactTable({ data: rows, columns: defs, getCoreRowModel: getCoreRowModel(), manualSorting: true })
   const virt = useVirtualizer({ count: rows.length, getScrollElement: () => scroller.current, estimateSize: () => ROW_H, overscan: 12 })
-  const width = 48 + columns.length * COL_W
+  const [drag, setDrag] = useState<{ name: string; px: number } | null>(null)
+  // widths: a drag wins, then a saved width, then one sized from the first rows (computed once per column set, so paging does not shift the columns)
+  const auto = useMemo(() => columns.map((c, i) => autoWidth(c, i, rows)), [columns]) // eslint-disable-line react-hooks/exhaustive-deps
+  const colW = columns.map((c, i) => (drag?.name === c.name ? drag.px : widths?.[c.name] ?? auto[i] ?? COL_W))
+  const numeric = useMemo(() => columns.map((c) => isNumeric(c.type)), [columns])
+  const lefts = colW.reduce<number[]>((a, _w, i) => (a.push(i ? a[i - 1] + colW[i - 1] : 0), a), [])
+  const width = 48 + colW.reduce((a, b) => a + b, 0)
+  const startResize = (e: React.MouseEvent, name: string, from: number) => {
+    e.preventDefault(); e.stopPropagation()
+    const x0 = e.clientX
+    let px = from
+    const move = (m: MouseEvent) => { px = Math.max(MIN_W, Math.min(MAX_W, from + m.clientX - x0)); setDrag({ name, px }) }
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); setDrag(null); if (px !== from) onResize?.(name, px) }
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up)
+  }
+  // shift-selected rectangle: the anchor is where the shift movement started, the other corner is the cursor
+  const [anchor, setAnchor] = useState<{ r: number; c: number } | null>(null)
+  const curRow = rows.findIndex((r) => r.key === selected)
+  const range: Range | null = anchor && curRow >= 0 && (anchor.r !== curRow || anchor.c !== col)
+    ? { r0: Math.min(anchor.r, curRow), r1: Math.max(anchor.r, curRow), c0: Math.min(anchor.c, col), c1: Math.max(anchor.c, col) } : null
+  const rangeKey = range ? `${range.r0},${range.r1},${range.c0},${range.c1}` : ''
+  useEffect(() => { onCursor?.(col, range) }, [col, rangeKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // a sort, filter or refresh re-orders the rows under the anchor's index, so the range would cover other rows
+  const order = rows.map((r) => r.key).join('\x00')
+  useEffect(() => { setAnchor(null) }, [order, columns.length])
+  const reveal = (cc: number) => { // keep column cc in view (the sticky row-number column covers the first 48px)
+    const el = scroller.current
+    if (!el) return
+    const left = lefts[cc] ?? 0, w = colW[cc] ?? COL_W
+    if (left < el.scrollLeft) el.scrollLeft = left
+    else if (left + w > el.scrollLeft + el.clientWidth - 48) el.scrollLeft = left + w - el.clientWidth + 48
+  }
+  useEffect(() => {
+    if (!focusCell) return
+    const r = rows.findIndex((x) => x.key === focusCell.row)
+    if (r < 0) return
+    setAnchor(null); setCol(focusCell.col); virt.scrollToIndex(r); reveal(focusCell.col)
+  }, [focusCell?.n]) // eslint-disable-line react-hooks/exhaustive-deps
+  const inRange = (r: number, c: number) => !!range && r >= range.r0 && r <= range.r1 && c >= range.c0 && c <= range.c1
   const sortOf = (name: string) => sort?.findIndex((s) => s.Column === name) ?? -1
 
-  const open = (row: GridRow, c: number) => columns[c] && onOpen?.({ row: row.key, col: columns[c].name, readOnly: !editable || row.state === 'deleted' })
+  // the cell menu opens at the cursor cell for Shift+F10 / the ContextMenu key
+  const menuAt = () => {
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-rk="${CSS.escape(selected ?? '')}"] [data-c="${col}"]`) ?? scroller.current
+    const r = el?.getBoundingClientRect()
+    if (r) onCellMenu?.(r.left + 12, r.bottom - 4)
+  }
+  const emptyDbl = (e: React.MouseEvent) => { // the empty space under the rows adds a row, beside the headers a column
+    if (e.target !== e.currentTarget && !(e.target as HTMLElement).dataset.fill) return
+    const top = scroller.current?.getBoundingClientRect().top ?? 0
+    if (e.clientY - top <= ROW_H + 2) onAddColumn?.(); else onAddRow?.()
+  }
+  const open = (row: GridRow, c: number, ro = false) => columns[c] && onOpen?.({ row: row.key, col: columns[c].name, readOnly: ro || !editable || row.state === 'deleted' })
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return
-    const idx = rows.findIndex((r) => r.key === selected)
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return // defaultPrevented: the keymap already dispatched it
+    const idx = curRow
     const go = (r: number, c: number) => {
       const rr = Math.max(0, Math.min(rows.length - 1, r)), cc = Math.max(0, Math.min(columns.length - 1, c))
+      if (e.shiftKey) { if (!anchor && idx >= 0) setAnchor({ r: idx, c: col }) } else setAnchor(null)
       if (rows[rr] && rows[rr].key !== selected) onSelect?.(rows[rr].key)
-      setCol(cc); virt.scrollToIndex(rr)
-      // horizontal: keep the cursor column in view (the sticky row-number column covers the first 48px)
-      const el = scroller.current
-      if (el) {
-        const left = 48 + cc * COL_W
-        if (left - 48 < el.scrollLeft) el.scrollLeft = left - 48
-        else if (left + COL_W > el.scrollLeft + el.clientWidth) el.scrollLeft = left + COL_W - el.clientWidth
-      }
+      setCol(cc); virt.scrollToIndex(rr); reveal(cc)
     }
     switch (e.key) {
       case 'ArrowDown': case 'j': go(idx < 0 ? 0 : idx + 1, col); break
