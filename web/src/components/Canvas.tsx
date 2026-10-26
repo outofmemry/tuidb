@@ -165,6 +165,18 @@ export function DiagramCanvas({ tables, storageKey, query, centerOn, canLink, co
           {ghost && drag.current?.kind === 'link' && (() => { const t = (drag.current as Extract<Drag, { kind: 'link' }>); const s = anchor(t.table, t.col, 'r'); return <line x1={s.x} y1={s.y} x2={ghost.x} y2={ghost.y} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="5 4" /> })()}
         </g>
       </svg>
+      {ctx && <>
+        <div className="fixed inset-0 z-40" onMouseDown={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null) }} />
+        <div className="popover fixed z-50 min-w-[190px] py-1 flex flex-col motion-safe:animate-pop" style={{ left: Math.min(ctx.x, window.innerWidth - 210), top: Math.min(ctx.y, window.innerHeight - 190) }} role="menu" aria-label={`Menu for ${ctx.t.ref.Name}`}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setCtx(null) } }}>
+          {ctx.col && <button className="menu-item" role="menuitem" autoFocus onClick={() => { const c = ctx.col!; setCtx(null); copyText(c).then(() => onNote?.(`Copied ${c}`), (er) => onNote?.(String(er))) }}>Copy column name</button>}
+          <button className="menu-item" role="menuitem" autoFocus={!ctx.col} onClick={() => { const r = ctx.t.ref; setCtx(null); onStructure(r) }}>Open structure</button>
+          {onColor && <label className="menu-item flex items-center gap-2 cursor-pointer">Colour
+            <input type="color" aria-label={`Colour of ${ctx.t.ref.Name}`} className="w-8 h-5 p-0 border border-rule-2 bg-transparent" value={tint(ctx.t) ?? '#7aa2f7'} onChange={(e) => onColor(tk(ctx.t.ref), e.target.value)} /></label>}
+          {onColor && tint(ctx.t) && <button className="menu-item" role="menuitem" onClick={() => { onColor(tk(ctx.t.ref), ''); setCtx(null) }}>Reset colour</button>}
+          {onDelete && <button className="menu-item btn-danger" role="menuitem" onClick={() => { const t = ctx.t; setCtx(null); onDelete(t) }}>Delete table…</button>}
+        </div>
+      </>}
     </div>
   )
 }
