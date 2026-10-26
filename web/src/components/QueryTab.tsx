@@ -81,9 +81,32 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   const [sel, setSel] = useState<string | null>(null)
   const [cell, setCell] = useState<CellTarget | null>(null)
   const [vars, setVars] = useState<{ names: string[]; body: Record<string, unknown> } | null>(null)
-  const [dlg, setDlg] = useState<'' | 'export' | 'copyas'>('')
+  const [dlg, setDlg] = useState<'' | 'export' | 'copyas' | 'cellsas' | 'setvalue' | 'sort'>('')
+  const [cmenu, setCmenu] = useState<{ x: number; y: number } | null>(null) // the result cell menu
+  const [hmenu, setHmenu] = useState<{ x: number; y: number; col: string } | null>(null) // the column header menu
+  const [cursor, setCursor] = useState<{ col: number; range: Range | null }>({ col: 0, range: null })
+  const [rsort, setRsort] = useState<Sort[]>([]) // client-side sort of the loaded rows
+  const root = useRef<HTMLDivElement>(null)
+  const savedAs = useRef(savedName ?? '') // the saved query this tab writes to: [editor] auto_save_queries saves on every change
+  const lastSaved = useRef(initial)
   const [chart, setChart] = useState(false)
-  const [find, setFind] = useState<string | null>(null) // results filter; null = closed
+  const [syntax, setSyntaxState] = useState(() => { try { return localStorage.getItem('webtuidb-mongo-syntax') === 'command' ? 'command' : 'shell' } catch { return 'shell' } }) // Mongo: shell JavaScript or a command document
+  const setSyntax = (v: string) => { setSyntaxState(v); try { localStorage.setItem('webtuidb-mongo-syntax', v) } catch { /* private mode */ } }
+  const [slow, setSlow] = useState(false) // the query ran past [general] query_timeout_secs: keep waiting or cancel
+  const [slowTick, setSlowTick] = useState(0)
+  const timeoutSecs = Number(meta.config.general.QueryTimeoutSecs) || 0
+  const [find, setFind] = useState<FindState | null>(null) // the results find / replace bar; null = closed
+  const [focusCell, setFocusCell] = useState<{ row: string; col: number; n: number } | null>(null)
+  const focusN = useRef(0)
+  // M12.2: pending changes of the editable results, by resultId (a re-run gets a new id). hist is the undo stack: the state before each change.
+  const [pends, setPends] = useState<Record<string, Pend>>({})
+  const hist = useRef<{ id: string; p: Pend }[]>([])
+  const nextId = useRef(1)
+  const [plan, setPlan] = useState<Plan | null>(null)
+  const busy = useRef(false)
+  const pendingTotal = Object.values(pends).reduce((n, p) => n + pendCount(p), 0)
+  useEffect(() => { onDirty?.(pendingTotal > 0) }, [pendingTotal]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onDirty?.(false), []) // eslint-disable-line react-hooks/exhaustive-deps
   const [explain, setExplain] = useState<{ Text: string; Current?: boolean; Offset?: number } | null>(null)
   const pinId = tabKey.replace(/[^A-Za-z0-9_-]/g, '_')
   const [pinned, setPinned] = useState(false) // this tab keeps one dedicated connection (BEGIN, SET and temp tables carry over)
