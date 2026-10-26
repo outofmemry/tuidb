@@ -373,13 +373,16 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   const loadMore = async () => {
     if (!cur?.truncated) return notify('Nothing more to load')
     if (loadingMore.current) return
+    if (cur.editable && pendCount(P) > 0 && !(await confirm('Loading more rows discards the pending changes in this result. Continue?'))) return
     loadingMore.current = true
+    if (cur.resultId) setPends((m) => { const { [cur.resultId!]: _g, ...rest } = m; return rest })
     try {
       const size = cur.pageSize ?? cur.cells.length
       const p = await api<{ supported: boolean; result?: ExecItem; more?: boolean }>('POST', `/sessions/${sid}/exec/page`, { text: cur.stmt, limit: size, offset: cur.cells.length, pin: pinned ? pinId : undefined })
       if (p.supported && p.result) {
         const add = p.result
-        return setResults((all) => all.map((x, i) => (i === active ? { ...x, cells: [...x.cells, ...add.cells], truncated: !!p.more, pageSize: size, durationMs: x.durationMs + add.durationMs } : x)))
+        // shortcut: the server snapshot behind resultId holds the first page only, so a result that grew by Load more is no longer editable
+        return setResults((all) => all.map((x, i) => (i === active ? { ...x, editable: false, cells: [...x.cells, ...add.cells], truncated: !!p.more, pageSize: size, durationMs: x.durationMs + add.durationMs } : x)))
       }
       const r = await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, { text: cur.stmt, limit: cur.cells.length * 2, vars: {}, pin: pinned ? pinId : undefined })
       if (r.results[0]?.error) return notify(r.results[0].error)
