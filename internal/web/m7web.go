@@ -435,8 +435,25 @@ func (s *Server) boardPut(r *http.Request) (any, error) {
 			if strings.TrimSpace(p.Table) == "" {
 				return nil, bad("import panel %q needs a table", p.Title)
 			}
+		case "input":
+			if strings.TrimSpace(p.Var) == "" {
+				return nil, bad("input panel %q needs the variable it sets", p.Title)
+			}
+		case "dropdown":
+			if strings.TrimSpace(p.Var) == "" || (len(p.Options) == 0 && strings.TrimSpace(p.Query) == "") {
+				return nil, bad("dropdown panel %q needs a variable and either options or a query", p.Title)
+			}
+		case "exporter":
+			if strings.TrimSpace(p.Query) == "" {
+				return nil, bad("exporter panel %q needs a query", p.Title)
+			}
+			switch p.Format {
+			case "csv", "json", "sql", "excel":
+			default:
+				return nil, bad("exporter panel %q: format must be csv, json, sql or excel", p.Title)
+			}
 		default:
-			return nil, bad("panel %q: kind must be number, table, bar, line, button or import", p.Title)
+			return nil, bad("panel %q: kind must be number, table, bar, line, button, import, input, dropdown or exporter", p.Title)
 		}
 		if p.RefreshOn != "" && titles[p.RefreshOn].Title == "" {
 			return nil, bad("panel %q refreshes on %q, which is not a panel", p.Title, p.RefreshOn)
