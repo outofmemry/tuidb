@@ -1,65 +1,75 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
-import { MySQL, PostgreSQL, StandardSQL, keywordCompletionSource, schemaCompletionSource } from '@codemirror/lang-sql'
+import { MySQL, PostgreSQL, StandardSQL } from '@codemirror/lang-sql'
 import { EditorSelection, EditorState, Prec } from '@codemirror/state'
 import { LanguageSupport, foldEffect, foldedRanges, unfoldEffect } from '@codemirror/language'
 import { EditorView as View, crosshairCursor, highlightWhitespace, keymap, rectangularSelection, type EditorView } from '@codemirror/view'
 import { SearchQuery, findNext, findPrevious, getSearchQuery, openSearchPanel, selectNextOccurrence, selectSelectionMatches, setSearchQuery } from '@codemirror/search'
-import { startCompletion, type Completion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
-import { toggleBlockComment, toggleComment } from '@codemirror/commands'
-import { vim } from '@replit/codemirror-vim'
-import { api, ApiError, beacon, download, postQuery, qs, saveBlob, stream, type Column, type DbObject, type ExecItem, type Gate, type Meta, type SessionInfo } from '../utils/api'
+import { autocompletion, startCompletion } from '@codemirror/autocomplete'
+import { selectAll, toggleBlockComment, toggleComment } from '@codemirror/commands'
+import { Vim, vim } from '@replit/codemirror-vim'
+import { api, ApiError, beacon, download, postQuery, qs, saveBlob, stream, type Column, type DbObject, type ExecItem, type Gate, type Meta, type Plan, type SessionInfo, type Sort, type Val } from '../utils/api'
 import { contextOf } from '../utils/keys'
 import { copyText, formatRows, type CopyFormat } from '../utils/copy'
 import { ChartView, CopyAsDialog, ExportDialog, VariablesDialog } from './Tools'
-import { Dialog, GateFields, ask } from './Dialogs'
+import { Dialog, GateFields, PlanDialog, ask, confirm } from './Dialogs'
 import { Select, type SelectHandle } from './Select'
-import { Grid, type GridRow } from './Grid'
+import { Grid, isNumeric, show, type GridRow, type Range } from './Grid'
+import { FindBar, newFind, type FindState } from './GridFind'
+import { SetValueDialog, SortDialog } from './Extras'
+import { cellsAs, columnText, rectOf, rectSize } from '../utils/m15_copy'
+import { listOf, menuItems } from '../utils/m15_menus'
+import { cfg } from '../utils/m15_cfg'
+import { foldedIndexes, loadHashes, saveHashes, stmtHash } from '../utils/m15_folds'
+import { ItemMenu } from './m15_Menu'
+import { cellMatches, findNext as findCell, replaceIn } from '../utils/gridfind'
+import { dupVals, editedMap, emptyPend, pendCount, planBody, setEdit, toggleDelete, type Pend } from '../utils/pending'
 import { CellEditor, type CellTarget } from './CellEditor'
 import { ExplainDialog } from './Wave'
+import { completionKeys, completionSource, type Env } from './Completion'
+import { cmTheme } from './cmtheme'
 
 // parameter values are remembered per session, so running a statement again pre-fills the dialog
 const savedVars: Record<string, Record<string, string>> = {}
 
 type Pending = { body: Record<string, unknown>; gate: Gate; statements: string[]; label: string; error?: string }
 
-// ---- alias-aware autocomplete -------------------------------------------------------------------------
-// Same rule as the terminal: every table named after FROM / JOIN, with its alias, offers its columns; `alias.` narrows to that table.
-const ALIAS = /\b(?:from|join)\s+((?:"[^"]+"|\w+)(?:\.(?:"[^"]+"|\w+))?)(?:\s+(?:as\s+)?(\w+))?/gi
-const NOT_ALIAS = new Set(['where', 'on', 'using', 'join', 'inner', 'left', 'right', 'full', 'outer', 'cross', 'natural', 'group', 'order', 'limit', 'offset', 'having', 'union', 'except', 'intersect', 'window', 'returning', 'set', 'values', 'select', 'lateral'])
-export function aliasesIn(sql: string): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const m of sql.matchAll(ALIAS)) {
-    const t = m[1].replace(/"/g, '').split('.').pop()!.toLowerCase()
-    out[t] = t
-    if (m[2] && !NOT_ALIAS.has(m[2].toLowerCase())) out[m[2].toLowerCase()] = t
-  }
-  return out
-}
-
-// Mongo shell methods offered after `db.<collection>.` and after a closing `)` (a chained cursor method)
-const MONGO_METHODS = ['find', 'findOne', 'aggregate', 'count', 'insertOne', 'insertMany', 'updateOne', 'updateMany', 'deleteOne', 'deleteMany', 'sort', 'limit', 'skip', 'project']
-export function mongoSource(ctx: CompletionContext): CompletionResult | null {
-  const m = ctx.matchBefore(/(?:db\.[\w$]+|\))\.\w*/)
-  if (!m) return null
-  return { from: m.from + m.text.lastIndexOf('.') + 1, options: MONGO_METHODS.map((label) => ({ label, type: 'method', apply: label + '(' })), validFor: /^\w*$/ }
-}
-
 // editor toggles are remembered for the browser, not per tab
+// M13.8 vim ex commands: the engine ships :<n> (go to line), :noh and visual mode / counts; :w :wq :q :q! are ours and reach the visible query tab through this event.
+// shortcut: the ex commands are global to the vim engine, so they are registered once and the tab that is shown answers.
+let vimEx = false
+function defineVimEx() {
+  if (vimEx) return
+  vimEx = true
+  const go = (name: string) => window.dispatchEvent(new CustomEvent('webtuidb:vim-ex', { detail: { name } }))
+  Vim.defineEx('write', 'w', () => go('w'))
+  Vim.defineEx('wq', undefined, () => go('wq'))
+  Vim.defineEx('xit', 'x', () => go('wq'))
+  Vim.defineEx('quit', 'q', (_cm, p) => go(String(p?.argString ?? '').trim().startsWith('!') ? 'q!' : 'q'))
+}
+
 const flag = (k: string) => { try { return localStorage.getItem(k) === '1' } catch { return false } }
 const setFlag = (k: string, v: boolean) => { try { localStorage.setItem(k, v ? '1' : '0') } catch { /* private mode */ } }
 
-export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tabKey, onText, onCancel }: { sid: string; info: SessionInfo; meta: Meta; initial: string; tabKey: string; notify: (m: string) => void; shown?: boolean; autorun?: boolean; onText?: (t: string) => void; onCancel?: () => void }) {
+export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tabKey, savedName, onText, onCancel, onDirty, onClose }: { sid: string; info: SessionInfo; meta: Meta; initial: string; tabKey: string; notify: (m: string) => void; shown?: boolean; autorun?: boolean; savedName?: string; onText?: (t: string) => void; onCancel?: () => void; onDirty?: (dirty: boolean) => void; onClose?: () => void }) {
   const [vimOn, setVimOn] = useState(() => flag('webtuidb-vim'))
   const [invis, setInvis] = useState(() => flag('webtuidb-invisibles'))
   const ed = meta.config.editor
+  const [edH, setEdH] = useState(() => { try { return Math.max(80, Math.min(900, Number(localStorage.getItem('webtuidb-editor-h')) || 220)) } catch { return 220 } })
+  const dragH = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const y0 = e.clientY, h0 = edH
+    let h = h0
+    const move = (m: MouseEvent) => { h = Math.max(80, Math.min(900, h0 + m.clientY - y0)); setEdH(h) }
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); try { localStorage.setItem('webtuidb-editor-h', String(h)) } catch { /* private mode */ } }
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up)
+  }
   const [wrap, setWrap] = useState(() => { try { const v = localStorage.getItem('webtuidb-wrap'); return v === null ? !!ed.Wrap : v === '1' } catch { return !!ed.Wrap } })
   const [text, setTextState] = useState(initial)
   const setText = (t: string) => { setTextState(t); onText?.(t) }
   const [showRes, setShowRes] = useState(true)
   const [msgView, setMsgView] = useState(false)
-  const [matchCase, setMatchCase] = useState(false)
   const [results, setResults] = useState<ExecItem[]>([])
   const [active, setActive] = useState(0)
   const [error, setError] = useState('')
