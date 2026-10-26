@@ -93,7 +93,11 @@ export const show = (v: Val | undefined, server: string | null): string | null =
   return v.$ === 'null' ? null : v.$ === 'default' ? 'DEFAULT' : ''
 }
 
-export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, selected, onSelect, onSpace, ctx = 'grid', colRef, onHeaderMenu, pretty }: Props) {
+// what a cell shows besides its text: NULL, the empty string and a pending DEFAULT are dim italic marks (M15.26)
+const specialOf = (v: Val | undefined, shown: string | null, isNew: boolean): '' | 'null' | 'empty' | 'default' =>
+  shown === null ? 'null' : v !== undefined && typeof v === 'object' && v !== null && '$' in v ? (v.$ === 'default' ? 'default' : v.$ === 'empty' ? 'empty' : '') : isNew && v === undefined ? 'default' : shown === '' && !isNew ? 'empty' : ''
+
+export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, selected, onSelect, onSpace, ctx = 'grid', colRef, onHeaderMenu, pretty, widths, onResize, focusCell, onCursor, onFind, zebra, spatial, colTips, onCellMenu, onAddRow, onAddColumn }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [col, setColState] = useState(0) // the cursor column; the cursor row is `selected`
   const setCol = (c: number) => { setColState(c); if (colRef) colRef.current = c }
