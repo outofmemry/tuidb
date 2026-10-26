@@ -34,6 +34,28 @@ type fakeSession struct {
 	curDB            string
 	failRows         error // Rows returns this error
 	colCalls         atomic.Int64
+	procs            []db.ProcessInfo
+	killed           []string
+	usersOn          bool // Caps().Users: the user-management tests
+	ulist            []db.User
+	pins             []*pinnedFake
+	reorder          bool // Caps().ReorderColumns
+	adminOpts        []map[string]string
+	userChanges      []db.UserChange
+}
+
+func (f *fakeSession) Processes(context.Context) ([]db.ProcessInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]db.ProcessInfo(nil), f.procs...), nil
+}
+
+func (f *fakeSession) Kill(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.killed = append(f.killed, id)
+	f.procs = nil
+	return nil
 }
 
 var customerCols = []db.Column{{Name: "id", Type: "int", PK: true}, {Name: "name", Type: "text", Nullable: true}, {Name: "email", Type: "text", Nullable: true}}
@@ -43,7 +65,7 @@ func newFake() *fakeSession {
 }
 
 func (f *fakeSession) Caps() db.Capabilities {
-	return db.Capabilities{Schemas: true, Indexes: true, Triggers: true, ForeignKeys: true, Views: true, Functions: true, Transactions: true, Editor: orStr(f.editor, "sql"), Dialect: f.dialect, DatabaseNoun: "database", Document: f.document}
+	return db.Capabilities{Schemas: true, Indexes: true, Triggers: true, ForeignKeys: true, Views: true, Functions: true, Transactions: true, ProcessList: true, Editor: orStr(f.editor, "sql"), Dialect: f.dialect, DatabaseNoun: "database", Document: f.document, Users: f.usersOn, ReorderColumns: f.reorder}
 }
 func (f *fakeSession) ServerInfo() string         { return "Fake 1.0" }
 func (f *fakeSession) Ping(context.Context) error { return nil }
@@ -72,15 +94,16 @@ func orStr(s, d string) string {
 	return s
 }
 
-func (f *fakeSession) Objects(context.Context, string) ([]db.Object, error) {
+func (f *fakeSession) Objects(_ context.Context, sc string) ([]db.Object, error) {
 	if f.objs != nil {
 		return f.objs, nil
 	}
+	sc = orStr(sc, "public")
 	return []db.Object{
-		{ObjRef: db.ObjRef{Schema: "public", Name: "customers", Kind: db.KindTable}, Detail: "3 rows"},
-		{ObjRef: db.ObjRef{Schema: "public", Name: "orders", Kind: db.KindTable}},
-		{ObjRef: db.ObjRef{Schema: "public", Name: "recent", Kind: db.KindView}},
-		{ObjRef: db.ObjRef{Schema: "public", Name: "order_count", Kind: db.KindFunction}},
+		{ObjRef: db.ObjRef{Schema: sc, Name: "customers", Kind: db.KindTable}, Detail: "3 rows"},
+		{ObjRef: db.ObjRef{Schema: sc, Name: "orders", Kind: db.KindTable}},
+		{ObjRef: db.ObjRef{Schema: sc, Name: "recent", Kind: db.KindView}},
+		{ObjRef: db.ObjRef{Schema: sc, Name: "order_count", Kind: db.KindFunction}},
 	}, nil
 }
 func (f *fakeSession) Columns(context.Context, db.ObjRef) ([]db.Column, error) {
@@ -156,8 +179,13 @@ func (f *fakeSession) Exec(ctx context.Context, stmt string, limit int) (*db.Res
 	f.execs = append(f.execs, stmt)
 	f.mu.Unlock()
 	switch {
+	case strings.HasPrefix(stmt, "EXPLAIN (FORMAT JSON"):
+		plan := `[{"Plan":{"Node Type":"Hash Join","Total Cost":12.5,"Plan Rows":3,"Plans":[{"Node Type":"Seq Scan","Relation Name":"customers","Total Cost":1.5,"Plan Rows":3}]}}]`
+		return &db.Result{HasRows: true, Columns: []db.ResultColumn{{Name: "QUERY PLAN", Type: "json"}}, Rows: [][]any{{plan}}}, nil
 	case strings.Contains(stmt, "boom"):
 		return nil, errors.New("syntax error near boom")
+	case strings.Contains(stmt, "raise"):
+		return &db.Result{Message: "NOTICE: first notice\nNOTICE: second notice"}, nil
 	case strings.Contains(stmt, "sleep"):
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -177,7 +205,8 @@ func (f *fakeSession) Exec(ctx context.Context, stmt string, limit int) (*db.Res
 }
 
 func (f *fakeSession) Plan(ch []db.Change) ([]db.Statement, error) { return db.PlanSQL(db.PG, ch) }
-func (f *fakeSession) PlanAdmin(op db.AdminOp, ref db.ObjRef, _ map[string]string) ([]db.Statement, error) {
+func (f *fakeSession) PlanAdmin(op db.AdminOp, ref db.ObjRef, opts map[string]string) ([]db.Statement, error) {
+	f.adminOpts = append(f.adminOpts, opts)
 	return []db.Statement{{Text: fmt.Sprintf("-- %s %s", op, ref.Name)}}, nil
 }
 func (f *fakeSession) PlanTable(old, new *db.TableDef) ([]db.Statement, error) {
@@ -357,4 +386,36 @@ func (h *harness) openCustomers() {
 	h.t.Helper()
 	h.press("enter") // sidebar selection snaps to the first object
 	h.want("ann@x.io")
+}
+
+func (f *fakeSession) Users(context.Context) ([]db.User, error) { return f.ulist, nil }
+
+func (f *fakeSession) PlanUser(c db.UserChange) ([]db.Statement, error) {
+	f.userChanges = append(f.userChanges, c)
+	if c.Kind == "create" {
+		return []db.Statement{{Text: "CREATE ROLE " + c.User.Name + " PASSWORD '" + c.Password + "'", Display: "CREATE ROLE " + c.User.Name + " PASSWORD '********'"}}, nil
+	}
+	return []db.Statement{{Text: strings.ToUpper(c.Kind) + " " + c.User.Name}}, nil
+}
+
+// pinnedFake is the dedicated connection fakeSession.Pin lends: it records what ran on it.
+type pinnedFake struct {
+	*fakeSession
+	owner  *fakeSession
+	closed bool
+	execs  []string
+}
+
+func (p *pinnedFake) Exec(ctx context.Context, stmt string, limit int) (*db.Result, error) {
+	p.execs = append(p.execs, stmt)
+	return p.fakeSession.Exec(ctx, stmt, limit)
+}
+func (p *pinnedFake) Close() error { p.closed = true; return nil }
+
+func (f *fakeSession) Pin(context.Context) (db.Session, error) {
+	p := &pinnedFake{fakeSession: f, owner: f}
+	f.mu.Lock()
+	f.pins = append(f.pins, p)
+	f.mu.Unlock()
+	return p, nil
 }
