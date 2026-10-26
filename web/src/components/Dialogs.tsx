@@ -81,10 +81,10 @@ export function Prompts() {
 export function GateFields({ gate, label, password, setPassword }: { gate: Gate; label: string; password: string; setPassword: (s: string) => void }) {
   if (!gate.confirm && !gate.password) return null
   return (
-    <div style={{ marginTop: 10 }}>
-      <div className="text-ink-2">{label}: {gate.password ? 'enter the database password to continue' : 'check the statements above, then continue'}</div>
+    <div className="mt-2.5">
+      <div className="text-ink-2"><span className="chip mr-1.5">{label}</span>{gate.password ? 'enter the database password to continue' : 'check the statements above, then continue'}</div>
       {gate.password && (
-        <input type="password" autoFocus placeholder="database password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ marginTop: 6, width: '100%' }} />
+        <input type="password" autoFocus placeholder="database password" aria-label="Database password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1.5 w-full" />
       )}
     </div>
   )
