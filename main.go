@@ -404,7 +404,7 @@ func checkModes(modes map[string]bool, nargs int) error {
 	}
 	slices.Sort(set)
 	if len(set) > 1 {
-		return fmt.Errorf("%s cannot be combined; use only one of --frontend, --mcp, --keys, --theme, --man, --completion, --mcp-config, --list-connections, --version", strings.Join(set, " and "))
+		return fmt.Errorf("%s cannot be combined; use only one of --frontend, --mcp, --keys, --theme, --man, --completion, --mcp-config, --list-connections, --version, --changelog, --bugreport, --check-update, --set-passcode, --theme-install, --theme-update", strings.Join(set, " and "))
 	}
 	if len(set) == 1 && nargs > 0 {
 		return fmt.Errorf("%s takes no connection or URL argument", set[0])
