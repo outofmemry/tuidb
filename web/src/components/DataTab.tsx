@@ -219,7 +219,7 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     if (key[0] === 'n') setInserts((l) => l.map((n) => ('n' + n.id === key ? { ...n, vals: { ...n.vals, [col]: v } } : n)))
     else setEdits((e) => ({ ...e, [key]: { ...e[key], [col]: v } }))
   }
-  const onSort = (col: string, additive: boolean) => change<Sort[]>(setSort)((() => {
+  const onSort = (col: string, additive: boolean) => change<Sort[]>(setSortChosen)((() => {
     const cur = sort.find((s) => s.Column === col)
     const rest = additive ? sort.filter((s) => s.Column !== col) : []
     if (!cur) return [...rest, { Column: col, Desc: false }]
