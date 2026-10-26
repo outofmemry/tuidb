@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Val } from '../utils/api'
 import { saveBlob } from '../utils/api'
 import { Dialog, ask } from './Dialogs'
 import { Select } from './Select'
+import { Tree } from './Extras'
+import { base64Of, openInWindow, sniff } from '../utils/m15_bin'
+import { draw, geomOf, wkt } from '../utils/m15_wkb'
 
 export type CellTarget = { row: string; col: string; readOnly?: boolean }
 
