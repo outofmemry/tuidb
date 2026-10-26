@@ -657,5 +657,5 @@ function Structure({ sid, refQ, caps, columns, section, obj, total, notify, onPl
 
 function Ddl({ sid, refQ }: { sid: string; refQ: string }) {
   const q = useQuery({ queryKey: ['ddl', sid, refQ], queryFn: () => api<{ text: string }>('GET', `/sessions/${sid}/object/ddl${refQ}`), gcTime: 0 })
-  return <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] whitespace-pre-wrap" data-ctx="structure">{q.error ? q.error.message : q.data?.text ?? 'Loading…'}</pre>
+  return <pre className={`flex-1 overflow-auto m-0 px-4 py-3 text-[12px] leading-[1.5] whitespace-pre-wrap ${q.error ? 'text-del' : ''}`} data-ctx="structure">{q.error ? q.error.message : q.data?.text ?? 'Loading…'}</pre>
 }
