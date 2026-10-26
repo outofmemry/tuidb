@@ -67,6 +67,12 @@ func run() error {
 	completion := flag.String("completion", "", "print a shell completion script (bash | zsh | fish) and exit")
 	man := flag.Bool("man", false, "print the man page (roff) and exit")
 	listConns := flag.Bool("list-connections", false, "print the saved connection names, one per line (used by the completion scripts) and exit")
+	changelogF := flag.Bool("changelog", false, "open the release notes in your browser (prints the URL) and exit")
+	bugreport := flag.Bool("bugreport", false, "print version, OS, terminal, drivers in use and the config with secrets masked, and exit")
+	checkUpd := flag.Bool("check-update", false, "ask GitHub for the latest release and say whether yours is older (never automatic) and exit")
+	setPass := flag.Bool("set-passcode", false, "read a passcode twice and print the [security] passcode line for config.toml, then exit")
+	themeInst := flag.String("theme-install", "", "install a theme from a git `url`[@ref] into the themes folder and exit")
+	themeUpd := flag.Bool("theme-update", false, "git pull every installed theme and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: webtuidb [flags] [connection-name | URL]\n       webtuidb --frontend [--listen addr] [--open]\n\n  URL: postgresql:// mysql:// mariadb:// redshift:// greenplum:// vertica:// singlestore:// clickhouse:// cassandra:// dynamodb:// redis:// mongodb://\n\nflags:\n")
 		flag.PrintDefaults()
