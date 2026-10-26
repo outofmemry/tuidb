@@ -324,26 +324,6 @@ export function DetailsDialog({ sid, info, onClose, onSaved }: { sid: string; in
   )
 }
 
-// ---- settings (read only) --------------------------------------------------------------------------------------
-
-// shortcut: read only. The resolved config is shown with the secrets hidden; edit config.toml in an editor and restart (the terminal UI opens it in $EDITOR).
-export function SettingsDialog({ onClose, notify }: { onClose: () => void; notify: (m: string) => void }) {
-  const q = useQuery({ queryKey: ['settings'], queryFn: () => api<{ path: string; text: string }>('GET', '/settings'), gcTime: 0 })
-  return (
-    <Dialog title="Settings" onClose={onClose}>
-      {q.isLoading && <div className="text-ink-2">Loading…</div>}
-      {q.error && <div className="text-del">{q.error.message}</div>}
-      {q.data && <>
-        <div className="flex items-center gap-2 mb-2 font-mono text-[12.5px]"><span className="flex-1 min-w-0 truncate" title={q.data.path}>{q.data.path}</span>
-          <button onClick={() => copyText(q.data!.path).then(() => notify('Path copied'), (e) => notify(msg(e)))}>Copy path</button></div>
-        <p className="text-ink-2 text-[12px] mt-0">This is the configuration the server runs with, with passwords, keys and tokens hidden. It cannot be edited here: change the file and restart webtuidb.</p>
-        <pre>{q.data.text}</pre>
-      </>}
-      <div className={ACTIONS}><button className="btn-primary" onClick={onClose}>Close</button></div>
-    </Dialog>
-  )
-}
-
 // ---- recent files ---------------------------------------------------------------------------------------------------
 
 export function RecentDialog({ onPick, onClose }: { onPick: (entry: string) => void; onClose: () => void }) {
