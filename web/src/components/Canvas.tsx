@@ -35,10 +35,14 @@ function autoLayout(tables: DiagramTable[]): Record<string, Pos> {
 
 const load = (k: string): Record<string, Pos> => { try { return JSON.parse(localStorage.getItem(k) ?? '{}') } catch { return {} } }
 
-export function DiagramCanvas({ tables, storageKey, query, centerOn, canLink, onStructure, onLink }: {
+type Ctx = { x: number; y: number; t: DiagramTable; col?: string }
+
+export function DiagramCanvas({ tables, storageKey, query, centerOn, canLink, colors = {}, onColor, onDelete, onNote, onStructure, onLink }: {
   tables: DiagramTable[]; storageKey: string; query: string; centerOn?: string; canLink: boolean
+  colors?: Record<string, string>; onColor?: (table: string, colour: string) => void; onDelete?: (t: DiagramTable) => void; onNote?: (m: string) => void
   onStructure: (r: ObjRef) => void; onLink: (from: DiagramTable, col: string, to: DiagramTable) => void
 }) {
+  const [ctx, setCtx] = useState<Ctx | null>(null)
   const key = 'webtuidb-er:' + storageKey
   const [pos, setPos] = useState<Record<string, Pos>>(() => ({ ...autoLayout(tables), ...load(key) }))
   const [view, setView] = useState<View>({ x: 20, y: 20, k: 1 })
