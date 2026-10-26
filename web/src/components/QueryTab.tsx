@@ -391,12 +391,61 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   }
   const copyRows = (f: CopyFormat) => {
     if (!cur?.hasRows) return
-    const idx = sel ? [Number(sel.slice(1))] : cur.cells.map((_, i) => i)
+    const idx = sel && sel[0] === 'r' ? [Number(sel.slice(1))] : cur.cells.map((_, i) => i)
     copyText(formatRows(f, cur.columns, idx.map((i) => cur.cells[i]), meta.config.csv, info.caps.Dialect)).then(() => notify(`Copied ${idx.length} row${idx.length === 1 ? '' : 's'}`), (e) => notify(String(e)))
   }
   const copyCell = () => {
-    if (!cur?.hasRows || !sel) return notify('Select a row first')
+    if (!cur?.hasRows || !sel || sel[0] !== 'r') return notify('Select a row first')
     copyText(cur.cells[Number(sel.slice(1))]?.[colRef.current] ?? 'NULL').then(() => notify('Copied the cell'), (e) => notify(String(e)))
+  }
+
+  // copy_cells_as / copy_column (M15.1, M15.2) and the header menu (M15.5) for result grids
+  const copyCellsAs = (f: CopyFormat) => {
+    if (!cur?.hasRows) return
+    const at = gridRows.findIndex((r) => r.key === sel)
+    if (at < 0) return notify('Select a cell first')
+    const rect = rectOf(cursor.range, at, Math.min(colRef.current, cur.columns.length - 1))
+    copyText(cellsAs(f, rect, cur.columns, (r, c) => cellVal(gridRows[r], c), meta.config.csv, info.caps.Dialect, cur.table?.name)).then(() => notify(`Copied ${rectSize(rect)} cell${rectSize(rect) === 1 ? '' : 's'} as ${f}`), (e) => notify(String(e)))
+  }
+  const copyColumn = (name?: string) => {
+    if (!cur?.hasRows) return
+    const ci = name ? cur.columns.findIndex((c) => c.name === name) : Math.min(colRef.current, cur.columns.length - 1)
+    if (ci < 0) return
+    copyText(columnText(sortedRows.length, ci, (r, c) => cellVal(sortedRows[r], c))).then(() => notify(`Copied the values of ${cur.columns[ci].name}`), (e) => notify(String(e)))
+  }
+  const colAct = (action: string, col: string) => {
+    switch (action) {
+      case 'sort_asc': return setRsort([{ Column: col, Desc: false }])
+      case 'sort_desc': return setRsort([{ Column: col, Desc: true }])
+      case 'sort_none': return setRsort((l) => l.filter((x) => x.Column !== col))
+      case 'sort_columns': return setDlg('sort')
+      case 'copy_name': return void copyText(col).then(() => notify('Copied the column name'), (e) => notify(String(e)))
+      case 'copy_column': return copyColumn(col)
+      case 'copy_definition': { const c = cur?.columns.find((x) => x.name === col); return void copyText(c ? `${c.name} ${c.type}${c.pk ? ' PRIMARY KEY' : ''}` : col).then(() => notify('Copied the column definition'), (e) => notify(String(e))) }
+    }
+    notify(`${action}: not available here`)
+  }
+  const headerAt = (col: number) => {
+    const r = root.current?.querySelector<HTMLElement>(`[data-h="${col}"]`)?.getBoundingClientRect()
+    if (cur?.columns[col]) setHmenu({ col: cur.columns[col].name, x: r ? r.left : 40, y: r ? r.bottom : 120 })
+  }
+  // result grid cell menu actions: the grid's keymap actions, answered here
+  const cellActs = (): Record<string, () => void> => ({
+    quick_look: () => { const r = gridRows.find((x) => x.key === sel); if (r && cur) setCell({ row: r.key, col: cur.columns[Math.min(colRef.current, cur.columns.length - 1)].name, readOnly: true }) },
+    add_row: addRow, duplicate_rows: duplicate, delete_rows: delRows, set_value: setValue,
+    copy_rows: () => copyRows('Plain'), copy_rows_as: () => setDlg('copyas'), copy_cells: copyCell, copy_cells_as: () => setDlg('cellsas'), copy_column: () => copyColumn(),
+    chart: () => setChart(!chart), load_more: loadMore, pin: () => cur && setResults((all) => all.map((x, i) => (i === active ? { ...x, pinned: !x.pinned } : x))), export: () => (cur?.hasRows && !cur.error ? setDlg('export') : notify('Run a query first, then export its result')),
+  })
+  const nextCell = (from: CellTarget, move: 1 | -1) => { // Tab while editing: save and edit the neighbouring cell
+    if (!cur) return
+    const ri = gridRows.findIndex((r) => r.key === from.row), ci = cur.columns.findIndex((c) => c.name === from.col)
+    if (ri < 0 || ci < 0) return
+    let r = ri, c = ci + move
+    if (c >= cur.columns.length) { c = 0; r++ } else if (c < 0) { c = cur.columns.length - 1; r-- }
+    const row = gridRows[r]
+    if (!row) return
+    setSel(row.key); setFocusCell({ row: row.key, col: c, n: ++focusN.current })
+    setCell({ row: row.key, col: cur.columns[c].name, readOnly: !canEdit || row.state === 'deleted' })
   }
 
   const exportAll = async () => {
