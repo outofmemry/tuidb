@@ -1,21 +1,49 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ApiError, api, type Gate, type Plan } from '../utils/api'
+import { openInWindow } from '../utils/m15_bin'
 
 // openSession opens a saved connection. A password = "ask" connection answers 422 passwordRequired: the password is asked for here and the call retried.
 export async function openSession(name: string): Promise<{ id: string }> {
-  try { return await api<{ id: string }>('POST', '/sessions', { Name: name }) } catch (e) {
+  const open = async (body: Record<string, string>) => {
+    const r = await api<{ id: string; bootstrapErrors?: string[] }>('POST', '/sessions', body)
+    // the terminal's "Bootstrap command failed (the connection is still open)" dialog; shortcut: a confirm box with the text, OK or Cancel both go on
+    if (r.bootstrapErrors?.length) await confirm('Bootstrap command failed (the connection is still open)', r.bootstrapErrors.join('\n'))
+    return r
+  }
+  try { return await open({ Name: name }) } catch (e) {
     if (!(e instanceof ApiError && e.status === 422 && e.body.passwordRequired)) throw e
     const pw = await askSecret(`Password for ${name}`)
     if (pw === null) throw new Error('Cancelled')
-    return api<{ id: string }>('POST', '/sessions', { Name: name, Password: pw })
+    return open({ Name: name, Password: pw })
   }
 }
 
-export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+
+export function Dialog({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+  const box = useRef<HTMLDivElement>(null)
+  // M15.44: focus moves into the dialog (unless a field took it with autoFocus), Tab stays inside it, and closing returns focus to where it was
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null
+    const el = box.current
+    if (el && !el.contains(document.activeElement)) (el.querySelector<HTMLElement>(FOCUSABLE) ?? el).focus()
+    return () => { if (before?.isConnected) before.focus() }
+  }, [])
+  const trap = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') { e.stopPropagation(); onClose(); return }
+    if (e.key !== 'Tab') return
+    const l = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.getClientRects().length)
+    if (!l.length) return
+    const first = l[0], last = l[l.length - 1], at = document.activeElement
+    if (e.shiftKey && (at === first || at === e.currentTarget)) { e.preventDefault(); last.focus() } else if (!e.shiftKey && at === last) { e.preventDefault(); first.focus() }
+  }
   return (
-    <div className="fixed inset-0 bg-backdrop flex items-center justify-center z-50 max-[760px]:items-stretch" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="popover px-5 py-[18px] w-[min(680px,94vw)] max-h-[88vh] overflow-auto max-[760px]:w-full max-[760px]:max-h-none max-[760px]:h-full max-[760px]:rounded-none max-[760px]:px-4 [&_input]:bg-canvas [&_select]:bg-canvas [&_pre]:m-0 [&_pre]:bg-canvas [&_pre]:border [&_pre]:border-rule [&_pre]:rounded-[2px] [&_pre]:px-3 [&_pre]:py-[10px] [&_pre]:max-h-[40vh] [&_pre]:overflow-auto [&_pre]:text-[12px] [&_pre]:whitespace-pre-wrap" role="dialog" aria-label={title} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
-        <h2 className="m-0 mb-[14px] text-[18px]">{title}</h2>
+    <div className="fixed inset-0 bg-backdrop flex items-center justify-center z-50 motion-safe:animate-fade max-[760px]:items-stretch" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={`popover motion-safe:animate-pop px-5 py-[18px] focus:outline-none ${wide ? 'w-[min(960px,94vw)]' : 'w-[min(680px,94vw)]'} max-h-[88vh] overflow-auto max-[760px]:w-full max-[760px]:max-h-none max-[760px]:h-full max-[760px]:rounded-none max-[760px]:px-4 [&_input]:bg-canvas [&_select]:bg-canvas [&_pre]:m-0 [&_pre]:bg-canvas [&_pre]:border [&_pre]:border-rule [&_pre]:rounded-[2px] [&_pre]:px-3 [&_pre]:py-[10px] [&_pre]:max-h-[40vh] [&_pre]:overflow-auto [&_pre]:text-[12px] [&_pre]:whitespace-pre-wrap`} role="dialog" aria-modal="true" aria-label={title} ref={box} tabIndex={-1} onKeyDown={trap}>
+        <div className="flex items-start gap-3 mb-[14px]">
+          <h2 className="flex-1 min-w-0 m-0 text-[18px] leading-tight [overflow-wrap:anywhere]">{title}</h2>
+          <button className="btn-ghost btn-icon -mr-1.5 -mt-0.5 text-ink-3 hover:text-ink" onClick={onClose} aria-label="Close" title="Close (Esc)">✕</button>
+        </div>
         {children}
       </div>
     </div>
