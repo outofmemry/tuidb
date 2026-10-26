@@ -1,9 +1,8 @@
 // Milestone 4 pieces: safe-mode picker, Open Anything, console pane, Set Value, multi-column sort, page settings, tab menu, tree view.
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ApiError, api, qs, type DbObject, type SessionInfo, type Sort, type Val } from '../utils/api'
+import { ApiError, api, qs, type DbObject, type MenuItem, type SessionInfo, type Sort, type Val } from '../utils/api'
 import { Dialog } from './Dialogs'
-import { copyText } from '../utils/copy'
 import { Select } from './Select'
 
 const ACTIONS = 'flex justify-end gap-2 mt-[18px]'
@@ -51,7 +50,8 @@ export function SafeModeDialog({ sid, info, onClose, onDone }: { sid: string; in
 
 // ---- Open Anything ------------------------------------------------------------------------------------
 
-export type PaletteItem = { group: string; label: string; detail?: string; run: () => void }
+// run gets true for alt+Enter: open the hit in a new tab
+export type PaletteItem = { group: string; label: string; detail?: string; run: (newTab?: boolean) => void }
 
 // match scores a query against a label: -1 no match, lower is better. `^` anchors the start, `$` the end, otherwise fuzzy (substring first, then subsequence).
 export function match(q: string, s: string): number {
