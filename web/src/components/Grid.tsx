@@ -3,6 +3,7 @@ import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tan
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { clip, type ResultCol, type Sort, type Val } from '../utils/api'
 import type { CellTarget } from './CellEditor'
+import { cellWkt } from '../utils/m15_wkb'
 
 export type GridRow = { key: string; cells: (string | null)[]; state: 'clean' | 'new' | 'deleted' }
 
