@@ -289,12 +289,72 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     const list = selRow ? [selRow] : rows.filter((r) => r.state !== 'new')
     copyText(formatRows(f, res.columns, list.map(shown), meta.config.csv, info.caps.Dialect, obj.Name)).then(() => notify(`Copied ${list.length} row${list.length === 1 ? '' : 's'}`), (e) => notify(String(e)))
   }
+  const range = cursor.range
+  // the rows the selection covers (the shift-selected rectangle, else the cursor row): Row detail edits and Set Value apply to all of them
+  const selRows = range ? rows.slice(range.r0, range.r1 + 1).filter((r) => r.state !== 'deleted') : selRow && selRow.state !== 'deleted' ? [selRow] : []
   const copyCell = () => {
     if (!res || !selRow) return notify('Select a row first')
+    if (range) { // the rectangle, tab separated like Copy rows
+      const text = rows.slice(range.r0, range.r1 + 1).map((r) => shown(r).slice(range.c0, range.c1 + 1).map((v) => v ?? 'NULL').join('\t')).join('\n')
+      return copyText(text).then(() => notify(`Copied ${(range.r1 - range.r0 + 1) * (range.c1 - range.c0 + 1)} cells`), (e) => notify(String(e)))
+    }
     const v = shown(selRow)[cc()]
     copyText(v ?? 'NULL').then(() => notify('Copied the cell'), (e) => notify(String(e)))
   }
   const cellValue = (r: GridRow, ci: number) => show(editedAll[r.key]?.[res!.columns[ci].name], r.cells[ci])
+  // copy_cells_as: the selected rectangle (else the cursor cell) in one of the seven formats; copy_column: every value of a column, one per line
+  const copyCellsAs = (f: CopyFormat) => {
+    if (!res || !selRow) return notify('Select a cell first')
+    const rect = rectOf(range, rows.findIndex((r) => r.key === selRow.key), cc())
+    copyText(cellsAs(f, rect, res.columns, (r, c) => cellValue(rows[r], c), meta.config.csv, info.caps.Dialect, obj.Name)).then(() => notify(`Copied ${rectSize(rect)} cell${rectSize(rect) === 1 ? '' : 's'} as ${f}`), (e) => notify(String(e)))
+  }
+  const copyColumn = (name?: string) => {
+    if (!res) return
+    const ci = name ? res.columns.findIndex((c) => c.name === name) : cc()
+    if (ci < 0) return
+    copyText(columnText(rows.filter((r) => r.state !== 'new').length, ci, (r, c) => cellValue(rows[r], c))).then(() => notify(`Copied the values of ${res.columns[ci].name}`), (e) => notify(String(e)))
+  }
+  // column header menu (M15.5): the entries come from meta.menus.header; col is the header it was opened on
+  const filterColumn = (col: string) => {
+    setView('data'); setShowBar(true)
+    setTimeout(() => window.dispatchEvent(new CustomEvent('webtuidb:filter-column', { detail: { column: col, sid, key: recentKey(obj) } })), 80) // FilterBar presets its blank filter to this column
+  }
+  const colAct = (action: string, col: string) => {
+    const hide = () => { if (visible.length > 1) change<string[]>(setHidden)([...hidden, col]); else notify('At least one column must stay visible') }
+    switch (action) {
+      case 'sort_asc': return change<Sort[]>(setSortChosen)([{ Column: col, Desc: false }])
+      case 'sort_desc': return change<Sort[]>(setSortChosen)([{ Column: col, Desc: true }])
+      case 'sort_none': return change<Sort[]>(setSortChosen)(sort.filter((x) => x.Column !== col))
+      case 'sort_columns': return setDlg('sort')
+      case 'filter_column': return filterColumn(col)
+      case 'hide_column': return hide()
+      case 'show_all_columns': return change<string[]>(setHidden)([])
+      case 'copy_name': return void copyText(col).then(() => notify('Copied the column name'), (e) => notify(String(e)))
+      case 'copy_column': return copyColumn(col)
+      case 'copy_definition': { const c = cols.data?.find((x) => x.Name === col); return void copyText(c ? columnDef(c) : col).then(() => notify('Copied the column definition'), (e) => notify(String(e))) }
+    }
+    notify(`${action}: not available here`)
+  }
+  const headerAt = (col: number) => { // column_menu: open the header menu under the cursor column's header
+    const el = root.current?.querySelector<HTMLElement>(`[data-h="${col}"]`)
+    const r = el?.getBoundingClientRect()
+    if (res?.columns[col]) setHmenu({ col: res.columns[col].name, x: r ? r.left : 40, y: r ? r.bottom : 80 })
+  }
+  const addColumn = () => {
+    if (obj.Kind !== 'table' || info.caps.Editor !== 'sql') return notify('Only an SQL table can get a new column')
+    setView('structure'); setTimeout(() => structCtl.current?.add(), 80) // opens the structure editor on a new column
+  }
+  const nextCell = (from: CellTarget, move: 1 | -1) => { // Tab while editing: save and edit the neighbouring cell
+    if (!res) return
+    const ri = rows.findIndex((r) => r.key === from.row), ci = res.columns.findIndex((c) => c.name === from.col)
+    if (ri < 0 || ci < 0) return
+    let r = ri, c = ci + move
+    if (c >= res.columns.length) { c = 0; r++ } else if (c < 0) { c = res.columns.length - 1; r-- }
+    const row = rows[r]
+    if (!row) return
+    setSelected(row.key); setFocusCell({ row: row.key, col: c, n: ++focusN.current })
+    setCell({ row: row.key, col: res.columns[c].name, readOnly: !res.editable || stale || row.state === 'deleted' })
+  }
   const clipRows = async () => { // clipboard text -> rows of cells, split on tabs only
     try {
       const t = (await navigator.clipboard.readText()).replace(/\r\n/g, '\n').replace(/\n$/, '')
