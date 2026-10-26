@@ -31,6 +31,8 @@ type EditorOpts struct {
 	CompleteKey  string // enter_or_tab | enter | tab
 	Highlight    bool   // tint the statement under the cursor
 	Autocomplete bool
+	Wrap         bool // soft-wrap long lines instead of scrolling sideways (wrap_lines toggles it)
+	AddSpace     bool // accepting a completion appends a space
 }
 
 type editSnap struct {
@@ -43,6 +45,7 @@ type Editor struct {
 	lines     []string
 	cur       pos
 	anchor    *pos
+	blk       *pos // block mode (block_select): the fixed corner of the rectangle the cursor stretches
 	top, left int
 	W, H      int
 	Dialect   string
@@ -56,7 +59,15 @@ type Editor struct {
 		items []Candidate
 		sel   int
 	}
-	Changed bool // set on any text change; the owner resets it
+	Changed bool   // set on any text change; the owner resets it
+	Invis   bool   // show spaces as · and tabs as →
+	marks   string // every occurrence of this text is highlighted (select_all_occurrences)
+	vim     vimState
+	curY    int // visual row of the cursor in the last View, -1 when off screen (anchors the completion popup)
+	curFrom int // first rune shown on that row
+
+	folds   map[int]bool // folded statement indexes (db.Split order)
+	OnFolds func([]int)  // called with the folded indexes whenever they change
 
 	// render cache: lexing and statement splitting are redone only when the text changes, and
 	// lexing stops at the bottom of the viewport (a frame is drawn after every message, not just keys)
@@ -80,14 +91,25 @@ func NewEditor(dialect string, opts EditorOpts) *Editor {
 func (e *Editor) Text() string { return strings.Join(e.lines, "\n") }
 
 // markChanged flags the buffer for the owner (Changed) and the render cache (dirty).
-func (e *Editor) markChanged() { e.Changed, e.cache.dirty = true, true }
+func (e *Editor) markChanged() {
+	e.Changed, e.cache.dirty = true, true
+	// shortcut: editing unfolds everything (statement indexes shift); keep per-statement folds if it matters
+	if len(e.folds) > 0 {
+		e.folds = nil
+		if e.OnFolds != nil {
+			e.OnFolds(nil)
+		}
+	}
+}
 
 func (e *Editor) SetText(s string) {
 	s = strings.ToValidUTF8(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"), "\uFFFD")
 	e.lines = strings.Split(s, "\n")
 	e.cache.dirty = true
+	e.folds = nil
 	e.cur, e.anchor, e.top, e.left = pos{}, nil, 0, 0
 	e.undo, e.redo, e.lastKind = nil, nil, ""
+	e.blk = nil
 	e.ac.open = false
 }
 
@@ -97,6 +119,9 @@ func (e *Editor) runes(r int) []rune { return []rune(e.lines[r]) }
 func (e *Editor) fixAnchor() {
 	e.cur.row = clamp(e.cur.row, 0, len(e.lines)-1)
 	e.cur.col = clamp(e.cur.col, 0, runeLen(e.lines[e.cur.row]))
+	if e.blk != nil && e.blk.row >= len(e.lines) {
+		e.blk = nil
+	}
 	if e.anchor == nil {
 		return
 	}
@@ -124,6 +149,12 @@ func (e *Editor) Offset() int {
 
 // Selection returns the selected text ("" when none).
 func (e *Editor) Selection() string {
+	if e.blk != nil {
+		if _, _, _, _, ok := e.blockRect(); ok {
+			return e.blockText()
+		}
+		return ""
+	}
 	a, b, ok := e.selRange()
 	if !ok {
 		return ""
@@ -131,7 +162,14 @@ func (e *Editor) Selection() string {
 	return e.textBetween(a, b)
 }
 
-func (e *Editor) HasSelection() bool { _, _, ok := e.selRange(); return ok }
+func (e *Editor) HasSelection() bool {
+	if e.blk != nil {
+		_, _, _, _, ok := e.blockRect()
+		return ok
+	}
+	_, _, ok := e.selRange()
+	return ok
+}
 
 func (e *Editor) selRange() (pos, pos, bool) {
 	if e.anchor == nil || *e.anchor == e.cur {
@@ -176,6 +214,9 @@ func (e *Editor) push(kind string) {
 }
 
 func (e *Editor) deleteSelection() bool {
+	if e.blk != nil {
+		return e.deleteBlock()
+	}
 	a, b, ok := e.selRange()
 	if !ok {
 		return false
@@ -213,6 +254,89 @@ func (e *Editor) indentOf(r int) string {
 
 var closers = map[rune]rune{'(': ')', '[': ']', '{': '}', '\'': '\'', '"': '"', '`': '`'}
 
+// rowOf is the line holding byte offset off of Text().
+func (e *Editor) rowOf(off int) int {
+	for i, l := range e.lines {
+		if off <= len(l) {
+			return i
+		}
+		off -= len(l) + 1
+	}
+	return len(e.lines) - 1
+}
+
+// foldInfo returns the hidden lines and, per folded header line, how many lines it hides.
+func (e *Editor) foldInfo() (hid map[int]bool, cnt map[int]int) {
+	if len(e.folds) == 0 {
+		return nil, nil
+	}
+	hid, cnt = map[int]bool{}, map[int]int{}
+	for i, s := range db.Split(e.Dialect, e.Text()) {
+		if !e.folds[i] {
+			continue
+		}
+		a, b := e.rowOf(s.Start), e.rowOf(max(s.Start, s.End-1))
+		for r := a + 1; r <= b; r++ {
+			hid[r] = true
+		}
+		if b > a {
+			cnt[a] = b - a
+		}
+	}
+	return hid, cnt
+}
+
+// ToggleFold folds or unfolds the statement under the cursor.
+func (e *Editor) ToggleFold() {
+	for i, s := range db.Split(e.Dialect, e.Text()) {
+		if e.Offset() < s.Start || e.Offset() > s.End {
+			continue
+		}
+		if e.folds == nil {
+			e.folds = map[int]bool{}
+		}
+		if e.folds[i] {
+			delete(e.folds, i)
+		} else {
+			e.folds[i] = true
+			e.move(e.rowOf(s.Start), 0, false)
+		}
+		e.cache.dirty = true
+		e.foldsChanged()
+		return
+	}
+}
+
+func (e *Editor) foldsChanged() {
+	if e.OnFolds != nil {
+		e.OnFolds(e.Folded())
+	}
+}
+
+// Folded lists the folded statement indexes, ascending.
+func (e *Editor) Folded() []int {
+	var out []int
+	for i := range e.folds {
+		out = append(out, i)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// SetFolded restores folds (indexes past the last statement are ignored).
+func (e *Editor) SetFolded(idx []int) {
+	e.folds = nil
+	n := len(db.Split(e.Dialect, e.Text()))
+	for _, i := range idx {
+		if i >= 0 && i < n {
+			if e.folds == nil {
+				e.folds = map[int]bool{}
+			}
+			e.folds[i] = true
+		}
+	}
+}
+
 func (e *Editor) move(row, col int, extend bool) {
 	if extend && e.anchor == nil {
 		p := e.cur
@@ -222,6 +346,20 @@ func (e *Editor) move(row, col int, extend bool) {
 		e.anchor = nil
 	}
 	next := pos{clamp(row, 0, len(e.lines)-1), 0}
+	if hid, _ := e.foldInfo(); hid[next.row] {
+		if next.row > e.cur.row { // moving down: land after the folded block
+			for hid[next.row] && next.row < len(e.lines)-1 {
+				next.row++
+			}
+			if hid[next.row] { // the block runs to the end: stay on its header
+				next.row = e.cur.row
+			}
+		} else {
+			for hid[next.row] {
+				next.row--
+			}
+		}
+	}
 	next.col = clamp(col, 0, len(e.runes(next.row)))
 	if extend && next == e.cur && e.anchor != nil && *e.anchor == e.cur {
 		e.anchor = nil // a shift-move that goes nowhere must not leave an empty, stale selection
@@ -237,11 +375,47 @@ func (e *Editor) scroll() {
 	if e.H <= 0 {
 		return
 	}
-	if e.cur.row < e.top {
-		e.top = e.cur.row
+	if e.Opts.Wrap {
+		// shortcut: scrolls whole logical lines, so a single line taller than the pane keeps its tail off screen; unwrap (wrap_lines) to reach it.
+		e.left = 0
+		hid, _ := e.foldInfo()
+		if e.cur.row < e.top {
+			e.top = e.cur.row
+		}
+		for e.top < e.cur.row {
+			n := e.cur.col / e.textW()
+			for r := e.top; r < e.cur.row; r++ {
+				if !hid[r] {
+					n += e.chunks(r)
+				}
+			}
+			if n < e.H {
+				break
+			}
+			e.top++
+		}
+		return
 	}
-	if e.cur.row >= e.top+e.H {
-		e.top = e.cur.row - e.H + 1
+	if hid, _ := e.foldInfo(); hid != nil {
+		var vis []int
+		for r := range e.lines {
+			if !hid[r] {
+				vis = append(vis, r)
+			}
+		}
+		ci := sort.SearchInts(vis, e.cur.row)
+		if e.cur.row < e.top {
+			e.top = e.cur.row
+		} else if ti := ci - e.H + 1; ti > 0 && sort.SearchInts(vis, e.top) < ti {
+			e.top = vis[ti]
+		}
+	} else {
+		if e.cur.row < e.top {
+			e.top = e.cur.row
+		}
+		if e.cur.row >= e.top+e.H {
+			e.top = e.cur.row - e.H + 1
+		}
 	}
 	tw := e.textW()
 	if e.cur.col < e.left {
@@ -253,6 +427,12 @@ func (e *Editor) scroll() {
 }
 
 // gutterW is the line-number column plus " │ " before the text.
+// chunks is how many screen rows line r takes when wrapped.
+func (e *Editor) chunks(r int) int {
+	n, tw := runeLen(e.lines[r]), e.textW()
+	return max(1, (n+tw-1)/tw)
+}
+
 func (e *Editor) gutterW() int { return max(3, len(fmt.Sprint(len(e.lines)))) + 3 }
 func (e *Editor) textW() int   { return max(1, e.W-e.gutterW()) }
 
@@ -305,6 +485,9 @@ func (e *Editor) acceptComplete() {
 		} else {
 			text = strings.ToLower(text)
 		}
+	}
+	if e.Opts.AddSpace && c.Kind != "saved" && c.Kind != "snippet" {
+		text += " "
 	}
 	e.push("complete")
 	e.deleteSelection()
@@ -376,7 +559,7 @@ func (e *Editor) Undo() {
 	s := e.undo[len(e.undo)-1]
 	e.undo = e.undo[:len(e.undo)-1]
 	e.redo = append(e.redo, editSnap{lines: append([]string(nil), e.lines...), cur: e.cur})
-	e.lines, e.cur, e.anchor, e.lastKind = s.lines, s.cur, nil, ""
+	e.lines, e.cur, e.anchor, e.lastKind, e.blk = s.lines, s.cur, nil, "", nil
 	e.ac.open = false
 	e.markChanged()
 	e.scroll()
@@ -389,7 +572,7 @@ func (e *Editor) Redo() {
 	s := e.redo[len(e.redo)-1]
 	e.redo = e.redo[:len(e.redo)-1]
 	e.undo = append(e.undo, editSnap{lines: append([]string(nil), e.lines...), cur: e.cur})
-	e.lines, e.cur, e.anchor, e.lastKind = s.lines, s.cur, nil, ""
+	e.lines, e.cur, e.anchor, e.lastKind, e.blk = s.lines, s.cur, nil, "", nil
 	e.ac.open = false
 	e.markChanged()
 	e.scroll()
@@ -412,11 +595,15 @@ func (e *Editor) Handle(msg tea.Msg) bool {
 }
 
 func (e *Editor) handleKey(m tea.KeyPressMsg) bool {
+	e.marks = ""
+	if e.vim.on && e.vimKey(m) {
+		return true
+	}
 	k := tea.Key(m)
 	ks := m.Keystroke()
 	if k.Text != "" && k.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
 		e.push("type")
-		if e.HasSelection() && e.Opts.CloseBraces && len(k.Text) == 1 && closers[rune(k.Text[0])] != 0 && k.Text != "'" && k.Text != "\"" && k.Text != "`" {
+		if e.blk == nil && e.HasSelection() && e.Opts.CloseBraces && len(k.Text) == 1 && closers[rune(k.Text[0])] != 0 && k.Text != "'" && k.Text != "\"" && k.Text != "`" {
 			sel := e.Selection() // wrap the selection like most editors
 			e.Insert(k.Text + sel + string(closers[rune(k.Text[0])]))
 		} else if e.Opts.CloseBraces && runeLen(k.Text) == 1 {
@@ -456,6 +643,9 @@ func (e *Editor) handleKey(m tea.KeyPressMsg) bool {
 		ks = "outdent" // not a selection-extending key
 	} else if strings.HasPrefix(ks, "shift+") {
 		extend, ks = true, strings.TrimPrefix(ks, "shift+")
+	}
+	if e.blk != nil {
+		extend = false // the corner is e.blk, not the anchor: every arrow stretches the rectangle
 	}
 	row, col := e.cur.row, e.cur.col
 	switch ks {
@@ -756,75 +946,128 @@ func (e *Editor) View(th Theme, focused bool) string {
 		offs = c.offs
 	}
 	a, b, hasSel := e.selRange()
+	br0, br1, bc0, bc1, hasBlk := e.blockRect()
 	gw, tw := e.gutterW(), e.textW()
 	rule := th.Border.Render("│") + " "
 	var out []string
-	for vi := 0; vi < e.H; vi++ {
-		ri := e.top + vi
+	hid, foldN := e.foldInfo()
+	var vis []int // visible lines when something is folded
+	if hid != nil {
+		for r := range e.lines {
+			if !hid[r] {
+				vis = append(vis, r)
+			}
+		}
+	}
+	first := sort.SearchInts(vis, e.top)
+	e.curY = -1
+	for k := 0; len(out) < e.H; k++ {
+		ri := e.top + k
+		if hid != nil {
+			ri = len(e.lines)
+			if first+k < len(vis) {
+				ri = vis[first+k]
+			}
+		}
 		if ri >= len(e.lines) {
 			out = append(out, strings.Repeat(" ", gw-2)+rule+strings.Repeat(" ", max(0, e.W-gw)))
 			continue
 		}
+		if ri >= len(c.kinds) { // folds jump past the lexed window
+			c.kinds = lexLines(e.Dialect, e.lines[:ri+1])
+		}
+		kinds = c.kinds
 		r := e.runes(ri)
-		var sb strings.Builder
-		num := th.Dim.Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
-		if ri == e.cur.row {
-			num = th.Accent.Bold(true).Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
+		if n := foldN[ri]; n > 0 {
+			r = append(r, []rune(fmt.Sprintf(" … (%d lines)", n))...)
 		}
-		sb.WriteString(num + rule)
-		curLine := focused && e.Opts.Highlight && ri == e.cur.row
-		end := min(len(r), e.left+tw)
-		bytePos := 0
-		if curStmt != nil && ri < len(offs) {
-			bytePos = offs[ri] + len(string(r[:min(e.left, len(r))]))
-		}
-		// Characters are grouped into runs that share a style and rendered once per run:
-		// a Render call per character made big buffers slow to draw.
-		runKey, run := -1, make([]rune, 0, tw)
-		flush := func() {
-			if len(run) > 0 {
-				sb.WriteString(e.styleFor(th, runKey).Render(string(run)))
-				run = run[:0]
+		mk := e.markRow(r)
+		segs := [][2]int{{e.left, min(len(r), e.left+tw)}}
+		if e.Opts.Wrap {
+			n := max(1, (len(r)+tw-1)/tw)
+			if ri == e.cur.row && len(r) > 0 && e.cur.col == len(r) && len(r)%tw == 0 {
+				n++ // the cursor sits just past a full row: it needs a row of its own
+			}
+			segs = segs[:0]
+			for i := 0; i < n; i++ {
+				segs = append(segs, [2]int{i * tw, min(len(r), (i+1)*tw)})
 			}
 		}
-		for ci := e.left; ci < end; ci++ {
-			key := int(kinds[ri][ci])
-			if curStmt != nil && bytePos >= curStmt.Start && bytePos < curStmt.End {
-				key |= keyStmt
+		for si, seg := range segs {
+			if len(out) >= e.H {
+				break
 			}
-			if curLine {
-				key |= keyCurLine
+			from, end := seg[0], seg[1]
+			var sb strings.Builder
+			num := th.Dim.Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
+			if ri == e.cur.row {
+				num = th.Accent.Bold(true).Render(padLeft(fmt.Sprint(ri+1), gw-3) + " ")
 			}
-			if hasSel && (ri > a.row || ri == a.row && ci >= a.col) && (ri < b.row || ri == b.row && ci < b.col) {
-				key |= keySel
+			if si > 0 {
+				num = strings.Repeat(" ", gw-2)
 			}
-			if focused && ri == e.cur.row && ci == e.cur.col {
-				key = keyCursor
+			sb.WriteString(num + rule)
+			curLine := focused && e.Opts.Highlight && ri == e.cur.row
+			if ri == e.cur.row && e.cur.col >= from && (e.cur.col < from+tw || !e.Opts.Wrap) {
+				e.curY, e.curFrom = len(out), from
 			}
-			if key != runKey {
-				flush()
-				runKey = key
+			bytePos := 0
+			if curStmt != nil && ri < len(offs) {
+				bytePos = offs[ri] + len(string(r[:min(from, len(r))]))
 			}
-			ch := r[ci]
-			if ch == '\t' {
-				ch = ' '
+			// Characters are grouped into runs that share a style and rendered once per run:
+			// a Render call per character made big buffers slow to draw.
+			runKey, run := -1, make([]rune, 0, tw)
+			flush := func() {
+				if len(run) > 0 {
+					sb.WriteString(e.styleFor(th, runKey).Render(string(run)))
+					run = run[:0]
+				}
 			}
-			run = append(run, ch)
-			bytePos += len(string(r[ci]))
+			for ci := from; ci < end; ci++ {
+				key := 0
+				if ri < len(kinds) && ci < len(kinds[ri]) {
+					key = int(kinds[ri][ci])
+				}
+				if curStmt != nil && bytePos >= curStmt.Start && bytePos < curStmt.End {
+					key |= keyStmt
+				}
+				if curLine {
+					key |= keyCurLine
+				}
+				if mk != nil && mk[ci] {
+					key |= keySel
+				}
+				if hasBlk && ri >= br0 && ri <= br1 && ci >= bc0 && ci < bc1 {
+					key |= keySel
+				}
+				if hasSel && (ri > a.row || ri == a.row && ci >= a.col) && (ri < b.row || ri == b.row && ci < b.col) {
+					key |= keySel
+				}
+				if focused && ri == e.cur.row && ci == e.cur.col {
+					key = keyCursor
+				}
+				if key != runKey {
+					flush()
+					runKey = key
+				}
+				run = append(run, e.shown(r[ci]))
+				bytePos += len(string(r[ci]))
+			}
+			flush()
+			if focused && ri == e.cur.row && e.cur.col >= end && e.cur.col-from < tw {
+				sb.WriteString(th.SelCell.Render(" "))
+			}
+			line := ansi.Truncate(sb.String(), e.W, "")
+			if pad := e.W - width(line); pad > 0 {
+				if curLine { // the cursor-line tint runs to the right edge
+					line += th.CurRow.Render(strings.Repeat(" ", pad))
+				} else {
+					line += strings.Repeat(" ", pad)
+				}
+			}
+			out = append(out, line)
 		}
-		flush()
-		if focused && ri == e.cur.row && e.cur.col >= end && e.cur.col-e.left < tw {
-			sb.WriteString(th.SelCell.Render(" "))
-		}
-		line := ansi.Truncate(sb.String(), e.W, "")
-		if pad := e.W - width(line); pad > 0 {
-			if curLine { // the cursor-line tint runs to the right edge
-				line += th.CurRow.Render(strings.Repeat(" ", pad))
-			} else {
-				line += strings.Repeat(" ", pad)
-			}
-		}
-		out = append(out, line)
 	}
 	if e.ac.open && focused {
 		e.overlayComplete(th, out, gw)
@@ -846,10 +1089,14 @@ func (e *Editor) overlayComplete(th Theme, out []string, gw int) {
 	w := min(2+tw+2+kw+1, e.W-gw) // "› text  kind "
 	tw = max(1, w-5-kw)
 	_, st := e.prefixAtCursor()
-	x := clamp(gw+st-e.left-2, gw, max(gw, e.W-w)) // the text column lines up with the word being completed
-	y := e.cur.row - e.top + 1
+	left, cy := e.left, e.cur.row-e.top
+	if e.curY >= 0 {
+		left, cy = e.curFrom, e.curY
+	}
+	x := clamp(gw+st-left-2, gw, max(gw, e.W-w)) // the text column lines up with the word being completed
+	y := cy + 1
 	if y+n > e.H {
-		y = max(0, e.cur.row-e.top-n)
+		y = max(0, cy-n)
 	}
 	for i := 0; i < n && y+i < len(out); i++ {
 		c := e.ac.items[start+i]
@@ -887,4 +1134,79 @@ func RankCandidates(prefix string, all []Candidate, limit int) []Candidate {
 		}
 	}
 	return out
+}
+
+// Replace swaps the selection (or, with none, the whole buffer) for s as one undo step.
+func (e *Editor) Replace(s string) {
+	e.push("replace")
+	if !e.deleteSelection() {
+		e.lines, e.cur, e.anchor = []string{""}, pos{}, nil
+	}
+	e.Insert(s)
+	e.markChanged()
+}
+
+func matchAt(rs []rune, c int, q []rune) bool {
+	for i, r := range q {
+		if unicode.ToLower(rs[c+i]) != r {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerRunes(s string) []rune { return []rune(strings.Map(unicode.ToLower, s)) }
+
+// Find selects the next case-insensitive match of q after the cursor, wrapping around; false when there is none.
+func (e *Editor) Find(q string) bool {
+	qr := lowerRunes(q)
+	if len(qr) == 0 {
+		return false
+	}
+	n := len(e.lines)
+	for i := 0; i <= n; i++ {
+		row := (e.cur.row + i) % n
+		rs := e.runes(row)
+		from := 0
+		if i == 0 {
+			from = e.cur.col
+		}
+		for c := from; c+len(qr) <= len(rs); c++ {
+			if matchAt(rs, c, qr) {
+				e.anchor, e.cur = &pos{row, c}, pos{row, c + len(qr)}
+				e.scroll()
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ReplaceAll replaces every case-insensitive match of q (one undo step) and returns how many it changed.
+// shortcut: r is inserted on one line (newlines become spaces); a multi-line replacement needs a buffer rebuild.
+func (e *Editor) ReplaceAll(q, r string) int {
+	qr, rr := lowerRunes(q), []rune(strings.ReplaceAll(r, "\n", " "))
+	if len(qr) == 0 {
+		return 0
+	}
+	n, out := 0, make([]string, len(e.lines))
+	for i := range e.lines {
+		rs := e.runes(i)
+		var b []rune
+		for c := 0; c < len(rs); {
+			if c+len(qr) <= len(rs) && matchAt(rs, c, qr) {
+				b, c, n = append(b, rr...), c+len(qr), n+1
+			} else {
+				b, c = append(b, rs[c]), c+1
+			}
+		}
+		out[i] = string(b)
+	}
+	if n > 0 {
+		e.push("replace")
+		e.lines, e.anchor = out, nil
+		e.fixAnchor()
+		e.markChanged()
+	}
+	return n
 }

@@ -422,7 +422,7 @@ func (t *tableTab) docInput(msg tea.Msg) tea.Cmd {
 	case "G", "end":
 		t.jsonTop = 1 << 30
 	case "c":
-		return tea.Batch(tea.SetClipboard(strings.Join(docLines(t.docs), "\n")), t.ws.a.say("copied JSON"))
+		return tea.Batch(setClip(strings.Join(docLines(t.docs), "\n")), t.ws.a.say("copied JSON"))
 	}
 	return nil
 }
@@ -438,6 +438,12 @@ type quickLookDlg struct {
 	lines []string    // wrapped raw lines, built once per width
 	kinds [][]tokKind // their token kinds (JSON coloring)
 	wrapW int
+
+	a        *App
+	rawBytes []byte               // the cell as bytes, for hex editing and re-decoding
+	isBytes  bool                 // a binary cell: e edits it as hex
+	enc      string               // how rawBytes is shown now
+	onSave   func([]byte) tea.Cmd // set when the cell can be written back
 }
 
 // quickLookMax caps what quick look formats: a huge cell would be wrapped and pretty-printed per frame.
@@ -469,12 +475,24 @@ func (q *quickLookDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case "esc", "q":
 		return nil, nil
 	case "c":
-		return q, tea.SetClipboard(q.text)
+		return q, setClip(q.text)
 	case "r":
 		if q.tree != nil {
 			q.raw = !q.raw
 		}
 		return q, nil
+	case "v":
+		if q.a != nil && q.rawBytes != nil {
+			return q, q.pickEncoding()
+		}
+	case "e":
+		if q.a != nil && q.isBytes && q.onSave != nil {
+			return q, q.editHex()
+		}
+	case "s":
+		if q.a != nil && q.isBytes {
+			return q, q.saveAs()
+		}
 	}
 	if !q.raw {
 		q.tree.input(key)
@@ -522,6 +540,15 @@ func (q *quickLookDlg) View(th Theme, maxW, maxH int) string {
 			body = append(body, highlight(th, q.lines[i], q.kinds[i]))
 		}
 		hint = "↑↓: scroll   " + hint
+		if q.a != nil && q.rawBytes != nil {
+			hint = "v: encoding (" + q.enc + ")   " + hint
+		}
+		if q.a != nil && q.isBytes && q.onSave != nil {
+			hint = "e: edit hex   " + hint
+		}
+		if q.a != nil && q.isBytes {
+			hint = "s: save as…   " + hint
+		}
 		if q.tree != nil {
 			hint = "r: tree   " + hint
 		}
