@@ -144,6 +144,11 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
   const [rev, setRev] = useState<Review | null>(null)
   const [newDb, setNewDb] = useState(false), [dbName, setDbName] = useState(''), [enc, setEnc] = useState(''), [col, setCol] = useState('') // restore into a database created on the spot
   const [paths, setPaths] = useState(false)
+  const [extra, setExtra] = useState(''), [ticked, setTicked] = useState<string[]>([]), [pattern, setPattern] = useState('') // M13.4: extra tool options and a file-name pattern
+  const common = useQuery({ queryKey: ['backup-common', sid, restore], gcTime: 0, retry: false, queryFn: async (): Promise<{ options: BackupOption[]; extra: string[] }> => {
+    // the server's list (backup.CommonOptions / AllowedExtra); the static copy is only the fallback when the request fails
+    try { const r = await api<{ options?: BackupOption[]; extra?: string[] }>('GET', `/sessions/${sid}/backup/options?restore=${restore ? 1 : 0}`); return { options: r.options ?? [], extra: r.extra ?? [] } } catch { return { options: commonBackupOptions(info.driver, restore), extra: [] } }
+  } })
   const [job, setJob] = useState<{ id: string; data: Job } | null>(null)
   // what was chosen last time on this connection (remembered by the server, shared with the terminal UI)
   const last = useQuery({ queryKey: ['backup-options', info.name], queryFn: () => api<{ options: Record<string, string> }>('GET', '/state/backup-options' + qs({ conn: info.name })), gcTime: 0 })
