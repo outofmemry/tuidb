@@ -117,8 +117,8 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
     return () => { window.removeEventListener('pagehide', gone); if (pinnedRef.current) api('DELETE', `/sessions/${sid}/pin/${pinId}`).catch(() => {}) }
   }, [])
   const colCache = useRef(new Map<string, Promise<string[]>>())
-  const objs = useQuery({ queryKey: ['acobjects', sid, info.database, info.schema], queryFn: () => api<DbObject[]>('GET', `/sessions/${sid}/objects` + (info.schema ? `?schema=${encodeURIComponent(info.schema)}` : '')), enabled: info.caps.Editor === 'sql', gcTime: 0 })
-  const saved = useQuery({ queryKey: ['acqueries'], queryFn: () => api<{ Name: string; SQL: string; Keywords: string[] | null }[]>('GET', '/queries'), enabled: info.caps.Editor === 'sql', gcTime: 0 })
+  const objs = useQuery({ queryKey: ['acobjects', sid, info.database, info.schema], queryFn: () => api<DbObject[]>('GET', `/sessions/${sid}/objects` + (info.schema ? `?schema=${encodeURIComponent(info.schema)}` : '')), gcTime: 0 })
+  const saved = useQuery({ queryKey: ['acqueries'], queryFn: () => api<{ Name: string; SQL: string; Keywords: string[] | null }[]>('GET', '/queries'), gcTime: 0 })
   const colRef = useRef(0)
   const view = useRef<EditorView | null>(null) // the editor that has the focus
   // split_down: a second editor stacked under the first. shortcut: its text is not saved with the tab, and a run sends the focused editor's text
