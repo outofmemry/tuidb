@@ -748,10 +748,6 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   )
 }
 
-const isDark = () => {
-  const t = document.documentElement.dataset.theme
-  return t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
-}
 const pretty = (d: string) => { try { return JSON.stringify(JSON.parse(d), null, 2) } catch { return d } }
 
 // The Message view: the command tag or row count, the server notices (PostgreSQL RAISE NOTICE) and the time; it can be saved as text.
