@@ -192,7 +192,7 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
     <Dialog title={restore ? 'Restore database' : 'Back up database'} onClose={running ? () => {} : onClose}>
       {!job && (
         <>
-          <div className={ROW}><input autoFocus className="flex-1" placeholder={restore ? 'name of the file to restore' : 'name of the backup file'} title="Files live in the backups folder of the data directory" aria-label="File path" value={file} onChange={(e) => { setFile(e.target.value); setRev(null) }} /></div>
+          <div className={ROW}><input autoFocus className="flex-1" onKeyDown={(e) => enterSubmits(e, () => { if (rev?.display && rev.tool.Found) { if (!rev.gate?.password || password) call(true) } else if (file || pattern.trim()) call(false) })} placeholder={restore ? 'name of the file to restore' : 'name of the backup file'} title="Files live in the backups folder of the data directory" aria-label="File path" value={file} onChange={(e) => { setFile(e.target.value); setRev(null) }} /></div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px]">
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={gzip} onChange={(e) => { setGzip(e.target.checked); setRev(null) }} />gzip</label>
             {info.driver === 'postgres' && <Select className="bg-raised border-transparent" aria-label="Format" value={format} onChange={(v) => { setFormat(v); setRev(null) }} options={['plain', 'custom']} />}
