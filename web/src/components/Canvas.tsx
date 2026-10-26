@@ -133,26 +133,30 @@ export function DiagramCanvas({ tables, storageKey, query, centerOn, canLink, co
         <button onClick={() => { setPos(autoLayout(tables)); setTimeout(fit, 0) }} title="Forget the arrangement and lay the tables out again">Reset layout</button>
       </div>
       <svg ref={svg} className="w-full h-full touch-none cursor-grab active:cursor-grabbing select-none font-mono" role="img" aria-label="Entity relationship diagram: drag the background to pan, the wheel to zoom, a table's header to move it"
-        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        onContextMenu={(e) => {
+          const el = (e.target as Element).closest<SVGElement>('[data-tbl]'), t = el && byKey.get(el.dataset.tbl!); if (!t) return
+          e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, t, col: (e.target as Element).closest<SVGElement>('[data-col]')?.dataset.col })
+        }}>
         <defs><marker id="er-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L10,5 L0,9 z" fill="var(--ink-2)" /></marker></defs>
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-          {edges.map((e) => <path key={e.id} d={e.d} fill="none" stroke={`hsl(${e.h} 55% 55%)`} strokeWidth={1.5} markerEnd="url(#er-arrow)" opacity={e.dim ? 0.2 : 0.85} />)}
+          {edges.map((e) => <path key={e.id} d={e.d} fill="none" stroke={e.stroke} strokeWidth={1.5} markerEnd="url(#er-arrow)" opacity={e.dim ? 0.2 : 0.85} />)}
           {tables.map((t) => {
             const k = tk(t.ref), p = pos[k]; if (!p) return null
             const fkCols = new Set(t.fks.flatMap((f) => f.columns)), match = !q || t.ref.Name.toLowerCase().includes(q)
             return (
-              <g key={k} transform={`translate(${p.x} ${p.y})`} opacity={match ? 1 : 0.3}>
-                <rect width={BW} height={boxH(t)} rx={2} fill="var(--panel)" stroke={`hsl(${hue(t)} 40% 50% / .7)`} />
-                <rect width={BW} height={HEAD} rx={2} fill={`hsl(${hue(t)} 45% 50% / .28)`} data-head={k} className="cursor-move"><title>Drag to move</title></rect>
+              <g key={k} data-tbl={k} transform={`translate(${p.x} ${p.y})`} opacity={match ? 1 : 0.3}>
+                <rect width={BW} height={boxH(t)} rx={2} fill="var(--panel)" stroke={tint(t) ?? `hsl(${hue(t)} 40% 50% / .7)`} />
+                <rect width={BW} height={HEAD} rx={2} fill={tint(t) ?? `hsl(${hue(t)} 45% 50% / .28)`} fillOpacity={tint(t) ? 0.3 : 1} data-head={k} className="cursor-move"><title>Drag to move</title></rect>
                 <g data-open transform={`translate(${BW - 52} 5)`} className="cursor-pointer" role="button" aria-label={`Open the structure of ${t.ref.Name}`} onClick={() => onStructure(t.ref)}>
                   <rect width={46} height={18} rx={2} fill="var(--canvas)" stroke="var(--rule-2)" /><text x={23} y={12.5} fontSize={10.5} textAnchor="middle" fill="var(--ink-2)">Open</text>
                 </g>
                 <text x={10} y={18} fontSize={12.5} fontWeight={600} fill="var(--ink)" pointerEvents="none">{t.ref.Name.length > 20 ? t.ref.Name.slice(0, 19) + '…' : t.ref.Name}</text>
                 {t.columns.map((c, i) => (
-                  <g key={c.name} transform={`translate(0 ${HEAD + i * ROWH})`}>
+                  <g key={c.name} data-col={c.name} transform={`translate(0 ${HEAD + i * ROWH})`}>
                     <text x={10} y={14} fontSize={11.5} fill={c.pk ? 'var(--accent)' : 'var(--ink)'} pointerEvents="none">{c.pk ? '# ' : fkCols.has(c.name) ? '→ ' : '  '}{c.name.length > 16 ? c.name.slice(0, 15) + '…' : c.name}</text>
                     <text x={BW - 22} y={14} fontSize={10.5} fill="var(--ink-3)" textAnchor="end" pointerEvents="none">{c.type.length > 12 ? c.type.slice(0, 11) + '…' : c.type}</text>
-                    {canLink && <circle cx={BW - 10} cy={10} r={4.5} data-link={c.name} data-t={k} className="cursor-crosshair" fill="var(--canvas)" stroke={`hsl(${hue(t)} 55% 55%)`}><title>Drag onto another table to add a foreign key from {c.name}</title></circle>}
+                    {canLink && <circle cx={BW - 10} cy={10} r={4.5} data-link={c.name} data-t={k} className="cursor-crosshair" fill="var(--canvas)" stroke={edge(t, tint(t))}><title>Drag onto another table to add a foreign key from {c.name}</title></circle>}
                   </g>
                 ))}
               </g>
