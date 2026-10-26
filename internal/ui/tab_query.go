@@ -17,18 +17,23 @@ import (
 )
 
 type resultView struct {
-	title   string
-	grid    *Grid
-	msg     string
-	isErr   bool
-	hasRows bool
-	took    time.Duration
-	trunc   bool
-	rows    int
-	stmt    string
-	pinned  bool       // survives the next run
-	ref     *db.ObjRef // set when the result maps to one table and can be edited
-	find    string
+	title     string
+	grid      *Grid
+	msg       string
+	isErr     bool
+	hasRows   bool
+	took      time.Duration
+	trunc     bool
+	rows      int
+	stmt      string
+	pinned    bool       // survives the next run
+	ref       *db.ObjRef // set when the result maps to one table and can be edited
+	find      string
+	raw       *db.Result // the rows as the server sent them: export and chart read these
+	chart     bool       // show the chart instead of the grid
+	limit     int        // row limit this result was fetched with when "load more" raised it
+	matchCase bool       // the result search is case-sensitive
+	msgView   bool       // show the message lines (notices, status) instead of the rows
 }
 
 type queryTab struct {
@@ -36,6 +41,8 @@ type queryTab struct {
 	id           int
 	name         string
 	ed           *Editor
+	other        *Editor // split_down: the second editor of the stack; ed is always the focused one
+	focusBottom  bool    // ed is the lower editor of the stack
 	res          []*resultView
 	rc           int
 	focusResults bool
@@ -56,6 +63,12 @@ type queryTab struct {
 	firstErr int // index of the first failed result in this batch, -1 if none
 	replace  int // >= 0: the next result replaces this index instead of starting a new set
 	closed   bool
+	override int               // row limit for the next fetch (load more); 0 = t.limit
+	edFind   string            // last editor search text
+	unbound  map[string]string // bound statement text -> the text as typed: history and the console never see variable values
+	pinning  bool              // a pin or unpin is in flight
+	pin      db.Session        // a dedicated connection (db.Pinner): every statement of this tab runs on it
+	sum      *batchSummary     // a run of more than summaryOver statements keeps one summary instead of a result tab each
 }
 
 func newQueryTab(ws *Workspace, id int) *queryTab {
@@ -64,14 +77,29 @@ func newQueryTab(ws *Workspace, id int) *queryTab {
 		limit: ws.a.d.State.RowLimit(ws.conn.Name, 1000)}
 	t.ed = NewEditor(ws.caps.Dialect, EditorOpts{
 		TabWidth: c.IndentWidth, UseTabs: c.Indent == "tabs", CloseBraces: c.CloseBraces, Uppercase: c.UppercaseKeywords,
-		CompleteKey: c.CompleteKey, Highlight: c.HighlightCurrent, Autocomplete: c.Autocomplete,
+		CompleteKey: c.CompleteKey, Highlight: c.HighlightCurrent, Autocomplete: c.Autocomplete, Wrap: c.Wrap, AddSpace: c.AddSpace,
 	})
 	t.ed.Complete = t.complete
+	t.ed.OnFolds = func(f []int) { ws.a.d.State.SetFolds(t.foldKey(), f) }
 	return t
 }
 
-func (t *queryTab) ID() int       { return t.id }
-func (t *queryTab) Title() string { return t.name }
+// foldKey names this editor in the saved fold state.
+func (t *queryTab) foldKey() string {
+	if t.savedAs != "" {
+		return t.savedAs
+	}
+	return fmt.Sprintf("%s/tab%d", t.ws.conn.Name, t.id)
+}
+
+func (t *queryTab) ID() int { return t.id }
+func (t *queryTab) Title() string {
+	pin := ""
+	if t.pin != nil {
+		pin = " [pinned]"
+	}
+	return t.name + pin + t.ed.vimBadge() + t.ed.blockBadge()
+}
 func (t *queryTab) Init() tea.Cmd { return nil }
 
 func (t *queryTab) Context() string {
@@ -83,6 +111,8 @@ func (t *queryTab) Context() string {
 
 // ---- autocomplete -----------------------------------------------------------------------
 
+var noticeRe = regexp.MustCompile(`^(NOTICE|WARNING|INFO|LOG|DEBUG\d?): `)
+
 var refRe = regexp.MustCompile(`(?i)\b(?:from|join|update|into|table)\s+((?:"[^"]+"|\w+)(?:\.(?:"[^"]+"|\w+))?)`)
 
 func (t *queryTab) complete(prefix string) []Candidate {
@@ -91,8 +121,14 @@ func (t *queryTab) complete(prefix string) []Candidate {
 	word := prefix
 	if i := strings.LastIndex(prefix, "."); i >= 0 {
 		qual, word = strings.ToLower(strings.Trim(prefix[:i], `"`)), prefix[i+1:]
+		qual = t.aliasAtCursor(qual) // "c." where c is an alias of customers
 	}
 	if qual != "" {
+		if t.ws.caps.Dialect == "mongo" {
+			if ms := mongoMethodCandidates(qual); ms != nil {
+				return RankCandidates(word, ms, 50)
+			}
+		}
 		for _, c := range t.cols[qual] {
 			all = append(all, Candidate{Text: c, Kind: "column"})
 		}
@@ -111,8 +147,16 @@ func (t *queryTab) complete(prefix string) []Candidate {
 			all = append(all, Candidate{Text: text, Kind: kind})
 		}
 	}
+	cfg := t.ws.a.d.Cfg.Editor
 	for _, o := range t.ws.sb.objs {
+		fn := o.Kind == db.KindFunction || o.Kind == db.KindProcedure
+		if fn && !cfg.CompleteFunctions || !fn && !cfg.CompleteTables {
+			continue
+		}
 		add(o.Name, string(o.Kind))
+		if cfg.PrefixSchema && o.Schema != "" {
+			all[len(all)-1].Insert = o.Schema + "." + o.Name
+		}
 	}
 	for _, m := range refRe.FindAllStringSubmatch(t.ed.Text(), -1) {
 		name := strings.ToLower(strings.Trim(m[1], `"`))
@@ -127,16 +171,21 @@ func (t *queryTab) complete(prefix string) []Candidate {
 		for k, q := range store.Keywords(qs) {
 			if !seen[strings.ToLower(k)] {
 				seen[strings.ToLower(k)] = true
-				all = append(all, Candidate{Text: k, Kind: "saved", Insert: q.SQL})
+				c := Candidate{Text: k, Kind: "saved", Insert: q.SQL}
+				if sn, ok := strings.CutPrefix(k, "snippet:"); ok { // a saved query keyworded snippet:<trigger> expands from <trigger>
+					c.Text, c.Kind = sn, "snippet"
+				}
+				all = append(all, c)
 			}
 		}
 	}
-	switch t.ws.caps.Dialect {
-	case "redis":
+	switch {
+	case !cfg.CompleteKeywords:
+	case t.ws.caps.Dialect == "redis":
 		for k := range redisCommands {
 			add(k, "keyword")
 		}
-	case "mongo":
+	case t.ws.caps.Dialect == "mongo":
 		for k := range mongoWords {
 			add(k, "keyword")
 		}
@@ -254,6 +303,15 @@ func (t *queryTab) run(stmts []db.Stmt) tea.Cmd {
 	if t.running {
 		return t.ws.a.say("a query is already running; cancel it first")
 	}
+	if t.ws.a.d.Cfg.Editor.QueryParams {
+		if names := t.paramNames(stmts); len(names) > 0 {
+			return t.askVars(stmts, t.paramFormat(), func(vals map[string]string, format string) tea.Cmd { return t.runBound(t.bindAs(stmts, vals, format)) })
+		}
+	}
+	return t.runBound(stmts)
+}
+
+func (t *queryTab) runBound(stmts []db.Stmt) tea.Cmd {
 	var gated []db.Statement
 	for _, s := range stmts {
 		gated = append(gated, db.Statement{Text: s.Text})
@@ -282,14 +340,18 @@ func (t *queryTab) start(stmts []db.Stmt) tea.Cmd {
 	if t.running || t.closed {
 		return nil
 	}
-	var keep []*resultView // pinned results stay; everything else is replaced
+	var keep []*resultView // pinned results stay; everything else is replaced (result_mode = append keeps all)
 	for _, r := range t.res {
-		if r.pinned {
+		if r.pinned || t.ws.a.d.Cfg.Editor.ResultMode == "append" {
 			keep = append(keep, r)
 		}
 	}
-	t.replace = -1
-	t.running, t.queue, t.res, t.rc, t.status, t.firstErr = true, stmts, keep, 0, "", -1
+	t.replace, t.sum = -1, nil
+	if len(stmts) > summaryOver {
+		t.sum = &batchSummary{total: len(stmts)}
+	}
+	t.running, t.queue, t.res, t.rc, t.status, t.firstErr = true, stmts, keep, max(0, len(keep)-1), "", -1
+	t.override = 0
 	t.batch++
 	t.started = time.Now()
 	t.focusResults = false
@@ -308,7 +370,10 @@ func (t *queryTab) next() tea.Cmd {
 	t.queue = t.queue[1:]
 	ctx, cancel := context.WithCancel(context.Background())
 	t.cancel = cancel
-	ws, sess, batch, tab, limit, gen := t.ws, t.ws.sess, t.batch, t.id, t.limit, t.ws.gen
+	ws, sess, batch, tab, limit, gen := t.ws, t.sess(), t.batch, t.id, t.limit, t.ws.gen
+	if t.override > 0 {
+		limit = t.override
+	}
 	return func() tea.Msg {
 		start := time.Now()
 		res, err := sess.Exec(ctx, s.Text, limit)
@@ -319,6 +384,10 @@ func (t *queryTab) next() tea.Cmd {
 // Close cancels a running statement when the tab goes away.
 func (t *queryTab) Close() {
 	t.closed = true
+	if t.pin != nil {
+		t.pin.Close()
+		t.pin = nil
+	}
 	if t.cancel != nil {
 		t.cancel()
 	}
@@ -336,6 +405,7 @@ func (t *queryTab) Cancel() tea.Cmd {
 	t.queue = nil
 	t.batch++ // late results of the cancelled statement are dropped
 	t.running = false
+	t.override, t.replace = 0, -1
 	t.status = "cancelled"
 	return t.ws.a.say("query cancelled")
 }
@@ -356,6 +426,8 @@ func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
 				return t.timeoutTick()
 			}})
 		return nil
+	case explainMsg:
+		return t.showExplain(m)
 	case resultColsMsg:
 		t.applyResultCols(m)
 	case colsLoadedMsg:
@@ -365,13 +437,21 @@ func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
 		if m.batch != t.batch {
 			return nil
 		}
-		t.ws.record(m.stmt.Text, "editor", m.took, m.err)
-		rv := t.toResult(m)
-		if t.ws.a.d.Cfg.Editor.ResultMode == "append" && len(t.res) > 0 {
-			rv.title = t.res[0].title
+		t.ws.record(t.typed(m.stmt.Text), "editor", m.took, m.err)
+		if m.res != nil {
+			for _, l := range strings.Split(m.res.Message, "\n") {
+				if noticeRe.MatchString(l) {
+					t.ws.log("-- "+l, 0, nil) // RAISE NOTICE lines belong in the console too
+				}
+			}
 		}
+		if t.sum != nil && t.replace < 0 {
+			return t.summaryStep(m)
+		}
+		rv := t.toResult(m)
 		if t.replace >= 0 && t.replace < len(t.res) { // a committed result is refreshed in place
-			rv.title, rv.pinned = t.res[t.replace].title, t.res[t.replace].pinned
+			rv.title, rv.pinned, rv.chart = t.res[t.replace].title, t.res[t.replace].pinned, t.res[t.replace].chart
+			rv.limit, t.override = t.override, 0
 			t.res[t.replace] = rv
 			t.running, t.queue, t.rc, t.replace = false, nil, t.replace, -1
 			t.focusResults = true
@@ -424,7 +504,7 @@ func (t *queryTab) toResult(m queryDoneMsg) *resultView {
 	for i, c := range r.Columns {
 		cols[i] = gridCol{Name: c.Name, Type: c.Type}
 	}
-	rv.hasRows, rv.rows = true, len(r.Rows)
+	rv.hasRows, rv.rows, rv.raw = true, len(r.Rows), r
 	rv.grid = &Grid{}
 	rv.grid.SetData(cols, r.Rows)
 	return rv
@@ -444,7 +524,7 @@ func (t *queryTab) Input(msg tea.Msg) tea.Cmd {
 		switch m.Keystroke() {
 		case "ctrl+c":
 			if sel := t.ed.Selection(); sel != "" {
-				return tea.SetClipboard(sel)
+				return setClip(sel)
 			}
 			return nil
 		case "ctrl+x":
@@ -452,13 +532,14 @@ func (t *queryTab) Input(msg tea.Msg) tea.Cmd {
 				t.ed.push("cut")
 				t.ed.deleteSelection()
 				t.ed.Changed = true
-				return tea.Batch(tea.SetClipboard(sel), t.afterEdit())
+				return tea.Batch(setClip(sel), t.afterEdit())
 			}
 			return nil
 		case "ctrl+v":
 			return tea.ReadClipboard
 		case "esc":
-			t.ed.anchor = nil
+			t.ed.anchor, t.ed.blk = nil, nil
+			t.ed.vimEsc()
 			return nil
 		}
 	}
@@ -487,6 +568,7 @@ func (t *queryTab) afterEdit() tea.Cmd {
 }
 
 func (t *queryTab) resultsInput(msg tea.Msg) tea.Cmd {
+	t.rc = min(max(t.rc, 0), len(t.res)-1)
 	rv := t.res[t.rc]
 	if rv.grid != nil && rv.grid.Editing() { // paste into the open cell editor
 		switch m := msg.(type) {
@@ -520,6 +602,17 @@ func (t *queryTab) resultsInput(msg tea.Msg) tea.Cmd {
 	case "esc":
 		t.focusResults = false
 		return nil
+	case "m":
+		rv.msgView = !rv.msgView
+		return nil
+	case "s":
+		if rv.msgView {
+			return t.saveMessage(rv)
+		}
+	case "b":
+		if rv.chart && rv.raw != nil {
+			return t.ws.addToBoard(rv)
+		}
 	case "p":
 		rv.pinned = !rv.pinned
 		return t.ws.a.say("%s %s", rv.title, map[bool]string{true: "pinned: it stays when you run again", false: "unpinned"}[rv.pinned])
@@ -551,10 +644,7 @@ func (t *queryTab) resultsInput(msg tea.Msg) tea.Cmd {
 	case "G":
 		g.GoRow(len(g.Rows)-1, false)
 	case "/":
-		t.ws.a.push(newForm("Find in this result", []formField{{Key: "q", Label: "Text", Kind: fText, Value: rv.find}}, func(v map[string]string) tea.Cmd {
-			rv.find = v["q"]
-			return t.findIn(rv, 1)
-		}))
+		return t.findPrompt(rv)
 	case "n":
 		return t.findIn(rv, 1)
 	case "N":
@@ -572,10 +662,27 @@ func (t *queryTab) resultsInput(msg tea.Msg) tea.Cmd {
 			return editCellInPopover(t.ws, g)
 		}
 		if v, ok := g.CursorValue(); ok {
-			text := plain(v)
-			t.ws.a.push(newQuickLook(g.Cols[g.col].Name, text))
+			t.ws.a.push(t.ws.a.newQuickLookValue(g.Cols[g.col].Name, v, nil))
 		}
 	}
+	return nil
+}
+
+func (t *queryTab) findPrompt(rv *resultView) tea.Cmd {
+	if rv.grid == nil {
+		return t.ws.a.say("nothing to search in this result")
+	}
+	var f *formDlg
+	title := func() string {
+		return "Find in this result · match case " + map[bool]string{true: "on", false: "off"}[rv.matchCase]
+	}
+	f = newForm(title(), []formField{{Key: "q", Label: "Text", Kind: fText, Value: rv.find}}, func(v map[string]string) tea.Cmd {
+		rv.find = v["q"]
+		return t.findIn(rv, 1)
+	})
+	f.hotHint = "Alt+c: match case"
+	f.hotkeys = map[string]func(map[string]string) tea.Cmd{"alt+c": func(map[string]string) tea.Cmd { rv.matchCase = !rv.matchCase; f.title = title(); return nil }}
+	t.ws.a.push(f)
 	return nil
 }
 
@@ -583,7 +690,7 @@ func (t *queryTab) findIn(rv *resultView, dir int) tea.Cmd {
 	if rv.find == "" {
 		return t.ws.a.say("press / to search this result")
 	}
-	if !rv.grid.Find(rv.find, dir) {
+	if !rv.grid.FindCase(rv.find, dir, rv.matchCase) {
 		return t.ws.a.say("%q is not in this result", rv.find)
 	}
 	return nil
@@ -593,7 +700,7 @@ func (t *queryTab) copyOut(text, what string) tea.Cmd {
 	if text == "" {
 		return nil
 	}
-	return tea.Batch(tea.SetClipboard(text), t.ws.a.say("copied %s", what))
+	return tea.Batch(setClip(text), t.ws.a.say("copied %s", what))
 }
 
 func (t *queryTab) Action(name string) (bool, tea.Cmd) {
@@ -610,6 +717,9 @@ func (t *queryTab) Action(name string) (bool, tea.Cmd) {
 			return true, t.Cancel()
 		}
 		return false, nil
+	case "fold":
+		t.ed.ToggleFold()
+		return true, nil
 	case "toggle_comment":
 		t.ed.ToggleComment()
 		return true, t.afterEdit()
@@ -636,10 +746,69 @@ func (t *queryTab) Action(name string) (bool, tea.Cmd) {
 		return true, t.saveAs()
 	case "set_limit":
 		return true, t.pickLimit()
-	case "beautify", "uglify", "find", "find_replace", "select_next_occurrence", "select_all_occurrences":
-		return true, t.ws.a.say("%s arrives in a later milestone", name)
+	case "beautify", "uglify":
+		return true, t.reformat(name == "beautify")
+	case "find":
+		if rv := t.curResult(); t.focusResults && rv != nil {
+			return true, t.findPrompt(rv)
+		}
+		return true, t.findInEditor()
+	case "find_replace":
+		return true, t.replaceInEditor()
+	case "find_next", "find_prev":
+		return true, t.findStep(map[string]int{"find_next": 1, "find_prev": -1}[name])
+	case "block_select":
+		return true, t.ws.a.say("%s", t.ed.toggleBlock())
+	case "split_down":
+		return true, t.splitDown()
+	case "next_pane", "prev_pane":
+		if t.other == nil {
+			return false, nil
+		}
+		t.swapPane()
+		return true, nil
+	case "variables":
+		return true, t.editVars()
+	case "chart", "load_more", "copy_rows", "copy_cells", "copy_rows_as":
+		return true, t.resultOnly(name)
+	case "select_next_occurrence", "select_all_occurrences", "vim_mode", "invisibles":
+		return true, t.ws.a.say("%s", t.ed.extra(name))
 	case "reload_tab":
 		return true, nil
+	case "wrap_lines":
+		t.ed.Opts.Wrap = !t.ed.Opts.Wrap
+		t.ed.left = 0
+		return true, t.ws.a.say("line wrap %s", map[bool]string{true: "on", false: "off"}[t.ed.Opts.Wrap])
+	case "explain":
+		return true, t.explain()
+	case "complete":
+		if !t.ed.openComplete() {
+			return true, t.ws.a.say("nothing to complete here")
+		}
+		return true, nil
+	case "upper_case", "lower_case", "capitalize":
+		if m := t.ed.transform(name); m != "" {
+			return true, t.ws.a.say("%s", m)
+		}
+		return true, t.afterEdit()
+	case "use_selection_find":
+		q := t.ed.Selection()
+		if q == "" {
+			q = t.ed.wordAtCursor()
+		}
+		if q == "" {
+			return true, t.ws.a.say("put the cursor on a word or select some text first")
+		}
+		t.edFind = q
+		return true, t.ws.a.say("find text is now %q (the find action jumps to the next match)", q)
+	case "jump_to_selection":
+		t.ed.scroll()
+		t.focusResults = false
+		return true, nil
+	case "cleanup_variables":
+		n := len(t.ws.vars)
+		t.ws.vars = nil
+		return true, t.ws.a.say("forgot %s", plural(n, "remembered variable"))
 	}
 	return false, nil
 }
@@ -705,14 +874,17 @@ func (t *queryTab) addToQueries() tea.Cmd {
 				kws = append(kws, k)
 			}
 		}
-		q, err := t.ws.a.d.Queries.Save(strings.Trim(v["folder"], "/ "), v["name"], kws, text)
-		if err != nil {
-			return t.ws.a.fail(err)
-		}
-		if text == t.ed.Text() { // the whole buffer was saved: keep auto-saving it
-			t.savedAs, t.lastAuto = q.Path, text
-		}
-		return t.ws.a.say("saved %s", q.Name)
+		folder := strings.Trim(v["folder"], "/ ")
+		return t.ws.a.ifNoQuery(folder, v["name"], func() tea.Cmd {
+			q, err := t.ws.a.d.Queries.Save(folder, v["name"], kws, text)
+			if err != nil {
+				return t.ws.a.fail(err)
+			}
+			if text == t.ed.Text() { // the whole buffer was saved: keep auto-saving it
+				t.savedAs, t.lastAuto = q.Path, text
+			}
+			return t.ws.a.say("saved %s", q.Name)
+		})
 	}))
 	return nil
 }
@@ -723,10 +895,13 @@ func (t *queryTab) saveAs() tea.Cmd {
 		if path == "" {
 			return t.ws.a.fail(fmt.Errorf("file name required"))
 		}
-		if err := writeFile(path, t.ed.Text()); err != nil {
-			return t.ws.a.fail(err)
-		}
-		return t.ws.a.say("saved %s", path)
+		text := t.ed.Text()
+		return t.ws.a.ifFree(func() tea.Cmd {
+			if err := writeFile(path, text); err != nil {
+				return t.ws.a.fail(err)
+			}
+			return t.ws.a.say("saved %s", path)
+		}, path)
 	}))
 	return nil
 }
@@ -744,9 +919,8 @@ func (t *queryTab) View(th Theme, W, H int) string {
 	if edH < 3 {
 		edH, resH = max(1, H-1), 0
 	}
-	t.ed.W, t.ed.H = W, edH
 	editorFocused := !t.ws.focusSB && !(t.focusResults && resH > 0)
-	parts := []string{t.ed.View(th, editorFocused), t.runBar(th, W)}
+	parts := []string{t.editorsView(th, W, edH, editorFocused), t.runBar(th, W)}
 	if resH > 0 {
 		parts = append(parts, t.resultsView(th, W, resH-1))
 	}
@@ -760,6 +934,9 @@ func (t *queryTab) runBar(th Theme, W int) string {
 		limit = fmt.Sprintf("limit %d", t.limit)
 	}
 	left := th.chips(key("run_current"), "run", key("run_all"), "run all", key("set_limit"), limit)
+	if t.ws.a.d.Cfg.Editor.RunDefault == "all" { // [editor] run_default: the first chip is what the run button does
+		left = th.chips(key("run_all"), "run", key("run_current"), "run current", key("set_limit"), limit)
+	}
 	status := ""
 	switch {
 	case t.running:
@@ -767,19 +944,22 @@ func (t *queryTab) runBar(th Theme, W int) string {
 	case t.status == "cancelled":
 		status = th.Warn.Render("⚠ cancelled")
 	case t.status != "":
-		failed := 0
+		failed, count := 0, len(t.res)
 		for _, r := range t.res {
 			if r.isErr {
 				failed++
 			}
 		}
+		if t.sum != nil { // a summarised run: the counts are the statements', not the tabs'
+			failed, count = t.sum.fail, t.sum.done
+		}
 		switch {
 		case failed == 0:
-			status = th.OK.Render("✓ ") + th.Dim.Render(plural(len(t.res), "statement")+" · "+t.status)
-		case len(t.res) == 1:
+			status = th.OK.Render("✓ ") + th.Dim.Render(plural(count, "statement")+" · "+t.status)
+		case count == 1:
 			status = th.Err.Render("✗ failed") + th.Dim.Render(" · "+t.status)
 		default:
-			status = th.Err.Render(fmt.Sprintf("✗ %d of %d failed", failed, len(t.res))) + th.Dim.Render(" · "+t.status)
+			status = th.Err.Render(fmt.Sprintf("✗ %d of %d failed", failed, count)) + th.Dim.Render(" · "+t.status)
 		}
 	}
 	// a hairline between the keys and the status separates the editor from the results
@@ -864,6 +1044,7 @@ func (t *queryTab) resultsView(th Theme, W, H int) string {
 		}
 		tabs = append(tabs, label)
 	}
+	t.rc = min(max(t.rc, 0), len(t.res)-1)
 	rv := t.res[t.rc]
 	info := th.Dim.Render(tookStr(rv.took))
 	if rv.hasRows {
@@ -878,11 +1059,23 @@ func (t *queryTab) resultsView(th Theme, W, H int) string {
 	case rv.isErr:
 		lines = append(lines, "")
 		lines = append(lines, errorLines(th, rv.msg, W)...)
+	case rv.msgView:
+		lines = append(lines, "")
+		for _, l := range wrapText(orDefault(rv.msg, "(no messages)"), W-6) {
+			lines = append(lines, "  "+l)
+		}
+		lines = append(lines, "", "  "+th.Dim.Render("m: back to the rows   s: save as text"))
+	case rv.hasRows && rv.chart:
+		lines = append(lines, chartLines(th, rv, W, H)...)
 	case rv.hasRows:
 		rv.grid.W, rv.grid.H = W, H
 		lines = append(lines, rv.grid.View(th, t.focusResults))
 		if rv.msg != "" && H > 3 {
-			lines = append(lines, th.Dim.Render(fit(" "+rv.msg, W)))
+			first, rest, more := strings.Cut(rv.msg, "\n")
+			if more {
+				first += fmt.Sprintf(" (+%d more lines: m)", strings.Count(rest, "\n")+1)
+			}
+			lines = append(lines, th.Dim.Render(fit(" "+first, W)))
 		}
 	default:
 		lines = append(lines, "")
