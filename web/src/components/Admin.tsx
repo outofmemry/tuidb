@@ -204,6 +204,11 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
             {newDb && <div className="flex flex-wrap gap-2 mt-1.5 pl-5"><input aria-label="New database name" placeholder="new database name" value={dbName} onChange={(e) => { setDbName(e.target.value); setRev(null) }} />
               {opts && <><input aria-label="Encoding" placeholder="encoding (optional)" value={enc} onChange={(e) => { setEnc(e.target.value); setRev(null) }} /><input aria-label="Collation" placeholder="collation (optional)" value={col} onChange={(e) => { setCol(e.target.value); setRev(null) }} /></>}</div>}
           </div>}
+          <div className={ROW}><label className="w-28 text-ink-2" htmlFor="m13-pattern">File name pattern</label><input id="m13-pattern" className="flex-1 min-w-0" placeholder="{database}-{date}.sql" title="Tokens: {connection} {database} {table} {tag} {date} {time}. Used instead of the name above when filled." value={pattern} onChange={(e) => { setPattern(e.target.value); setRev(null) }} /></div>
+          {!!common.data?.options.length && <fieldset className="border border-rule px-2.5 py-1.5 my-2 min-w-0"><legend className="text-ink-2 text-[12px] px-1">Common options</legend>
+            <div className="flex flex-col gap-0.5 text-[12.5px]">{common.data.options.map((o) => <label key={o.Flag} className="flex items-center gap-1.5" title={o.Desc}><input type="checkbox" checked={ticked.includes(o.Flag)} onChange={(e) => { setTicked(e.target.checked ? [...ticked, o.Flag] : ticked.filter((x) => x !== o.Flag)); setRev(null) }} /><code>{o.Flag}</code><span className="text-ink-3">{o.Desc}</span></label>)}</div></fieldset>}
+          <div className={ROW}><label className="w-28 text-ink-2" htmlFor="m13-extra">Extra options</label><input id="m13-extra" className="flex-1 min-w-0 font-mono" placeholder="--no-comments --lock-wait-timeout=5" value={extra} onChange={(e) => { setExtra(e.target.value); setRev(null) }} /></div>
+          {!!common.data?.extra.length && <div className="text-ink-3 text-[11.5px] ml-28 pl-1 wrap-anywhere">Also accepted: {common.data.extra.join(' ')}</div>}
           {rev && (
             <div className="mt-3">
               {rev.create && rev.create.length > 0 && <><div className="text-ink-2 mb-1">First this is sent to the server:</div><pre>{rev.create.map((c) => c.Text).join('\n')}</pre></>}
