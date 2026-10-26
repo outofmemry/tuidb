@@ -20,7 +20,11 @@ const PG_ATTRS = ['SUPERUSER', 'CREATEDB', 'CREATEROLE', 'LOGIN', 'REPLICATION',
 const PG_PRIVS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER']
 const MY_PRIVS = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'ALTER', 'INDEX', 'ALL']
 
-type Form = { kind: 'create' | 'password' | 'attrs' | 'grant' | 'revoke'; user?: DbUser }
+type Form = { kind: 'create' | 'password' | 'attrs' | 'grant' | 'revoke' | 'limits'; user?: DbUser }
+// MySQL leaves Limits null when the max_* columns cannot be read; saving then would write zeros over the real quotas
+const LIMITS_UNREADABLE = 'The resource limits of this account could not be read (the max_* columns of mysql.user are not visible to this login), so they cannot be changed here.'
+const PG_LIMITS = [['CONNECTION_LIMIT', 'Connection limit']] as const // -1 = no limit
+const MY_LIMITS = [['MAX_QUERIES_PER_HOUR', 'Queries per hour'], ['MAX_UPDATES_PER_HOUR', 'Updates per hour'], ['MAX_CONNECTIONS_PER_HOUR', 'Connections per hour'], ['MAX_USER_CONNECTIONS', 'Simultaneous connections']] as const
 
 export function UsersDialog({ sid, info, onPlan, onClose }: { sid: string; info: SessionInfo; onPlan: (p: Plan) => void; onClose: () => void }) {
   const q = useQuery({ queryKey: ['users', sid], queryFn: () => api<{ supported: boolean; users: DbUser[] }>('GET', `/sessions/${sid}/users`), gcTime: 0 })
