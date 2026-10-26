@@ -272,12 +272,14 @@ export function PageDialog({ limit, offset, onApply, onClose }: { limit: number;
 
 // ---- tab menu -----------------------------------------------------------------------------------------
 
-export function TabMenu({ x, y, items, onClose }: { x: number; y: number; items: [string, () => void][]; onClose: () => void }) {
+// items: [label, run, why]; a third entry greys the item and shows it as the tooltip. "-" is a separator.
+export function TabMenu({ x, y, items, onClose, label = 'Menu' }: { x: number; y: number; items: [string, () => void, string?][]; onClose: () => void; label?: string }) {
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} aria-hidden />
-      <div className="popover fixed z-[41] min-w-[200px] p-1.5" style={{ left: Math.min(x, window.innerWidth - 220), top: y }} role="menu" aria-label="Tab menu">
-        {items.map(([label, run]) => <button key={label} role="menuitem" className="flex w-full text-left border-transparent hover:border-ink-3" onClick={() => { onClose(); run() }}>{label}</button>)}
+      <div className="popover motion-safe:animate-pop fixed z-[41] min-w-[200px] max-h-[calc(100vh-16px)] overflow-auto p-1.5 font-mono text-[12.5px]" style={{ left: Math.max(4, Math.min(x, window.innerWidth - 240)), top: Math.max(4, Math.min(y, window.innerHeight - 30 * items.length - 16)) }} role="menu" aria-label={label}
+        onKeyDown={(e) => { const l = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role=menuitem]:not(:disabled)')], i = l.indexOf(document.activeElement as HTMLButtonElement); if (e.key === 'ArrowDown') l[(i + 1) % l.length]?.focus(); else if (e.key === 'ArrowUp') l[(i - 1 + l.length) % l.length]?.focus(); else if (e.key === 'Escape') onClose(); else return; e.preventDefault(); e.stopPropagation() }}>
+        {items.map(([text, run, why], i) => text === '-' ? <hr key={i} className="border-t border-rule my-1" /> : <button key={text} role="menuitem" autoFocus={i === 0} disabled={!!why} title={why} className={`menu-item ${/^(Delete|Drop|Truncate|Close all)/.test(text) ? 'btn-danger' : ''}`} onClick={() => { onClose(); run() }}>{text}</button>)}
       </div>
     </>
   )
