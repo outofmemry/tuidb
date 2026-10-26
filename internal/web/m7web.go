@@ -192,6 +192,7 @@ func (s *Server) settings(r *http.Request) (any, error) {
 	blank(&c.AI.APIKeyCmd) // a command may embed the key itself
 	noUser(&c.AI.BaseURL)
 	blank(&c.Web.Password)
+	blank(&c.Security.Passcode) // the bcrypt hash of the lock passcode
 	c.Web.TLSCert, c.Web.TLSKey, c.MCP.TLSCert, c.MCP.TLSKey = "", "", "", ""
 	ps := map[string]config.AIProvider{}
 	for k, p := range c.AI.Providers {
@@ -212,7 +213,7 @@ func (s *Server) settings(r *http.Request) (any, error) {
 	if err := toml.NewEncoder(&b).Encode(c); err != nil {
 		return nil, err
 	}
-	return map[string]any{"path": filepath.Join(config.ConfigDir(), "config.toml"), "text": b.String(), "readOnly": true}, nil
+	return map[string]any{"path": s.configPath(), "text": b.String(), "readOnly": true}, nil
 }
 
 // ---- filter bar: the WHERE text ----------------------------------------------------------------------------------
