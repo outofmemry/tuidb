@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	tea "charm.land/bubbletea/v2"
@@ -69,20 +70,31 @@ type confirmDlg struct {
 	yes    string
 	danger bool
 	onYes  func() tea.Cmd
+	onNo   func() tea.Cmd // optional: n / Esc
 	scroll int
+	armed  time.Time // keys before this are ignored (a stray press must not answer a dialog that popped up)
 }
 
 func (d *confirmDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	if k, ok := msg.(tea.KeyPressMsg); ok {
+		if time.Now().Before(d.armed) {
+			return d, nil
+		}
 		switch k.Keystroke() {
 		case "y":
 			return nil, d.onYes()
 		case "enter": // a reflexive Enter must not be the destructive choice
 			if d.danger {
+				if d.onNo != nil {
+					return nil, d.onNo()
+				}
 				return nil, nil
 			}
 			return nil, d.onYes()
 		case "n", "esc", "q":
+			if d.onNo != nil {
+				return nil, d.onNo()
+			}
 			return nil, nil
 		case "down", "j":
 			d.scroll++
@@ -251,6 +263,7 @@ type formDlg struct {
 	onChange func(key string, vals map[string]string)        // lets the owner react (e.g. driver changes the default port)
 	hotkeys  map[string]func(vals map[string]string) tea.Cmd // extra keys while the form is open, e.g. ctrl+t
 	hotHint  string
+	onCancel func() tea.Cmd // Esc
 }
 
 func newForm(title string, fields []formField, onSubmit func(map[string]string) tea.Cmd) *formDlg {
@@ -317,6 +330,9 @@ func (f *formDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		}
 		switch ks {
 		case "esc":
+			if f.onCancel != nil {
+				return nil, f.onCancel()
+			}
 			return nil, nil
 		case "enter":
 			vals := f.values()
@@ -375,7 +391,7 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 	var rows []string
 	focusRow := 0
 	for i, fl := range f.fields {
-		if fl.Kind < fLabel && !f.visible(i) {
+		if fl.Kind < fLabel && !f.visible(i) || fl.Kind == fLabel && fl.Show != nil && !fl.Show(f.values()) {
 			continue
 		}
 		if fl.Kind == fHeading {
@@ -387,6 +403,12 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 		}
 		if i == f.idx {
 			focusRow = len(rows)
+		}
+		if fl.Kind == fLabel && fl.Label == "" && !sqlish(fl.Value) { // a note: wrapped over the full width, not cut at the value column
+			for _, l := range wrapText(fl.Value, w-8) {
+				rows = append(rows, "  "+th.Dim.Render(l))
+			}
+			continue
 		}
 		mark, label := "  ", th.Dim.Render(fit(fl.Label, lw))
 		if i == f.idx {
@@ -479,6 +501,8 @@ type pickerDlg struct {
 	onPick  func(it pickItem, ctrl bool) tea.Cmd
 	hint    string
 	empty   string
+	keys    map[string]func(it pickItem, ok bool) tea.Cmd // extra keys on the selected row (ok: there is one)
+	onClose func()                                        // Esc, for dialogs that own a background job
 }
 
 func (p *pickerDlg) shown() []pickItem {
@@ -517,8 +541,18 @@ func (p *pickerDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 		p.q.Handle(m)
 		p.refresh()
 	case tea.KeyPressMsg:
-		switch ks := m.Keystroke(); ks {
+		ks := m.Keystroke()
+		if f, ok := p.keys[ks]; ok {
+			if len(items) == 0 {
+				return p, f(pickItem{}, false)
+			}
+			return p, f(items[clamp(p.sel, 0, len(items)-1)], true)
+		}
+		switch ks {
 		case "esc":
+			if p.onClose != nil {
+				p.onClose()
+			}
 			return nil, nil
 		case "enter", "ctrl+enter", "alt+enter":
 			if len(items) == 0 {
@@ -680,6 +714,7 @@ func (t *textViewDlg) View(th Theme, maxW, maxH int) string {
 type checkItem struct {
 	Label   string
 	Checked bool
+	Seq     int // tick order: a later tick gets a higher number (unticked items keep their last)
 }
 
 // checklistDlg is a multi-select list: Space toggles, a toggles all, Enter applies.
@@ -688,6 +723,7 @@ type checklistDlg struct {
 	items []checkItem
 	sel   int
 	top   int
+	seq   int // ticks so far
 	onOK  func(items []checkItem) tea.Cmd
 }
 
@@ -708,6 +744,10 @@ func (c *checklistDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case "space", "x":
 		if len(c.items) > 0 {
 			c.items[c.sel].Checked = !c.items[c.sel].Checked
+			if c.items[c.sel].Checked {
+				c.seq++
+				c.items[c.sel].Seq = c.seq
+			}
 		}
 	case "a":
 		all := true
@@ -715,7 +755,10 @@ func (c *checklistDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 			all = all && it.Checked
 		}
 		for i := range c.items {
-			c.items[i].Checked = !all
+			if c.items[i].Checked = !all; !all {
+				c.seq++
+				c.items[i].Seq = c.seq
+			}
 		}
 	}
 	return c, nil
