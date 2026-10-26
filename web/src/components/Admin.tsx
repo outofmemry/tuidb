@@ -288,9 +288,16 @@ export function PluginsDialog({ sid, ctx, onClose, onSql, notify }: { sid: strin
   const run = async (p: PluginInfo) => {
     setBusy(p.name)
     try {
-      // shortcut: the current cell is whatever text is selected in the grid; a focused-cell API is the upgrade
-      const r = await api<{ output: string; text: string }>('POST', `/sessions/${sid}/plugins/run`, { Name: p.name, Context: ctx.context, Object: ctx.object, Selection: ctx.selection, Cell: ctx.context === 'grid' ? ctx.selection : '' })
-      if (r.output === 'sql') { onSql(r.text); onClose() } else setOut({ name: p.name, text: r.text })
+      const r = await api<{ output: string; text: string; effects?: PluginEffect[] }>('POST', `/sessions/${sid}/plugins/run`, { Name: p.name, Context: ctx.context, Object: ctx.object, Selection: ctx.selection, Cell: ctx.cell })
+      // effects first (copy, open, notify, sql), then the text; a plugin that only has effects closes the dialog
+      for (const ef of r.effects ?? []) {
+        const kind = (ef.Kind ?? (ef as any).kind) as string, text = ef.Text ?? (ef as any).text ?? '', ref = ef.Ref ?? (ef as any).ref
+        if (kind === 'copy') await copyText(text).then(() => notify('Copied'), (e) => notify(msg(e)))
+        else if (kind === 'open') window.dispatchEvent(new CustomEvent('webtuidb:open', { detail: { obj: ref, newTab: true } }))
+        else if (kind === 'notify') notify(text)
+        else if (kind === 'sql') onSql(text)
+      }
+      if (r.output === 'sql' && r.text) { onSql(r.text); onClose() } else if (r.text) { setOut({ name: p.name, text: r.text }); setBusy('') } else onClose()
     } catch (e) { notify(msg(e)); setBusy('') }
   }
   return (
