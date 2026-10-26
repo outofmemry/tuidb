@@ -52,11 +52,11 @@ export function Dialog({ title, children, onClose, wide }: { title: string; chil
 
 // ask / confirm replace window.prompt and window.confirm with the app's own dialog. <Prompts/> is
 // mounted once at the root and renders whatever request is pending.
-type Req = { kind: 'prompt' | 'confirm'; title: string; init: string; secret?: boolean; resolve: (v: string | null | boolean) => void }
+type Req = { kind: 'prompt' | 'confirm'; title: string; text?: string; init: string; secret?: boolean; resolve: (v: string | null | boolean) => void }
 let pending: ((r: Req | null) => void) | null = null
 export const ask = (title: string, init = '') => new Promise<string | null>((resolve) => pending?.({ kind: 'prompt', title, init, resolve: resolve as Req['resolve'] }))
 export const askSecret = (title: string) => new Promise<string | null>((resolve) => pending?.({ kind: 'prompt', title, init: '', secret: true, resolve: resolve as Req['resolve'] }))
-export const confirm = (title: string) => new Promise<boolean>((resolve) => pending?.({ kind: 'confirm', title, resolve: resolve as Req['resolve'], init: '' }))
+export const confirm = (title: string, text?: string) => new Promise<boolean>((resolve) => pending?.({ kind: 'confirm', title, text, resolve: resolve as Req['resolve'], init: '' }))
 
 export function Prompts() {
   const [req, setReq] = useState<Req | null>(null)
