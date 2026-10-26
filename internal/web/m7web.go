@@ -131,8 +131,8 @@ func (s *Server) putConnSort(r *http.Request) (any, error) {
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	if in.Sort != "" && in.Sort != "name" && in.Sort != "tag" && in.Sort != "driver" {
-		return nil, bad("sort must be name, tag or driver")
+	if in.Sort != "" && in.Sort != "name" && in.Sort != "tag" && in.Sort != "driver" && in.Sort != "recent" {
+		return nil, bad("sort must be name, tag, driver or recent")
 	}
 	if s.needState() != nil {
 		return nil, bad("no state store")
