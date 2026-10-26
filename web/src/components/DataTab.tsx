@@ -375,8 +375,8 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
   async function pasteCells() {
     if (!res?.editable || !selRow) return notify(res?.editable ? 'Select a cell first' : 'This table is not editable')
     const lines = await clipRows(); if (!lines.length) return
-    const at = rows.findIndex((r) => r.key === selRow.key)
-    lines.forEach((cells, dy) => { const r = rows[at + dy]; if (r && r.state !== 'deleted') cells.forEach((v, dx) => { const c = res.columns[cc() + dx]; if (c) onEdit(r.key, c.name, asVal(v)) }) })
+    const at = range ? range.r0 : rows.findIndex((r) => r.key === selRow.key), c0 = range ? range.c0 : cc()
+    lines.forEach((cells, dy) => { const r = rows[at + dy]; if (r && r.state !== 'deleted') cells.forEach((v, dx) => { const c = res.columns[c0 + dx]; if (c) onEdit(r.key, c.name, asVal(v)) }) })
   }
   function quickFilter() {
     if (!selRow || !res) return notify('Select a cell first')
