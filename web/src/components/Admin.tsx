@@ -182,6 +182,7 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
     watchJob(sid, id, (d) => setJob({ id, data: d }), ac.signal).then((d) => {
       const m = d.error ? `${restore ? 'Restore' : 'Backup'} failed: ${d.error}` : `${restore ? 'Restore' : 'Backup'} finished`
       notify(m); desktopNotify(m)
+      api<Job>('GET', `/sessions/${sid}/jobs/${id}`).then((j) => j.file && setJob({ id, data: { ...d, file: j.file } })).catch(() => {}) // the finished job names its file
     }).catch((e) => { if (!ac.signal.aborted) setErr(msg(e)) })
     return () => ac.abort()
   }, [job?.id])
