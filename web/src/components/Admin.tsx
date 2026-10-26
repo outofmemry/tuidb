@@ -307,7 +307,7 @@ export function PluginsDialog({ sid, ctx, onClose, onSql, notify }: { sid: strin
           {q.isLoading && <div className="text-ink-2">Loading…</div>}
           {q.error && <div className="text-del">{q.error.message}</div>}
           {q.data && list.length === 0 && <div className="text-ink-2">No plugins for this place. Add a .toml file to the plugins folder in the config directory.</div>}
-          <div className="flex flex-col gap-0.5">{list.map((p) => <button key={p.name} className="text-left border-transparent hover:border-ink-3" disabled={!!busy} onClick={() => run(p)}>{p.name} <span className="text-ink-2">{busy === p.name ? 'running…' : p.output}</span></button>)}</div>
+          <div className="flex flex-col gap-0.5">{list.map((p) => <button key={p.name} className="text-left border-transparent hover:border-ink-3" disabled={!!busy} onClick={() => run(p)}><span>{p.name}</span> <span className="text-ink-2">{busy === p.name ? 'running…' : p.output}</span>{p.js && <span className="chip ml-1.5" title="A JavaScript plugin">js</span>}{p.key && <kbd className="ml-1.5 text-ink-3 font-mono text-[11.5px]" title="Shortcut">{p.key}</kbd>}</button>)}</div>
         </>
       )}
       <div className={ACTIONS}>{out && <button onClick={() => setOut(null)}>Back</button>}<button className="btn-primary" onClick={onClose}>Close</button></div>
