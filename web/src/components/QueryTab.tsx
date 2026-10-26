@@ -166,13 +166,19 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
         else if (ev === 'rows') { items[d.i].cells.push(...d.cells); show() }
         else if (ev === 'done') {
           const it = items[d.i] ?? { stmt: d.stmt, columns: [], cells: [], affected: 0, hasRows: false, durationMs: 0, truncated: false, editable: false }
-          items[d.i] = { ...it, label: d.label || it.label, error: d.error || undefined, affected: d.affected, message: d.message, noticeId: d.noticeId || undefined, durationMs: d.durationMs, truncated: d.truncated, hasRows: d.hasRows, docs: d.docs ?? undefined }
+          items[d.i] = { ...it, label: d.label || it.label, error: d.error || undefined, affected: d.affected, message: d.message, noticeId: d.noticeId || undefined, durationMs: d.durationMs, truncated: d.truncated, hasRows: d.hasRows, docs: d.docs ?? undefined, editable: !!d.editable, table: d.table ?? undefined, resultId: d.resultId || undefined }
           show(true)
         }
       }, signal)
     } catch (e) { show(true); throw e }
     return items
   }
+  useEffect(() => {
+    if (!running) return setSlow(false)
+    if (!timeoutSecs) return
+    const t = setTimeout(() => setSlow(true), timeoutSecs * 1000)
+    return () => clearTimeout(t)
+  }, [running, timeoutSecs, slowTick])
   const cancel = () => { if (running) { ctrl.current?.abort(); onCancel?.() } }
   const togglePin = async () => {
     try {
