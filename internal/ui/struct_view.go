@@ -194,7 +194,7 @@ func (t *tableTab) buildStructure(m structureLoadedMsg) {
 func (t *tableTab) readOnlyKind() bool { return t.ref.Kind != db.KindTable }
 
 func (t *tableTab) structPending() bool {
-	return (t.structGrid != nil && t.structGrid.HasPending()) || (t.idxGrid != nil && t.idxGrid.HasPending())
+	return (t.structGrid != nil && t.structGrid.HasPending()) || (t.idxGrid != nil && t.idxGrid.HasPending()) || t.structReordered()
 }
 
 // ---- TableDef from the edited grids -----------------------------------------------------
@@ -515,6 +515,8 @@ func (t *tableTab) structInput(msg tea.Msg) tea.Cmd {
 	key := keymap.FromMsg(k)
 	extend := strings.HasPrefix(key, "shift+")
 	switch strings.TrimPrefix(key, "shift+") {
+	case "alt+up", "alt+down":
+		return t.moveColumn(g, map[string]int{"alt+up": -1, "alt+down": 1}[key])
 	case "down", "j":
 		g.Move(1, 0, extend)
 	case "up", "k":
@@ -533,6 +535,8 @@ func (t *tableTab) structInput(msg tea.Msg) tea.Cmd {
 		return t.copy(g.CopyCells(FmtPlain, t.ref.Name), "cells")
 	case "enter", "e":
 		return t.structActivate(g)
+	case "space":
+		return t.structRowForm(g)
 	case "i":
 		return t.structAdd(g)
 	case "delete", "backspace":
@@ -616,7 +620,26 @@ func (t *tableTab) structSetValue() tea.Cmd {
 			if t.ws.caps.Dialect == "postgres" {
 				items = append(items, pickItem{Label: "gen_random_uuid()", Value: "gen_random_uuid()"}, pickItem{Label: "now()", Value: "now()"})
 			}
+			for _, o := range t.ws.sb.objs { // a sequence default: nextval('schema.seq')
+				if o.Kind == db.KindSequence && t.ws.caps.Dialect == "postgres" {
+					n := o.Name
+					if o.Schema != "" {
+						n = o.Schema + "." + o.Name
+					}
+					items = append(items, pickItem{Label: "nextval('" + n + "')", Value: "nextval('" + n + "'::regclass)"})
+				}
+			}
+			items = append(items, pickItem{Label: "Advanced…", Value: setValueExpr{}})
 			t.ws.a.push(&pickerDlg{title: "Default value", items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
+				if _, ok := it.Value.(setValueExpr); ok {
+					t.ws.a.push(newForm("Advanced: default expression", []formField{{Key: "expr", Label: "Expression", Kind: fText}}, func(m map[string]string) tea.Cmd {
+						if e := strings.TrimSpace(m["expr"]); e != "" {
+							g.SetCell(e)
+						}
+						return nil
+					}))
+					return nil
+				}
 				g.SetCell(it.Value)
 				return nil
 			}})
@@ -650,7 +673,7 @@ func (t *tableTab) ddlInput(msg tea.Msg) tea.Cmd {
 	case "G", "end":
 		t.ddlTop = 1 << 30
 	case "c":
-		return tea.Batch(tea.SetClipboard(t.ddl), t.ws.a.say("copied DDL"))
+		return tea.Batch(setClip(t.ddl), t.ws.a.say("copied DDL"))
 	case "e":
 		if t.ref.Kind == db.KindView || t.ref.Kind == db.KindMatView {
 			return t.ws.editDefinition(t.ref)
