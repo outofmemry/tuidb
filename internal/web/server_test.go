@@ -23,10 +23,14 @@ type fakeSess struct {
 	changes []db.Change
 	execs   []string
 	killed  []string
+	capsFn  func() db.Capabilities // overrides Caps (the M14 capability gating test)
 }
 
 func (f *fakeSess) Caps() db.Capabilities {
-	return db.Capabilities{Dialect: "postgres", Editor: "sql", Transactions: true, ProcessList: true, Users: true}
+	if f.capsFn != nil {
+		return f.capsFn()
+	}
+	return db.Capabilities{Dialect: "postgres", Schemas: true, Editor: "sql", Transactions: true, ProcessList: true, Users: true}
 }
 func (f *fakeSess) Objects(_ context.Context, schema string) ([]db.Object, error) {
 	if schema == "other" {
