@@ -52,6 +52,12 @@ export function UsersDialog({ sid, info, onPlan, onClose }: { sid: string; info:
     if (form.kind === 'create') return plan({ Kind: 'create', User: { Name: name, Host: pg ? '' : host, Attrs: pg ? picked : [] }, Password: pw })
     if (!u) return
     if (form.kind === 'password') return plan({ Kind: 'password', User: who(u), Password: pw })
+    if (form.kind === 'limits') {
+      if (!pg && !u.Limits) return setErr(LIMITS_UNREADABLE)
+      const bad = lims.find(([k]) => !(pg ? /^(-1|\d+)$/ : /^\d+$/).test((limits[k] ?? '').trim()))
+      if (bad) return setErr(`${bad[1]} must be a whole number (${limitHint(bad[0], pg)})`)
+      return plan({ Kind: 'limits', User: { ...who(u), Limits: Object.fromEntries(lims.map(([k]) => [k, Number(limits[k])])) } })
+    }
     if (form.kind === 'attrs') {
       // PostgreSQL turns a flag off with NO<flag>; MySQL only adds global privileges
       const had = u.Attrs ?? []
