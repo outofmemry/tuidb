@@ -519,19 +519,144 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
       { key: 'Escape', run: (v) => { if (!blockOnRef.current) return false; setBlockOn(false); blk.current = null; v.dispatch({ selection: EditorSelection.cursor(v.state.selection.main.head) }); return true } },
     ])),
     rectangularSelection(), crosshairCursor(), // Alt-drag with the mouse
-    ...(dialect === 'mongo' ? [EditorState.languageData.of(() => [{ autocomplete: mongoSource }])] : []),
     ...(wrap ? [View.lineWrapping] : []),
-    ...(info.caps.Editor === 'sql' ? [sqlSupport()] : []),
+    completion,
   ]
   const cur = results[active]
+  // ---- editable results (M12.2): a single-table SELECT with its whole primary key. Edits go through POST .../plan like a table tab's.
+  const canEdit = !!(cur?.editable && cur.resultId && !cur.error && cur.hasRows && !running)
+  const rid = cur?.resultId ?? ''
+  const P: Pend = pends[rid] ?? emptyPend()
+  const curCols = useMemo(() => (cur?.table ? cur.columns.map((c) => ({ ...c, pk: cur.table!.pk.includes(c.name) })) : cur?.columns ?? []), [cur?.columns, cur?.table]) // eslint-disable-line react-hooks/exhaustive-deps
+  const edited = useMemo(() => editedMap(P), [pends, rid]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setRsort([]) }, [active])
+  // header menu sort: the loaded rows are sorted here (NULL first, numbers by value); keys stay 'r<original index>', so pending changes keep their rows
+  const sortedRows = useMemo((): GridRow[] => {
+    if (!cur) return []
+    const rows = cur.cells.map((cells, i): GridRow => ({ key: 'r' + i, cells, state: P.deletes.has('r' + i) ? 'deleted' : 'clean' }))
+    if (!rsort.length) return rows
+    const idx = rsort.map((x) => ({ i: cur.columns.findIndex((c) => c.name === x.Column), desc: x.Desc })).filter((x) => x.i >= 0)
+    const num = idx.map((x) => isNumeric(cur.columns[x.i].type))
+    return rows.sort((a, b) => {
+      for (let k = 0; k < idx.length; k++) {
+        const x = a.cells[idx[k].i], y = b.cells[idx[k].i]
+        const d = x === y ? 0 : x === null ? -1 : y === null ? 1 : num[k] && !isNaN(Number(x)) && !isNaN(Number(y)) ? Number(x) - Number(y) : x.localeCompare(y, undefined, { numeric: true })
+        if (d) return idx[k].desc ? -d : d
+      }
+      return 0
+    })
+  }, [cur?.cells, cur?.cells.length, cur?.columns, rsort, P.deletes]) // eslint-disable-line react-hooks/exhaustive-deps
+  const gridRows: GridRow[] = !cur ? [] : [
+    ...sortedRows,
+    ...P.inserts.map((n): GridRow => ({ key: 'n' + n.id, cells: cur.columns.map(() => ''), state: 'new' })),
+  ]
+  const onSortCol = (col: string, additive: boolean) => setRsort((cur0) => {
+    const c = cur0.find((x) => x.Column === col), rest = additive ? cur0.filter((x) => x.Column !== col) : []
+    return !c ? [...rest, { Column: col, Desc: false }] : c.Desc ? rest : [...rest, { Column: col, Desc: true }]
+  })
+  const change = (f: (p: Pend) => Pend) => { hist.current.push({ id: rid, p: P }); setPends((m) => ({ ...m, [rid]: f(m[rid] ?? emptyPend()) })) }
+  const onEditCell = (key: string, col: string, v: Val) => change((p) => setEdit(p, key, col, v))
+  const addRow = () => { if (!canEdit) return; const id = nextId.current++; change((p) => ({ ...p, inserts: [...p.inserts, { id, vals: {} }] })); setSel('n' + id) }
+  const duplicate = () => {
+    const src = gridRows.find((r) => r.key === sel); if (!canEdit || !src) return notify('Select a row first')
+    const vals = src.state === 'new' ? { ...edited[src.key] } : dupVals(curCols, src.cells, edited[src.key], show)
+    const id = nextId.current++; change((p) => ({ ...p, inserts: [...p.inserts, { id, vals }] })); setSel('n' + id)
+  }
+  const delRows = () => { if (!canEdit || !sel) return notify('Select a row first'); change((p) => toggleDelete(p, sel)); if (sel[0] === 'n') setSel(null) } // shortcut: one row at a time, no multi-select
+  const setValue = () => { const r = gridRows.find((x) => x.key === sel); if (!canEdit || !r || r.state === 'deleted') return notify('Select a row first'); setDlg('setvalue') }
+  const undo = () => { // shortcut: undo only, no redo
+    const i = hist.current.map((h) => h.id).lastIndexOf(rid)
+    if (i < 0) return notify('Nothing to undo')
+    const [h] = hist.current.splice(i, 1); setPends((m) => ({ ...m, [rid]: h.p }))
+  }
+  const discard = () => { hist.current = hist.current.filter((h) => h.id !== rid); setPends((m) => ({ ...m, [rid]: emptyPend() })) }
+  const makePlan = async (): Promise<Plan | null> => {
+    try { return await api<Plan>('POST', `/sessions/${sid}/plan`, planBody(rid, curCols, cur!.cells, P)) } catch (e) { notify(e instanceof Error ? e.message : String(e)); return null }
+  }
+  // after a commit the statement runs again for the fresh rows (and a fresh resultId); the other result tabs stay
+  const refresh = async (idx: number, item: ExecItem) => {
+    try {
+      const r = await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, { text: item.stmt, limit: Math.max(item.cells.length, 1), vars: {}, pin: pinned ? pinId : undefined })
+      if (r.results[0] && !r.results[0].error) setResults((all) => all.map((x, i) => (i === idx ? { ...r.results[0], pinned: x.pinned } : x)))
+      else notify(r.results[0]?.error ?? 'Could not reload the result')
+    } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
+  }
+  const applied = () => { const was = active, item = cur!; setPlan(null); discard(); setSel(null); notify('Changes sent'); refresh(was, item) }
+  const preview = async () => { if (!canEdit || !pendCount(P)) return notify('No pending changes'); const p = await makePlan(); if (p) setPlan(p) }
+  const commit = async () => {
+    if (!canEdit || !pendCount(P)) return notify('No pending changes')
+    if (busy.current) return
+    busy.current = true
+    try {
+      const p = await makePlan(); if (!p) return
+      if (p.gate.confirm || p.gate.password) return setPlan(p)
+      try { await api('POST', `/sessions/${sid}/apply`, { planId: p.planId, confirmed: true }); applied() } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
+    } finally { busy.current = false }
+  }
+  // find / replace over the result's rows; replace edits through the pending changes, so it is offered only when the result is editable
+  const cellVal = (r: GridRow, ci: number) => show(edited[r.key]?.[cur!.columns[ci].name], r.cells[ci])
+  const names = cur?.columns.map((c) => c.name) ?? []
+  const stepRes = (dir: 1 | -1, f = find) => {
+    if (!f || !cur) return
+    if (!f.text) return notify('Type what to find')
+    const at = Math.max(0, gridRows.findIndex((r) => r.key === sel))
+    const hit = findCell((r, c) => cellVal(gridRows[r], c), gridRows.length, names, f, { r: at, c: Math.min(colRef.current, names.length - 1) }, dir)
+    if (!hit) return notify(`"${f.text}" is not in the loaded rows`)
+    setSel(gridRows[hit.r].key); setFocusCell({ row: gridRows[hit.r].key, col: hit.c, n: ++focusN.current })
+  }
+  const replaceCell = (r: GridRow, ci: number, f: FindState, into: Pend) => {
+    if (r.state === 'deleted') return null
+    const v = cellVal(r, ci), out = v === null ? null : replaceIn(v, f, f.replace)
+    return out === null ? null : setEdit(into, r.key, names[ci], out)
+  }
+  const replaceOne = () => {
+    const r = gridRows.find((x) => x.key === sel); if (!find || !canEdit || !r) return
+    const ci = Math.min(colRef.current, names.length - 1)
+    const next = find.col === '' || find.col === names[ci] ? replaceCell(r, ci, find, P) : null
+    if (next) { hist.current.push({ id: rid, p: P }); setPends((m) => ({ ...m, [rid]: next })) }
+    stepRes(1)
+  }
+  const replaceAll = () => {
+    if (!find || !canEdit) return
+    let p = P, n = 0, skipped = 0
+    const pk = cur?.table?.pk ?? []
+    for (const r of gridRows) names.forEach((c, ci) => {
+      if (!(find.col === '' || find.col === c)) return
+      if (find.col === '' && pk.includes(c)) { if (r.state !== 'deleted' && cellMatches(cellVal(r, ci), find)) skipped++; return } // Any column leaves primary keys alone
+      const q = replaceCell(r, ci, find, p); if (q) { p = q; n++ }
+    })
+    if (n) { hist.current.push({ id: rid, p: P }); setPends((m) => ({ ...m, [rid]: p })) }
+    const sk = skipped ? ` (skipped ${skipped} primary-key cell${skipped === 1 ? '' : 's'})` : ''
+    notify(n ? `Replaced in ${n} cell${n === 1 ? '' : 's'}${sk}` : skipped ? `Nothing replaced${sk}` : `"${find.text}" is not in the loaded rows`)
+  }
+  // RESULTS: the body under the result tabs (rows, JSON, message, error). The editable results grid mounts here in place of the read-only Grid.
+  const resultsView = () => cur && (msgView && !cur.error ? <MessageView sid={sid} item={cur} notify={notify} /> : cur.error ? <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] max-w-[100ch] text-del">{cur.error}</pre>
+        : cur.hasRows ? (
+          json && cur.docs ? <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] max-w-[100ch]">{cur.docs.map(pretty).join('\n')}</pre> : <>
+            {find && <FindBar value={find} columns={names} editable={canEdit} onChange={setFind} onStep={stepRes} onReplace={replaceOne} onReplaceAll={replaceAll} onClose={() => setFind(null)} />}
+            {chart ? <ChartView notify={notify} stmt={cur.stmt} columns={cur.columns.map((c) => c.name)} cells={cur.cells} />
+              : <Grid colRef={colRef} ctx="results" columns={curCols} rows={gridRows} edited={edited} editable={canEdit} selected={sel} onSelect={setSel} onOpen={setCell} focusCell={focusCell}
+                  sort={rsort} onSort={onSortCol} onHeaderMenu={(col, x, y) => setHmenu({ col, x, y })} onCellMenu={(x, y) => setCmenu({ x, y })} zebra={!!cfg(meta, 'table', 'alternatingRows', false)} spatial={cfg<boolean>(meta, 'table', 'decodeSpatial', true) !== false}
+                  onCursor={(col, r) => setCursor((c) => (c.col === col && JSON.stringify(c.range) === JSON.stringify(r) ? c : { col, range: r }))} onAddRow={canEdit ? addRow : undefined}
+                  onFind={(d) => (d === 0 || !find ? setFind((f) => f ?? newFind()) : stepRes(d))} />}
+            {cell && (() => {
+              const r = gridRows.find((x) => x.key === cell.row), ci = cur.columns.findIndex((c) => c.name === cell.col)
+              return r && ci >= 0 ? <CellEditor key={`${cell.row}:${cell.col}`} col={cell.col} readOnly={cell.readOnly || !canEdit} value={show(edited[r.key]?.[cell.col], r.cells[ci])}
+                imagePreview={cfg<boolean>(meta, 'table', 'imagePreview', true) !== false} decodeSpatial={cfg<boolean>(meta, 'table', 'decodeSpatial', true) !== false}
+                onDone={(v, move) => { setCell(null); if (v !== undefined && canEdit) onEditCell(cell.row, cell.col, v); if (move && canEdit) nextCell(cell, move) }} /> : null
+            })()}
+            <div className="toolbar bg-canvas border-b-0! border-t border-rule text-ink-2 text-[12px]"><span className="tabular-nums"><span className="text-ink">{cur.cells.length.toLocaleString()}</span> row{cur.cells.length === 1 ? '' : 's'} in <span className="text-ink">{cur.durationMs.toLocaleString()}</span> ms</span>{cur.truncated && <span className="chip border-edit text-edit">stopped at the row limit</span>}{cur.truncated && <button className="btn-ghost" onClick={loadMore}>Load more</button>}<span className="flex-1" />{cur.editable && <span className="text-ink-3" title="A single-table SELECT with its primary key: cells can be edited">editable</span>}</div>
+          </>
+        ) : <MessageView sid={sid} item={cur} notify={notify} />)
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <div className="toolbar bg-canvas">
+    <div className="flex-1 min-h-0 flex flex-col" ref={root}>
+      <div className="toolbar bg-canvas" role="toolbar" aria-label="Query toolbar">
         {/* [editor] run_default decides what the primary button runs */}
         <button className="btn-primary" disabled={running} onClick={() => run(ed.RunDefault === 'all')} title={ed.RunDefault === 'all' ? 'Run all (Ctrl/Cmd+Shift+Enter)' : 'Run the current statement (Ctrl/Cmd+Enter)'}>Run{ed.RunDefault === 'all' ? ' all' : ''}</button>
         <button disabled={running} onClick={() => run(ed.RunDefault !== 'all')} title={ed.RunDefault === 'all' ? 'Run the current statement (Ctrl/Cmd+Enter)' : 'Run all (Ctrl/Cmd+Shift+Enter)'}>{ed.RunDefault === 'all' ? 'Run current' : 'Run all'}</button>
         <button disabled={!running} onClick={cancel}>Cancel</button>
+        {info.caps.Editor === 'mongo' && <Select className="bg-raised border-transparent" title="What the editor holds" aria-label="Mongo syntax" value={syntax} onChange={setSyntax} options={[{ value: 'shell', label: 'Shell JavaScript' }, { value: 'command', label: 'Command document' }]} />}
         {info.caps.Editor === 'sql' && <button onClick={explainNow} title="Explain the statement at the cursor (or the selection) as a tree">Explain</button>}
         {info.pinnable && <button className={pinned ? 'btn-on' : ''} aria-pressed={pinned} onClick={togglePin} title="Keep one connection for this tab, so BEGIN, SET and temp tables carry over">{pinned ? 'Pinned' : 'Pin'}</button>}
         <Select ref={limitBox} className="bg-raised border-transparent" title="row limit" aria-label="Row limit" value={String(limit)} onChange={(v) => setLimit(Number(v))}
