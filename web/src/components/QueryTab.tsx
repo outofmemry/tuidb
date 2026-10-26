@@ -668,46 +668,71 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
         <button onClick={toggleSecond} className={second !== null ? 'btn-on' : ''} aria-pressed={second !== null} title="Stack a second editor under this one">Split down</button>
         <button onClick={save} disabled={!text.trim()}>Save query</button>
       </div>
-      <div className="border-b border-rule" data-ctx="editor" onFocusCapture={() => { if (views.current[0]) { view.current = views.current[0]; setPane(0) } }}>
-        <CodeMirror value={text} height={second === null ? '220px' : '140px'} theme={isDark() ? 'dark' : 'light'} extensions={ext} onChange={setText} onCreateEditor={(v) => { views.current[0] = v; view.current = v; restoreFolds(v) }}
-          basicSetup={{ lineNumbers: true, foldGutter: true }} />
+      <div className={`relative border-b border-rule ${second === null && pane === 0 ? '' : ''}`} data-ctx="editor" onFocusCapture={() => { if (views.current[0]) { view.current = views.current[0]; setPane(0) } }}>
+        <CodeMirror value={text} height={second === null ? `${edH}px` : `${Math.max(100, Math.round(edH * 0.64))}px`} theme={cmTheme} extensions={ext} onChange={(t) => { setText(t); syncFolds() }} onCreateEditor={(v) => { views.current[0] = v; view.current = v; restoreFolds(v) }}
+          basicSetup={{ lineNumbers: true, foldGutter: true, autocompletion: false, closeBrackets: cfg<boolean>(meta, 'editor', 'closeBraces', true) !== false, highlightActiveLine: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false, highlightActiveLineGutter: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false }} />
+        {second === null && <div role="separator" aria-orientation="horizontal" aria-label="Resize the editor" title="Drag to resize the editor" className="absolute left-0 right-0 -bottom-[3px] h-[6px] z-[3] cursor-row-resize hover:bg-accent/40 active:bg-accent/60" onMouseDown={dragH} onDoubleClick={() => { setEdH(220); try { localStorage.removeItem('webtuidb-editor-h') } catch { /* private mode */ } }} />}
       </div>
       {second !== null && (
         <div className="border-b border-rule" data-ctx="editor" onFocusCapture={() => { if (views.current[1]) { view.current = views.current[1]; setPane(1) } }}>
-          <CodeMirror value={second} height="140px" theme={isDark() ? 'dark' : 'light'} extensions={ext} onChange={setSecond} onCreateEditor={(v) => { views.current[1] = v }} basicSetup={{ lineNumbers: true, foldGutter: true }} />
+          <CodeMirror value={second} height={`${Math.max(100, Math.round(edH * 0.64))}px`} theme={cmTheme} extensions={ext} onChange={setSecond} onCreateEditor={(v) => { views.current[1] = v }} basicSetup={{ lineNumbers: true, foldGutter: true, autocompletion: false, closeBrackets: cfg<boolean>(meta, 'editor', 'closeBraces', true) !== false, highlightActiveLine: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false, highlightActiveLineGutter: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false }} />
         </div>
       )}
       {showRes && <>
-      <div className="flex h-8 text-[12px] border-b border-rule overflow-x-auto [scrollbar-width:none] bg-canvas font-mono">
+      <div role="tablist" aria-label="Results" className="flex h-8 text-[12px] border-b border-rule overflow-x-auto [scrollbar-width:none] bg-canvas font-mono">
         {results.map((r, i) => (
-          <div key={i} className={`flex items-center gap-2 pl-3.5 pr-2.5 cursor-pointer whitespace-nowrap border-r border-rule ${i === active ? 'text-ink bg-panel shadow-[inset_0_-2px_0_var(--accent)]' : 'text-ink-2 hover:text-ink hover:bg-panel'}`} onClick={() => setActive(i)} title={r.stmt}>
-            <span className={r.error ? 'text-del' : ''}>{r.error ? '✗' : '✓'}</span>{i + 1}: {r.label ? r.label.slice(0, 28) : r.stmt.replace(/\s+/g, ' ').slice(0, 28)}
+          <div key={i} role="tab" aria-selected={i === active} className={`flex items-center gap-1.5 pl-3 pr-2.5 cursor-pointer whitespace-nowrap border-r border-rule ${i === active ? 'text-ink bg-panel shadow-[inset_0_-2px_0_var(--accent)]' : 'text-ink-2 hover:text-ink hover:bg-panel'}`} onClick={() => setActive(i)} title={r.stmt}>
+            <span className={r.error ? 'text-del' : 'text-new'} aria-label={r.error ? 'failed' : 'ok'}>{r.error ? '✗' : '✓'}</span>{pendCount(pends[r.resultId ?? '']) > 0 && <span className="text-edit" title="Pending changes">●</span>}{r.pinned && <span className="text-accent text-[10px]" title="Pinned: stays when you run again">pin</span>}<span className="text-ink-3">{i + 1}</span> {r.label ? r.label.slice(0, 28) : r.stmt.replace(/\s+/g, ' ').slice(0, 28)}
           </div>
         ))}
-        {cur?.docs?.length ? <button className="btn-ghost" onClick={() => setJson(!json)}>{json ? 'Rows' : 'JSON'}</button> : null}
-        {cur && !cur.error && <button className={`btn-ghost ${msgView ? 'btn-on' : ''}`} onClick={() => setMsgView(!msgView)}>Message</button>}
-        {cur?.hasRows && !cur.error && <button className={`btn-ghost ${chart ? 'btn-on' : ''}`} onClick={() => setChart(!chart)}>Chart</button>}
+        {results.length > 0 && <span className="flex-1 min-w-[6px]" />}
+        {cur && <button className={`btn-ghost self-center ${cur.pinned ? 'btn-on' : ''}`} aria-pressed={!!cur.pinned} title="A pinned result tab stays when you run again" onClick={() => setResults((all) => all.map((x, i) => (i === active ? { ...x, pinned: !x.pinned } : x)))}>{cur.pinned ? 'Unpin result' : 'Pin result'}</button>}
+        {canEdit && !chart && !msgView && <>
+          <button className="btn-ghost" onClick={addRow}>Add row</button>
+          <button className="btn-ghost" onClick={duplicate} disabled={!sel}>Duplicate row</button>
+          <button className="btn-ghost" onClick={delRows} disabled={!sel}>{sel && P.deletes.has(sel) ? 'Keep row' : 'Delete row'}</button>
+          <button className="btn-ghost" onClick={setValue} disabled={!sel}>Set value</button>
+          <button className="btn-ghost" onClick={undo} disabled={!hist.current.some((h) => h.id === rid)}>Undo</button>
+          <button className="btn-ghost" onClick={preview} disabled={!pendCount(P)}>Preview SQL</button>
+          <button className="btn-ghost" onClick={discard} disabled={!pendCount(P)}>Discard</button>
+          <button className={pendCount(P) ? 'btn-primary' : 'btn-ghost'} onClick={commit} disabled={!pendCount(P)}>Commit{pendCount(P) ? ` (${pendCount(P)} pending)` : ''}</button>
+        </>}
+        {cur?.docs?.length ? <button className="btn-ghost" aria-pressed={json} onClick={() => setJson(!json)}>{json ? 'Rows' : 'JSON'}</button> : null}
+        {cur && !cur.error && <button className={`btn-ghost ${msgView ? 'btn-on' : ''}`} aria-pressed={msgView} onClick={() => setMsgView(!msgView)}>Message</button>}
+        {cur?.hasRows && !cur.error && <button className={`btn-ghost ${chart ? 'btn-on' : ''}`} aria-pressed={chart} onClick={() => setChart(!chart)}>Chart</button>}
         {results.some((r) => r.hasRows && !r.error) && <button className="btn-ghost" onClick={exportAll} title="One CSV file per result tab">Export all tabs</button>}
       </div>
-      {error && <div className="p-2.5 text-[12.5px] text-del">{error}</div>}
+      {error && <div className="px-3 py-2.5 text-[12.5px] text-del border-b border-rule bg-[color-mix(in_srgb,var(--del)_8%,transparent)]" role="alert">{error}</div>}
+      {!results.length && !running && !error && <div className="px-8 py-10 max-w-[52ch] text-ink-2 text-[14px] leading-normal font-sans">
+        <p className="m-0">Type a statement and run it. The results show here, one tab per statement.</p>
+        <p className="mt-3 mb-0 flex flex-wrap gap-x-4 gap-y-1.5 text-[12.5px] font-mono"><span><kbd>⌘</kbd> <kbd>Enter</kbd> run at the cursor</span><span><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>Enter</kbd> run all</span><span><kbd>Tab</kbd> complete</span></p>
+      </div>}
       {running && <><div className="relative h-[2px] -mb-[2px] z-[4] overflow-hidden bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] after:absolute after:inset-0 after:w-[40%] after:bg-accent after:animate-slide motion-reduce:after:animate-none motion-reduce:after:w-full motion-reduce:after:opacity-60" role="progressbar" aria-label="Running" /><div className="p-2.5 text-[12.5px] text-ink-2">Running…</div></>}
-      {cur && (msgView && !cur.error ? <MessageView sid={sid} item={cur} notify={notify} /> : cur.error ? <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] max-w-[100ch] text-del">{cur.error}</pre>
-        : cur.hasRows ? (
-          json && cur.docs ? <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] max-w-[100ch]">{cur.docs.map(pretty).join('\n')}</pre> : <>
-            {find !== null && <div className="toolbar bg-canvas"><input autoFocus className="flex-1 min-w-0" aria-label="Search results" placeholder="Search results" value={find} onChange={(e) => setFind(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setFind(null) }} /><label className="flex items-center gap-1.5 text-ink-2"><input type="checkbox" checked={matchCase} onChange={(e) => setMatchCase(e.target.checked)} />Match case</label><button className="btn-ghost" onClick={() => setFind(null)} aria-label="Close search">✕</button></div>}
-            {chart ? <ChartView notify={notify} stmt={cur.stmt} columns={cur.columns.map((c) => c.name)} cells={cur.cells} />
-              : <Grid colRef={colRef} ctx="results" columns={cur.columns} rows={cur.cells.flatMap((cells, i): GridRow[] => (find && !cells.some((c) => (matchCase ? c?.includes(find) : c?.toLowerCase().includes(find.toLowerCase()))) ? [] : [{ key: 'r' + i, cells, state: 'clean' }]))} selected={sel} onSelect={setSel} onOpen={setCell} />}
-            {cell && <CellEditor col={cell.col} readOnly value={cur.cells[Number(cell.row.slice(1))]?.[cur.columns.findIndex((c) => c.name === cell.col)] ?? null} onDone={() => setCell(null)} />}
-            <div className="toolbar bg-canvas text-ink-2">{cur.cells.length} rows in {cur.durationMs} ms{cur.truncated ? '. Stopped at the row limit.' : ''}{cur.truncated && <button className="btn-ghost" onClick={loadMore}>Load more</button>}</div>
-          </>
-        ) : <MessageView sid={sid} item={cur} notify={notify} />)}
+      {resultsView()}
       </>}
       {vars && <VariablesDialog names={vars.names} init={savedVars[sid] ?? {}} format={String(ed.ParamFormat || 'colon')} onClose={() => setVars(null)}
         onFormat={async (f) => (await api<{ params: string[] }>('POST', '/params', { Text: vars.body.text, Dialect: info.caps.Dialect, ParamFormat: f, Current: vars.body.current, Offset: vars.body.offset })).params}
         onRun={(v, f) => { savedVars[sid] = { ...savedVars[sid], ...v }; const b = vars.body; setVars(null); send({ ...b, vars: v, paramFormat: f }) }} />}
       {explain && <ExplainDialog sid={sid} body={explain} onClose={() => setExplain(null)} />}
       {dlg === 'export' && cur && <ExportDialog sid={sid} notify={notify} onClose={() => setDlg('')} source={{ mode: 'query', text: cur.stmt, columns: [], limit }} />}
+      {dlg === 'setvalue' && cur?.table && sel && <SetValueDialog sid={sid} schema={cur.table.schema} col={names[Math.min(colRef.current, names.length - 1)]} dialect={info.caps.Dialect} onClose={() => setDlg('')} onPick={(v) => { setDlg(''); onEditCell(sel, names[Math.min(colRef.current, names.length - 1)], v) }} />}
+      {plan && <PlanDialog sid={sid} plan={plan} onClose={() => setPlan(null)} onApplied={applied} />}
       {dlg === 'copyas' && <CopyAsDialog onClose={() => setDlg('')} onPick={(f) => { setDlg(''); copyRows(f) }} />}
+      {dlg === 'cellsas' && <CopyAsDialog onClose={() => setDlg('')} onPick={(f) => { setDlg(''); copyCellsAs(f) }} />}
+      {dlg === 'sort' && cur && <SortDialog columns={cur.columns.map((c) => c.name)} sort={rsort} onClose={() => setDlg('')} onApply={(v) => { setDlg(''); setRsort(v) }} />}
+      {hmenu && <ItemMenu x={hmenu.x} y={hmenu.y} label={`Column ${hmenu.col}`} onClose={() => setHmenu(null)} onPick={(it) => colAct(it.action, hmenu.col)}
+        items={menuItems(listOf(meta.menus, 'header'), {}).map((it) => (it.action === 'filter_column' ? { ...it, disabled: true, why: 'Filters belong to table tabs: add a WHERE to the query' } : it.action === 'hide_column' || it.action === 'show_all_columns' ? { ...it, disabled: true, why: 'Hiding columns applies to table tabs: select fewer columns in the query' } : it))} />}
+      {cmenu && <ItemMenu x={cmenu.x} y={cmenu.y} label="Result cell menu" onClose={() => setCmenu(null)} items={menuItems(listOf(meta.menus, 'result'), { editable: canEdit })}
+        onPick={(it) => { const f = cellActs()[it.action]; if (f) f(); else notify(`${it.label}: not available here`) }} />}
+      {slow && (
+        <Dialog title={`The server is taking too long (over ${timeoutSecs}s)`} onClose={() => { setSlow(false); setSlowTick((n) => n + 1) }}>
+          <div className="text-ink-2">The query is still running.</div>
+          <div className="flex justify-end gap-2 mt-[18px]">
+            <button onClick={() => { setSlow(false); cancel() }}>Cancel the query</button>
+            <button className="btn-primary" autoFocus onClick={() => { setSlow(false); setSlowTick((n) => n + 1) }}>Keep waiting</button>
+          </div>
+        </Dialog>
+      )}
       {gate && (
         <Dialog title="Run these statements?" onClose={() => setGate(null)}>
           <pre>{gate.statements.join('\n')}</pre>
