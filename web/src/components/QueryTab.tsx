@@ -201,29 +201,53 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   const runRef = useRef(run); runRef.current = run
   const limitBox = useRef<SelectHandle>(null)
   // Fold by statement: statement offsets come from the server's db.Split so indexes match the terminal's. The hidden part starts at the end of the statement's first line.
-  // shortcut: the folded indexes are saved on the fold command (not for gutter clicks) and restored by index when the tab opens, edits that move statements are not tracked.
-  const stmtRanges = async (v: EditorView) => (await api<[number, number][]>('POST', '/split', { text: v.state.doc.toString(), dialect: info.caps.Dialect })).map(([a, b]) => ({ from: v.state.doc.lineAt(a).to, to: b })) // one-line statements get an empty range (from >= to) to keep indexes aligned
+  // The server keeps the folded indexes ([]int, /api/state/folds); the client also keeps the FNV-1a hash of each folded statement's trimmed text (m15_folds.ts),
+  // so after an edit above, or when the tab opens again, the fold goes back on the same statement. Identical statements share a hash, like the terminal's.
+  // shortcut: a gutter click is saved by the next edit or fold command, not at once.
+  const stmtRanges = async (v: EditorView) => {
+    const doc = v.state.doc
+    return (await api<[number, number][]>('POST', '/split', { text: doc.toString(), dialect: info.caps.Dialect })).map(([a, b]) => ({ from: doc.lineAt(a).to, to: b, text: doc.sliceString(a, b) })) // one-line statements get an empty range (from >= to) to keep indexes aligned
+  }
   const foldKeyQ = `?key=${encodeURIComponent(tabKey)}`
+  const saveFolds = (v: EditorView, rs: { from: number; to: number; text: string }[]) => {
+    const idx: number[] = [], hashes: string[] = []
+    rs.forEach((x, k) => foldedRanges(v.state).between(x.from, x.from, (a) => { if (a === x.from) { idx.push(k); hashes.push(stmtHash(x.text)) } }))
+    saveHashes(tabKey, hashes)
+    api('PUT', '/state/folds' + foldKeyQ, idx).catch(() => {})
+  }
   const foldStatement = async () => {
     const v = view.current; if (!v) return
     const rs = await stmtRanges(v), head = v.state.selection.main.head
     const r = rs.find((x) => head >= v.state.doc.lineAt(x.from).from && head <= x.to)
     if (!r || r.from >= r.to) { notify('No multi-line statement here to fold'); return }
     const was = (() => { let f = false; foldedRanges(v.state).between(r.from, r.from, (a) => { f = a === r.from }); return f })()
-    v.dispatch({ effects: (was ? unfoldEffect : foldEffect).of(r) })
-    const idx: number[] = []
-    rs.forEach((x, k) => foldedRanges(v.state).between(x.from, x.from, (a) => { if (a === x.from) idx.push(k) }))
-    api('PUT', '/state/folds' + foldKeyQ, idx).catch(() => {})
+    v.dispatch({ effects: (was ? unfoldEffect : foldEffect).of({ from: r.from, to: r.to }) })
+    saveFolds(v, rs)
   }
   const restoreFolds = async (v: EditorView) => {
     try {
       const [idx, rs] = await Promise.all([api<number[]>('GET', '/state/folds' + foldKeyQ), stmtRanges(v)])
-      const effects = idx.flatMap((k) => rs[k] && rs[k].from < rs[k].to ? [foldEffect.of(rs[k])] : [])
+      const hashes = loadHashes(tabKey)
+      const want = hashes ? foldedIndexes(hashes, rs.map((x) => x.text)) : idx
+      const effects = want.flatMap((k) => rs[k] && rs[k].from < rs[k].to ? [foldEffect.of({ from: rs[k].from, to: rs[k].to })] : [])
       if (effects.length) v.dispatch({ effects })
+      if (hashes && JSON.stringify(want) !== JSON.stringify(idx)) saveFolds(v, rs) // the statements moved: the server's indexes follow
     } catch { /* folds are a convenience */ }
   }
+  const foldTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const syncFolds = () => { // after an edit: the folded statements may have moved, so the saved indexes are derived again from what is folded now
+    clearTimeout(foldTimer.current)
+    foldTimer.current = setTimeout(async () => {
+      const v = views.current[0]
+      if (!v || (!foldedRanges(v.state).size && !loadHashes(tabKey)?.length)) return
+      try { saveFolds(v, await stmtRanges(v)) } catch { /* a convenience */ }
+    }, 1200)
+  }
+  useEffect(() => () => clearTimeout(foldTimer.current), [])
   useEffect(() => {
     if (!shown) return
+    // answered only while the focus is in an editable result grid (the editor keeps undo, add_row etc. otherwise)
+    const resActs: Record<string, () => void> = { add_row: addRow, duplicate_rows: duplicate, delete_rows: delRows, commit, preview, discard, undo, set_value: setValue }
     const acts: Record<string, () => void> = {
       run_current: () => run(false), run_all: () => run(true), cancel_query: cancel, explain: explainNow, pin_connection: () => (info.pinnable ? togglePin() : notify(`${info.driver} cannot pin a connection to a tab`)),
       toggle_results: () => setShowRes((v) => !v),
