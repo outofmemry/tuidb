@@ -1,14 +1,20 @@
 import { Select } from './Select'
-import { useEffect, useState } from 'react'
-import { api, type Filter, type FilterSet, type ObjRef } from '../utils/api'
+import { useEffect, useRef, useState } from 'react'
+import { forThisTab } from '../utils/links'
+import { api, recentKey, type Filter, type FilterSet, type ObjRef } from '../utils/api'
 import { copyText } from '../utils/copy'
 
 const ANY = ''
 const RAW = '\x00raw'
 
 // FilterBar edits a draft and pushes it up on Apply, so typing does not refetch on every key.
-export function FilterBar({ sid, obj, value, columns, operators, onApply, active }: { active?: boolean; sid: string; obj: ObjRef; value: FilterSet; columns: string[]; operators: string[]; onApply: (f: FilterSet) => void }) {
-  const [draft, setDraft] = useState<FilterSet>(value.Filters.length ? value : { Filters: [blank(columns, operators)], Or: false })
+export function FilterBar({ sid, obj, value, columns, operators, onApply, onExport, active, defaults, pk, menu }: { menu?: { label: string; action: string }[]; active?: boolean; defaults?: Defaults; pk?: string; sid: string; obj: ObjRef; value: FilterSet; columns: string[]; operators: string[]; onApply: (f: FilterSet) => void; onExport?: (f: FilterSet) => void }) {
+  const fresh = () => blank(columns, operators, defaults, pk)
+  // the button labels are meta.menus.filter_bar (internal/menus.FilterBar), the terminal's filter bar menu: same words, same order
+  const L = (action: string, dflt: string) => menu?.find((i) => i.action === action)?.label ?? dflt
+  const [draft, setDraft] = useState<FilterSet>(value.Filters.length ? value : { Filters: [fresh()], Or: false })
+  const rows = useRef<HTMLDivElement>(null)
+  const row = useRef(0) // the filter row last focused: add-as-copy copies it
   const set = (i: number, p: Partial<Filter>) => setDraft({ ...draft, Filters: draft.Filters.map((f, j) => (j === i ? { ...f, ...p } : f)) })
   const noValue = (op: string) => op === 'IS NULL' || op === 'IS NOT NULL'
   const [sql, setSql] = useState<{ text: string; err?: boolean } | null>(null) // filter_sql: the WHERE the filters make
