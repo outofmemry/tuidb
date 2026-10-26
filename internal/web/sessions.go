@@ -251,6 +251,25 @@ func (s *Server) withSession(h sessHandler) handler {
 	}
 }
 
+// ctxNoTimeout is ctx without the hard query_timeout_secs: exec handlers end when the client cancels
+// (the keep-waiting prompt), the session stops, or a generous server cap passes (the larger of ten
+// times query_timeout_secs and one hour), so a vanished client cannot leave a query running forever.
+func (ss *session) ctxNoTimeout(r *http.Request) (context.Context, context.CancelFunc) {
+	limit := time.Hour
+	if n := ss.srv.o.Cfg.General.QueryTimeoutSecs; n > 0 && time.Duration(n)*10*time.Second > limit {
+		limit = time.Duration(n) * 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), limit)
+	go func() {
+		select {
+		case <-ss.stop:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
+}
+
 // ctx applies the configured query timeout on top of the request context.
 func (ss *session) ctx(r *http.Request) (context.Context, context.CancelFunc) {
 	if n := ss.srv.o.Cfg.General.QueryTimeoutSecs; n > 0 {
