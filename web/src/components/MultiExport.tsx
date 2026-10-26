@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, download, qs, saveBlob, watchJob, type DbObject, type Meta, type SessionInfo } from '../utils/api'
 import { Dialog } from './Dialogs'
 import { Select } from './Select'
+import { enterSubmits } from '../utils/m13'
 
 const SYSTEM_SCHEMA = /^(information_schema|pg_.*|mysql|performance_schema|sys|system|INFORMATION_SCHEMA)$/
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -30,6 +31,7 @@ export function MultiExportDialog({ sid, info, initial, onClose, notify }: { sid
   const [picked, setPicked] = useState<Set<string>>(new Set(initial.map((o) => at(o.Schema, o.Name))))
   const [open, setOpen] = useState<Set<string>>(new Set(initial.length ? initial.map((o) => o.Schema) : [info.caps.Schemas ? info.schema : '']))
   const [format, setFormat] = useState('csv'), [gzip, setGzip] = useState(false), [structure, setStructure] = useState(false)
+  const [header, setHeader] = useState(true), [pattern, setPattern] = useState('')
   const [state, setState] = useState(''), [err, setErr] = useState(''), [busy, setBusy] = useState(false)
   const abort = useRef<AbortController | null>(null)
   useEffect(() => () => abort.current?.abort(), [])
