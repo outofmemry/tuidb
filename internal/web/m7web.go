@@ -344,8 +344,14 @@ func toPanelOut(pr board.PanelResult) panelOut {
 	return p
 }
 
-// panelRuns: button and import panels hold no query; the UIs act on them.
-func panelRuns(p board.Panel) bool { return p.Kind != "button" && p.Kind != "import" }
+// panelRuns: button, import, input, dropdown and exporter panels are not run by board.Run; the UIs act on them.
+func panelRuns(p board.Panel) bool {
+	switch p.Kind {
+	case "button", "import", "input", "dropdown", "exporter":
+		return false
+	}
+	return true
+}
 
 // boardPanel runs the one panel titled `title` ({name, title, vals}) and names the panels that refresh when it runs.
 func (s *Server) boardPanel(ss *session, r *http.Request) (any, error) {
