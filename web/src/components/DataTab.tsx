@@ -52,12 +52,26 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
   const [planOwn, setPlanOwn] = useState(false) // the open plan was built from the staged cell edits (not from a tool dialog)
   const toolPlan = (p: Plan) => { setPlanOwn(false); setPlan(p) }
   const ownPlan = (p: Plan) => { setPlanOwn(true); setPlan(p) }
-  const [dlg, setDlg] = useState<'' | 'export' | 'import' | 'copyas' | 'setvalue' | 'sort' | 'page' | 'bulk'>('')
+  const [dlg, setDlg] = useState<'' | 'export' | 'import' | 'copyas' | 'cellsas' | 'setvalue' | 'sort' | 'page' | 'bulk'>('')
   const [fieldQ, setFieldQ] = useState('') // row detail: Search for field…
   const [section, setSection] = useState('') // structure section to scroll to (show_index, triggers)
   const [hmenu, setHmenu] = useState<{ x: number; y: number; col: string } | null>(null)
+  const [cmenu, setCmenu] = useState<{ x: number; y: number } | null>(null) // the cell / row context menu
+  const root = useRef<HTMLDivElement>(null)
+  const [more, setMore] = useState<{ x: number; y: number } | null>(null) // the toolbar's ⋯ menu: the less frequent actions
   const [structCol, setStructCol] = useState('') // the structure row the cursor is on; Row detail (space) edits it as a form
   const [colForm, setColForm] = useState<Column | null>(null)
+  const [find, setFind] = useState<FindState | null>(null) // the find / replace bar; null = closed
+  const [focusCell, setFocusCell] = useState<{ row: string; col: number; n: number } | null>(null)
+  const focusN = useRef(0)
+  const [cursor, setCursor] = useState<{ col: number; range: Range | null }>({ col: 0, range: null }) // from the grid: the cursor column and the shift-selected rectangle
+  const [widths, setWidths] = useState<Record<string, number>>({}) // column name -> width in terminal cells, the unit the TUI saves
+  const resized = useRef(false)
+  const sortChosen = useRef(false) // [table] default_sort fills `sort` on open; only a sort the user picked is saved
+  const setSortChosen = (v: Sort[]) => { sortChosen.current = true; setSort(v) }
+  const [expFilters, setExpFilters] = useState<FilterSet | null>(null) // "Export filtered rows": the bar's filters, all rows
+  const structCtl: StructureCtl = useRef(null)
+  const [structDirty, setStructDirty] = useState(false)
   const redo = useRef<Pend[]>([])
   const colRef = useRef(0)
   const cc = () => Math.max(0, Math.min(colRef.current, (rowsQ.data?.columns.length ?? 1) - 1)) // the cursor column, clamped: hiding it leaves colRef past the end
