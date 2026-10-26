@@ -3,10 +3,13 @@ package ui
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"webtuidb/internal/db"
@@ -162,4 +165,50 @@ func indentJSON(s string) (string, bool) {
 	return buf.String(), true
 }
 
-func writeFile(path, text string) error { return os.WriteFile(path, []byte(text), 0o644) }
+func writeFile(path, text string) error {
+	return writeAtomic(path, func(w io.Writer) error { _, err := io.WriteString(w, text); return err })
+}
+
+// writeAtomic fills a temp file next to path (mode 0600) and renames it over path, so a failed write
+// never destroys the previous file.
+func writeAtomic(path string, fill func(io.Writer) error) error {
+	f, err := os.CreateTemp(filepath.Dir(path), ".webtuidb-*")
+	if err != nil {
+		return err
+	}
+	err = fill(f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
+	return err
+}
+
+// ifNoQuery runs run, after an overwrite confirm when a saved query of that name exists in folder.
+// shortcut: matches by name via List; use store.SaveIfAbsent once it exists.
+func (a *App) ifNoQuery(folder, name string, run func() tea.Cmd) tea.Cmd {
+	qs, _ := a.d.Queries.List()
+	for _, q := range qs {
+		if q.Name == name && q.Folder == folder && !q.Shared {
+			a.push(&confirmDlg{title: "Overwrite saved query " + name + "?", yes: "Overwrite", danger: true, onYes: run})
+			return nil
+		}
+	}
+	return run()
+}
+
+// ifFree runs run, after an overwrite confirm when any of paths already exists.
+func (a *App) ifFree(run func() tea.Cmd, paths ...string) tea.Cmd {
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			a.push(&confirmDlg{title: "Overwrite " + p + "?", yes: "Overwrite", danger: true, onYes: run})
+			return nil
+		}
+	}
+	return run()
+}
