@@ -165,7 +165,7 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
   const logEnd = useRef<HTMLPreElement>(null)
   const path = `/sessions/${sid}/${restore ? 'restore' : 'backup'}`
   const opts = info.caps.Dialect === 'postgres' || info.caps.Dialect === 'mysql'
-  const body = { File: file, Gzip: gzip, Format: format, DataOnly: dataOnly, SchemaOnly: schemaOnly, ...(restore && newDb && dbName.trim() ? { NewDatabase: dbName.trim(), CreateOpts: opts ? { encoding: enc.trim(), collation: col.trim() } : undefined } : {}) }
+  const body = { File: file, filename: pattern.trim() || undefined, extra: extraArgs(ticked, extra), Gzip: gzip, Format: format, DataOnly: dataOnly, SchemaOnly: schemaOnly, ...(restore && newDb && dbName.trim() ? { NewDatabase: dbName.trim(), CreateOpts: opts ? { encoding: enc.trim(), collation: col.trim() } : undefined } : {}) }
   const call = async (run: boolean) => {
     setErr('')
     if (run && !restore && rev?.exists && !(await confirm('That backup file already exists in the backups folder. Overwrite it?'))) return
