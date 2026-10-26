@@ -185,22 +185,29 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
       case 'PageUp': go(idx - 20, col); break
       case 'Enter': if (idx >= 0) open(rows[idx], col); break
       case ' ': onSpace?.(); break
+      case 'Escape': if (anchor) setAnchor(null); else if (selected) onSelect?.(null); else return; break
+      case 'ContextMenu': menuAt(); break
+      case 'F10': if (!e.shiftKey) return; menuAt(); break
+      case '/': if (!onFind) return; onFind(0); break
+      case 'n': if (!onFind) return; onFind(1); break
+      case 'N': if (!onFind) return; onFind(-1); break
       default: return
     }
     e.preventDefault()
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-auto relative text-[12px] bg-canvas font-mono outline-none" ref={scroller} data-ctx={ctx} tabIndex={0} onKeyDown={onKey} role="grid" aria-rowcount={rows.length} aria-colcount={columns.length}>
+    <div className="flex-1 min-h-0 overflow-auto relative text-[12px] bg-canvas font-mono outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--accent)]" ref={scroller} data-ctx={ctx} tabIndex={0} onKeyDown={onKey} onDoubleClick={emptyDbl} role="grid" aria-label={ctx === 'results' ? 'Query result' : 'Table data'} aria-rowcount={rows.length} aria-colcount={columns.length}>
       <div className="sticky top-0 z-[3] flex bg-panel border-b border-rule-2" style={{ width }}>
         <div className={`${CELL} ${LN} border-b-0 font-sans font-medium text-ink-3 bg-panel cursor-pointer select-none hover:text-ink hover:bg-raised`} aria-hidden>#</div>
         {table.getHeaderGroups()[0]?.headers.map((h) => {
           const i = sortOf(h.column.id)
           return (
-            <div key={h.id} className={`${CELL} border-b-0 font-sans font-medium text-[12px] text-ink-2 cursor-pointer select-none hover:text-ink hover:bg-raised`} style={{ width: COL_W }} title={`${h.column.id} (${columns[h.index]?.type})`}
+            <div key={h.id} data-h={h.index} role="columnheader" aria-haspopup={onHeaderMenu ? 'menu' : undefined} className={`${CELL} relative border-b-0 font-sans font-medium text-[12px] text-ink-2 cursor-pointer select-none hover:text-ink hover:bg-raised ${numeric[h.index] ? 'text-right' : ''} ${i >= 0 ? 'text-ink' : ''}`} style={{ width: colW[h.index] }} title={`${colTips?.[h.column.id] ?? `${h.column.id} (${columns[h.index]?.type})`}${onSort ? '\nClick to sort, shift-click to add a column' : ''}`}
               onClick={(e) => onSort?.(h.column.id, e.shiftKey)} onContextMenu={(e) => { if (onHeaderMenu) { e.preventDefault(); onHeaderMenu(h.column.id, e.clientX, e.clientY) } }}>
               {columns[h.index]?.pk ? <span className="text-accent mr-1" title="primary key" aria-label="primary key">◆</span> : null}{flexRender(h.column.columnDef.header, h.getContext())}
               {i >= 0 && <span className="text-accent ml-1 text-[10px]" aria-label={sort![i].Desc ? 'descending' : 'ascending'}>{sort![i].Desc ? '▼' : '▲'}{sort!.length > 1 ? i + 1 : ''}</span>}
+              {onResize && <span role="separator" aria-orientation="vertical" aria-label={`Resize ${h.column.id}`} className="absolute right-0 top-0 h-full w-[6px] cursor-col-resize hover:bg-accent/40" onMouseDown={(e) => startResize(e, h.column.id, colW[h.index])} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => { e.stopPropagation(); onResize(h.column.id, null) }} />}
             </div>
           )
         })}
