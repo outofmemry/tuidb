@@ -200,7 +200,7 @@ func (s *Server) execPage(ss *session, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := ss.ctx(r)
+	ctx, cancel := ss.ctxNoTimeout(r)
 	defer cancel()
 	start := time.Now()
 	res, err := sess.Exec(ctx, stmt, 0)
@@ -208,7 +208,9 @@ func (s *Server) execPage(ss *session, r *http.Request) (any, error) {
 		return nil, bad("%v", err)
 	}
 	ss.record(stmt, "editor", time.Since(start), "")
-	return map[string]any{"supported": true, "result": toJSON(res, nil), "more": len(res.Rows) >= req.Limit}, nil
+	out := toJSON(res, nil)
+	// pages are never editable: editableResult would cache a result nobody uses and evict live ones
+	return map[string]any{"supported": true, "result": out, "more": len(res.Rows) >= req.Limit}, nil
 }
 
 // ---- table edits: foreign key by drag, column order ---------------------------------------------------
