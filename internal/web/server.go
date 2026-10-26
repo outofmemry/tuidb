@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"webtuidb/internal/config"
+	"webtuidb/internal/crashlog"
 	"webtuidb/internal/mcp"
 	"webtuidb/internal/store"
 	"webtuidb/internal/ui"
@@ -40,6 +41,7 @@ type Options struct {
 	Cfg      config.Config
 	Conns    []config.Connection
 	ConnPath string
+	CfgPath  string // the config.toml in use (-config); "" = the default under ConfigDir
 	State    *store.State
 	Hist     *store.History
 	Queries  *store.Queries
