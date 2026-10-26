@@ -310,6 +310,14 @@ func fail(w http.ResponseWriter, err error) {
 	writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 }
 
+// call runs h; a panic in it is written to the crash log and becomes a 500 for that request only.
+func (s *Server) call(h handler, r *http.Request) (v any, err error) {
+	defer crashlog.Catch(s.con.tail, func(p any) {
+		v, err = nil, fmt.Errorf("internal error: %v (see %s)", p, crashlog.Path())
+	})
+	return h(r)
+}
+
 func (s *Server) api(h handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.originOK(r) || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
@@ -320,7 +328,7 @@ func (s *Server) api(h handler) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized", "login": s.o.Cfg.Web.Password != ""})
 			return
 		}
-		v, err := h(r.WithContext(context.WithValue(r.Context(), ctxKey{}, w)))
+		v, err := s.call(h, r.WithContext(context.WithValue(r.Context(), ctxKey{}, w)))
 		if err != nil {
 			fail(w, err)
 			return
