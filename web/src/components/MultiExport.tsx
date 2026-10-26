@@ -45,7 +45,7 @@ export function MultiExportDialog({ sid, info, initial, onClose, notify }: { sid
       let n = 0
       for (const ref of list) {
         setState(`${++n}/${list.length}: ${ref.Name}`)
-        const { job } = await api<{ job: string }>('POST', `/sessions/${sid}/export`, { mode: 'table', ref: { ...ref, Kind: 'table' }, format, gzip: gzip && format !== 'xlsx', structure: structure && format === 'sql', job: true, fileName: several ? `${ref.Schema}.${ref.Name}.${format}${gzip ? '.gz' : ''}` : undefined })
+        const { job } = await api<{ job: string }>('POST', `/sessions/${sid}/export`, { mode: 'table', ref: { ...ref, Kind: 'table' }, format, gzip: gzip && format !== 'xlsx', structure: structure && format === 'sql', job: true, header: format === 'csv' ? header : undefined, filename: pattern.trim() || undefined, fileName: pattern.trim() ? pattern.trim() : several ? `${ref.Schema}.${ref.Name}.${format}${gzip ? '.gz' : ''}` : undefined })
         const j = await watchJob(sid, job, () => {}, ac.signal)
         if (j.error) throw new Error(`${ref.Name}: ${j.error}`)
         const f = await download(`/sessions/${sid}/jobs/${job}/file`)
