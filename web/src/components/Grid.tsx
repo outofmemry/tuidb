@@ -18,22 +18,64 @@ type Props = {
   // Enter or a double-click opens the cell in the popover; the owner renders it
   onOpen?: (t: CellTarget) => void
   selected?: string | null
-  onSelect?: (rowKey: string) => void
+  onSelect?: (rowKey: string | null) => void // null: Esc deselected the row
   onSpace?: () => void
   ctx?: 'grid' | 'results'
   colRef?: { current: number } // the cursor column, for copy_cells
   onHeaderMenu?: (col: string, x: number, y: number) => void // right-click on a column header
   pretty?: boolean // auto_pretty_json
+  widths?: Record<string, number> // column name -> px (the owner converts from the saved cells)
+  onResize?: (col: string, px: number | null) => void // a header edge was dragged; null = double-click, back to the default
+  focusCell?: { row: string; col: number; n: number } | null // move the cursor here (find); n changes on every request
+  onCursor?: (col: number, range: Range | null) => void // the cursor column and the shift-selected rectangle changed
+  onFind?: (dir: 0 | 1 | -1) => void // / opens find, n / N step through the matches
+  zebra?: boolean // [table] alternating_rows
+  spatial?: boolean // [table] decode_spatial: (E)WKB cells show as WKT
+  colTips?: Record<string, string> // column name -> header tooltip (type, nullable, default, key)
+  onCellMenu?: (x: number, y: number) => void // right-click on a cell, Shift+F10 or the ContextMenu key
+  onAddRow?: () => void // double-click in the empty space below the last row
+  onAddColumn?: () => void // double-click in the empty space beside the last column header
 }
+
+// A rectangle of cells, as indexes into rows and columns (inclusive).
+export type Range = { r0: number; r1: number; c0: number; c1: number }
 
 const ROW_H = 28
 const COL_W = 160
+const MIN_W = 40, MAX_W = 960
+const AUTO_MIN = 64, AUTO_MAX = 360, SAMPLE = 200
+
+// numeric columns sit flush right, like a ledger; the type names are the drivers' own
+const NUMERIC = /^(small|big|tiny|medium|u)?int|^int\d|numeric|decimal|float|double|real|money|serial|^number|^dec\b|^fixed|^uint/i
+export const isNumeric = (type: string) => NUMERIC.test(type)
+
+// one character of the data face, measured once (Martian Mono at 80% width is narrower than a generic monospace guess)
+let charW = 0
+const charWidth = () => {
+  if (charW) return charW
+  if (typeof document === 'undefined') return 7
+  const el = document.createElement('span')
+  el.className = 'font-mono text-[12px]'; el.style.cssText = 'position:absolute;visibility:hidden;white-space:pre'; el.textContent = '0'.repeat(20)
+  document.body.appendChild(el); charW = el.getBoundingClientRect().width / 20 || 7; el.remove()
+  return charW
+}
+// a column's starting width: wide enough for its name and the longest of the first rows, within limits
+const autoWidth = (c: ResultCol, i: number, rows: GridRow[]) => {
+  let n = c.name.length + (c.pk ? 2 : 0) + 1
+  for (const r of rows.slice(0, SAMPLE)) { const v = r.cells[i]; const l = v === null ? 4 : v.length; if (l > n) n = l; if (n * charWidth() + 20 >= AUTO_MAX) break }
+  return Math.max(AUTO_MIN, Math.min(AUTO_MAX, Math.round(n * charWidth()) + 20))
+}
 
 // one ledger cell: hairline right and bottom rules, clipped to a single line
-const CELL = 'px-[9px] h-[28px] leading-[27px] overflow-hidden text-ellipsis whitespace-nowrap flex-none border-r border-b border-rule'
+const CELL = 'px-[9px] h-[28px] leading-[27px] overflow-hidden text-ellipsis whitespace-nowrap flex-none border-r border-b border-[color:var(--grid-line,var(--rule))]'
 // the sticky row-number column
 const LN = 'sticky left-0 z-[2] w-[48px] text-right cursor-pointer pr-[8px] text-[11px]'
-const SEL_BG = 'bg-[color-mix(in_srgb,var(--accent)_12%,var(--canvas))]'
+const SEL_BG = 'bg-[var(--selection,color-mix(in_srgb,var(--accent)_12%,var(--canvas)))]'
+const MOD_BG = 'bg-[var(--modified-row,color-mix(in_srgb,var(--edit)_22%,var(--canvas)))]'
+const NEW_BG = 'bg-[var(--new-row,transparent)]'
+const DEL_BG = 'bg-[var(--deleted-row,transparent)]'
+const ZEBRA = 'bg-[color-mix(in_srgb,var(--ink)_3%,var(--canvas))]'
+const CUR = 'shadow-[inset_0_0_0_2px_var(--sel-cell,var(--cell-selection,var(--accent)))]'
 
 // [table] auto_pretty_json: a JSON value shows with spaces after its separators; in a grid cell only when that still fits the column.
 export function prettyJson(v: string, indent = 2): string {
