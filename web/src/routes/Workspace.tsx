@@ -238,17 +238,26 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     return id
   }
   const kick = (action: string) => setTimeout(() => window.dispatchEvent(new CustomEvent('webtuidb:action', { detail: { action }, cancelable: true })), 50)
-  const openObj = (o: ObjRef, record = true, view?: 'structure') => {
+  // M12.3: the same object already open in this pane is shown; otherwise the current table tab is replaced when it has no pending changes.
+  // Tabs with changes, editors and other pages are kept, and newTab (sidebar "Open in new tab") always adds.
+  const openObj = (o: ObjRef, record = true, view?: 'structure', newTab = false) => {
     if (!['table', 'view', 'matview'].includes(o.Kind)) return
     if (record) { // cap 50, a new open drops the forward trail
       const t = trail.current
       if (t.list[t.i] === undefined || !sameRef(t.list[t.i], o)) { t.list = [...t.list.slice(0, t.i + 1), o].slice(-50); t.i = t.list.length - 1 }
     }
-    const ex = tabs.find((t) => t.kind === 'table' && t.pane === p && sameRef(t.obj, o))
+    const ex = newTab ? undefined : tabs.find((t) => t.kind === 'table' && t.pane === p && sameRef(t.obj, o))
     if (ex) { setActive(p, ex.id); if (view) kick('show_structure'); return }
-    addTab({ kind: 'table', obj: o, view })
+    const curTab = tabs.find((t) => t.id === actives[p] && t.pane === p)
+    if (!newTab && curTab?.kind === 'table' && !dirty.current[curTab.id]) {
+      const id = seq.current++ // a new id remounts the DataTab for the new object
+      delete dirty.current[curTab.id]
+      setTabs((l) => l.map((t) => (t.id === curTab.id ? ({ kind: 'table', obj: o, view, id, pane: p } as Tab) : t))); setActive(p, id); setSide(false)
+    } else addTab({ kind: 'table', obj: o, view })
     api('POST', '/state/touch', { Conn: i.name, Item: recentKey(o) }).then(() => qc.invalidateQueries({ queryKey: ['shortcuts', sid] })).catch(() => {})
   }
+  // the sidebar's "Open in new tab" sends this event: detail { obj, newTab, view }
+  openRef.current = openObj
   const walk = (d: number) => {
     const t = trail.current, j = t.i + d
     if (j < 0 || j >= t.list.length) return notify(d < 0 ? 'Nothing to go back to' : 'Nothing to go forward to')
