@@ -338,20 +338,37 @@ export function ProcessDialog({ sid, info, onClose, notify }: { sid: string; inf
       {q.data?.supported && (q.data.processes.length === 0 ? <div className="text-ink-2">No other processes.</div> : (
         <div className="overflow-auto max-h-[50vh] border border-rule">
           <table className="text-[12px] font-mono border-collapse w-full">
-            <thead><tr>{([['Id', 'id'], ['User', 'user'], ['Database', 'db'], ['State', 'state'], ['Elapsed', 'elapsed'], ['Query', ''], ['', '']] as const).map(([h, k], i) => <th key={i} className="text-left p-1 border-b border-rule-2 font-medium text-ink-2" aria-sort={k && k === by ? 'ascending' : undefined}>{k ? <button className="btn-ghost p-0 font-medium" title={`Sort by ${h}`} onClick={() => setBy(k)}>{h}{k === by ? ' ▾' : ''}</button> : h}</th>)}</tr></thead>
+            <thead><tr>
+              <th className="p-1 border-b border-rule-2"><input type="checkbox" aria-label="Select all processes" checked={sel.size === procs.length && procs.length > 0} onChange={(e) => setSel(e.target.checked ? new Set(procs.map((p) => p.id)) : new Set())} /></th>
+              {HEADS.map(([h, k]) => <th key={k} className="text-left p-1 border-b border-rule-2 font-medium text-ink-2" aria-sort={k === by ? (desc ? 'descending' : 'ascending') : undefined}><button className="btn-ghost p-0 font-medium" title={`Sort by ${h}`} onClick={() => header(k)}>{h}{k === by ? (desc ? ' ▾' : ' ▴') : ''}</button></th>)}
+              <th className="text-left p-1 border-b border-rule-2 font-medium text-ink-2">Query</th><th className="p-1 border-b border-rule-2" aria-label="Actions" />
+            </tr></thead>
             <tbody>{procs.map((p) => (
-              <tr key={p.id}>
+              <tr key={p.id} className={sel.has(p.id) ? 'bg-raised' : ''} aria-selected={sel.has(p.id)} onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, id: p.id }) }}>
+                <td className="p-1 border-b border-rule"><input type="checkbox" aria-label={`Select process ${p.id}`} checked={sel.has(p.id)} onChange={() => toggle(p.id)} /></td>
                 <td className="p-1 border-b border-rule">{p.id}</td><td className="p-1 border-b border-rule">{p.user}</td><td className="p-1 border-b border-rule">{p.db}</td><td className="p-1 border-b border-rule">{p.state}</td>
                 <td className="p-1 border-b border-rule whitespace-nowrap">{(p.elapsedMs / 1000).toFixed(1)}s</td>
                 <td className="p-1 border-b border-rule max-w-[36ch] truncate cursor-pointer" title="Click for a closer look" onClick={() => setLook(p.query)}>{p.query}</td>
-                <td className="p-1 border-b border-rule"><button className="btn-ghost btn-danger" onClick={() => ask(p.id)}>Kill</button></td>
+                <td className="p-1 border-b border-rule"><button className="btn-ghost btn-danger" aria-label={`Kill process ${p.id}`} onClick={() => askKill([p.id])}>Kill</button></td>
               </tr>))}</tbody>
           </table>
         </div>))}
-      {kill && <><GateFields gate={kill.gate} label="Safe mode" password={password} setPassword={setPassword} /><div className={ACTIONS}><button onClick={() => setKill(null)}>Cancel</button><button className="btn-primary" disabled={kill.gate.password && !password} onClick={() => send(kill.id, true)}>Kill {kill.id}</button></div></>}
-      {err && <div className="text-del mt-2">{err}</div>}
+      {kill && <><GateFields gate={kill.gate} label="Safe mode" password={password} setPassword={setPassword} /><div className={ACTIONS}><button onClick={() => setKill(null)}>Cancel</button><button className="btn-primary" disabled={kill.gate.password && !password} onClick={() => send(kill.ids, true)}>Kill {kill.ids.length === 1 ? kill.ids[0] : `${kill.ids.length} processes`}</button></div></>}
+      {err && <div className="text-del mt-2" role="alert">{err}</div>}
       {look !== null && <CellEditor col="Query" readOnly value={look} onDone={() => setLook(null)} />}
-      <div className={ACTIONS}><button onClick={() => q.refetch()}>Refresh</button>{procs.length > 0 && <><button onClick={copyRows}>Copy rows</button><button onClick={exportPage}>Export page</button></>}<button className="btn-primary" onClick={onClose}>Close</button></div>
+      {copyAs && <CopyAsDialog onPick={copyRows} onClose={() => setCopyAs(false)} />}
+      {ctx && <>
+        <div className="fixed inset-0 z-[60]" onMouseDown={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null) }} />
+        <div className="popover fixed z-[61] min-w-[170px] py-1 flex flex-col motion-safe:animate-pop" style={{ left: Math.min(ctx.x, window.innerWidth - 190), top: Math.min(ctx.y, window.innerHeight - 40 - menu.length * 26) }} role="menu" aria-label="Process" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setCtx(null) } }}>
+          {menu.map((it, k) => <button key={it.action} className="menu-item" role="menuitem" autoFocus={k === 0} disabled={!!whyNot(it)} title={whyNot(it)} onClick={() => run(it.action, ctx.id)}>{it.label}</button>)}
+        </div></>}
+      <div className={ACTIONS}>
+        <button onClick={() => q.refetch()}>Refresh</button>
+        {procs.length > 0 && <>
+          <button className="btn-danger" disabled={!sel.size} onClick={killSelected}>{label('kill')}{sel.size ? ` (${sel.size})` : ''}</button>
+          <button onClick={() => setCopyAs(true)}>{label('copy_rows_as')}</button><button onClick={exportPage}>{label('export')}</button></>}
+        <button className="btn-primary" onClick={onClose}>{label('close')}</button>
+      </div>
     </Dialog>
   )
 }
