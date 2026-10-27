@@ -248,9 +248,16 @@ function ConnForm({ meta, init, error, onSave, onClose }: { meta: Meta; init: Co
       return merge(c)
     } catch (e) { setUrlErr(`That URL isn't valid: ${e instanceof Error ? e.message : e}`) }
   }
+  const presets = meta.passwordCmdPresets?.length ? meta.passwordCmdPresets : PRESETS
   const set = <K extends keyof Connection>(k: K, v: Connection[K]) => setC((x) => ({ ...x, [k]: v }))
   const file = (meta.fileBased ?? []).includes(c.Driver)
+  // options and bootstrap are edited as text separated by ' ;; ', like the TUI form
+  const [optText, setOptText] = useState(() => Object.entries(init.Options ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join(' ;; '))
+  const [bootText, setBootText] = useState(() => (init.Bootstrap ?? []).join(' ;; '))
+  const parts = (t: string) => t.split(';;').map((x) => x.trim()).filter(Boolean)
+  const optsOf = (t: string) => Object.fromEntries(parts(t).map((o) => { const i = o.indexOf('='); return i < 0 ? [o, ''] : [o.slice(0, i).trim(), o.slice(i + 1).trim()] }))
   const clean = (x = c): Connection => ({ ...x, Port: x.Port ? Number(x.Port) : undefined, SSH: x.SSH?.Host ? x.SSH : null })
+  const showSSL = !!c.SSLMode && c.SSLMode !== 'disable'
   const field = (label: string, k: keyof Connection, type = 'text') => (
     <>
       <label>{label}</label>
