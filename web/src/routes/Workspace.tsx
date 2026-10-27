@@ -64,7 +64,12 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const [focus, setFocus] = useState(0)
   const trail = useRef<{ list: ObjRef[]; i: number }>({ list: [], i: -1 }) // go back / forward over opened tables
   const [plan, setPlan] = useState<Plan | null>(null)
-  const [drawer, setDrawer] = useState<'' | 'history' | 'queries'>('')
+  const [drawer, setDrawer] = useState<'' | 'history' | 'queries' | 'jobs'>('')
+  const [zen, setZen] = useState(false) // M15.24: sidebar, console, row detail and status bar hidden
+  const jobs = useJobs(sid, drawer === 'jobs')
+  const [dragTab, setDragTab] = useState<number | null>(null)
+  const [dbMenuAt, setDbMenuAt] = useState<{ x: number; y: number; db: string } | null>(null)
+  const [dropImport, setDropImport] = useState<{ obj: ObjRef; file: File } | null>(null)
   const [side, setSide] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
   const [help, setHelp] = useState(false)
