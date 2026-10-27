@@ -1,10 +1,20 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { ApiError, api, type Gate, type Plan } from '../utils/api'
 
+// openSession opens a saved connection. A password = "ask" connection answers 422 passwordRequired: the password is asked for here and the call retried.
+export async function openSession(name: string): Promise<{ id: string }> {
+  try { return await api<{ id: string }>('POST', '/sessions', { Name: name }) } catch (e) {
+    if (!(e instanceof ApiError && e.status === 422 && e.body.passwordRequired)) throw e
+    const pw = await askSecret(`Password for ${name}`)
+    if (pw === null) throw new Error('Cancelled')
+    return api<{ id: string }>('POST', '/sessions', { Name: name, Password: pw })
+  }
+}
+
 export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 bg-backdrop flex items-center justify-center z-50" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="popover px-5 py-[18px] w-[min(680px,94vw)] max-h-[88vh] overflow-auto [&_input]:bg-canvas [&_select]:bg-canvas [&_pre]:m-0 [&_pre]:bg-canvas [&_pre]:border [&_pre]:border-rule [&_pre]:rounded-[2px] [&_pre]:px-3 [&_pre]:py-[10px] [&_pre]:max-h-[40vh] [&_pre]:overflow-auto [&_pre]:text-[12px] [&_pre]:whitespace-pre-wrap" role="dialog" aria-label={title} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+    <div className="fixed inset-0 bg-backdrop flex items-center justify-center z-50 max-[760px]:items-stretch" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="popover px-5 py-[18px] w-[min(680px,94vw)] max-h-[88vh] overflow-auto max-[760px]:w-full max-[760px]:max-h-none max-[760px]:h-full max-[760px]:rounded-none max-[760px]:px-4 [&_input]:bg-canvas [&_select]:bg-canvas [&_pre]:m-0 [&_pre]:bg-canvas [&_pre]:border [&_pre]:border-rule [&_pre]:rounded-[2px] [&_pre]:px-3 [&_pre]:py-[10px] [&_pre]:max-h-[40vh] [&_pre]:overflow-auto [&_pre]:text-[12px] [&_pre]:whitespace-pre-wrap" role="dialog" aria-label={title} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <h2 className="m-0 mb-[14px] text-[18px]">{title}</h2>
         {children}
       </div>
@@ -14,9 +24,10 @@ export function Dialog({ title, children, onClose }: { title: string; children: 
 
 // ask / confirm replace window.prompt and window.confirm with the app's own dialog. <Prompts/> is
 // mounted once at the root and renders whatever request is pending.
-type Req = { kind: 'prompt' | 'confirm'; title: string; init: string; resolve: (v: string | null | boolean) => void }
+type Req = { kind: 'prompt' | 'confirm'; title: string; init: string; secret?: boolean; resolve: (v: string | null | boolean) => void }
 let pending: ((r: Req | null) => void) | null = null
 export const ask = (title: string, init = '') => new Promise<string | null>((resolve) => pending?.({ kind: 'prompt', title, init, resolve: resolve as Req['resolve'] }))
+export const askSecret = (title: string) => new Promise<string | null>((resolve) => pending?.({ kind: 'prompt', title, init: '', secret: true, resolve: resolve as Req['resolve'] }))
 export const confirm = (title: string) => new Promise<boolean>((resolve) => pending?.({ kind: 'confirm', title, resolve: resolve as Req['resolve'], init: '' }))
 
 export function Prompts() {
@@ -29,7 +40,7 @@ export function Prompts() {
   const ok = () => done(req.kind === 'prompt' ? val : true)
   return (
     <Dialog title={req.title} onClose={cancel}>
-      {req.kind === 'prompt' && <input autoFocus className="w-full" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); ok() } }} />}
+      {req.kind === 'prompt' && <input autoFocus className="w-full" type={req.secret ? 'password' : 'text'} autoComplete="off" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); ok() } }} />}
       <div className="flex justify-end gap-2 mt-[18px]">
         <button onClick={cancel}>Cancel</button>
         <button className="btn-primary" autoFocus={req.kind === 'confirm'} disabled={req.kind === 'prompt' && !val.trim()} onClick={ok}>{req.kind === 'prompt' ? 'OK' : 'Continue'}</button>
