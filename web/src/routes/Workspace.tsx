@@ -38,16 +38,20 @@ export const SUPPORTED = new Set(['help', 'new_query_tab', 'new_tab', 'close_tab
   'redo', 'reconnect', 'safe_mode', 'toggle_console', 'toggle_results', 'set_value', 'paste_rows', 'paste_cells', 'quick_filter', 'follow_fk', 'page_settings', 'show_index', 'show_ddl', 'show_tree', 'triggers',
   'truncate', 'delete_item', 'open_anything', 'open_database', 'next_workspace', 'prev_workspace', 'toggle_comment', 'block_comment', 'save_sql_as', 'focus_left', 'focus_right', 'focus_up', 'focus_down',
   'close_other_tabs', 'close_tabs_right', 'close_all_tabs', 'rename_tab', 'cancel_queries', 'connection_details', 'wrap_lines', 'cleanup_variables', 'upper_case', 'lower_case', 'capitalize', 'use_selection_find',
-  'split_down', 'close_other_connections', 'open_file', 'open_recent', 'settings', 'find_next', 'find_prev', 'block_select', 'filter_sql', 'mark', 'new_schema',
-  'jump_to_selection', 'complete', 'hide_column', 'show_all_columns', 'sort_columns', 'bulk_update', 'explain', 'pin_connection',
+  'split_down', 'close_other_connections', 'open_file', 'open_recent', 'settings', 'find_next', 'find_prev', 'block_select', 'filter_sql', 'filter_clear_all', 'filter_export', 'filter_add_copy', 'mark', 'new_schema',
+  'jump_to_selection', 'complete', 'hide_column', 'show_all_columns', 'sort_columns', 'bulk_update', 'explain',
+  'close_pane', 'toggle_panels', 'move_tab_left', 'move_tab_right', 'jobs', 'lock', 'assistant_new', 'assistant_clear', 'assistant_history', 'copy_cells_as', 'copy_column', 'column_menu', 'select_word', 'select_all',
+  'console_find', 'console_next', 'console_prev', 'console_copy', 'console_errors', 'console_menu',
   ...Array.from({ length: 9 }, (_, i) => `tab_${i + 1}`)])
+// plugin shortcuts are bindings named plugin:<plugin name> (config.KeymapWith); the web runs them through POST /plugins/run
+const supported = (a: string) => SUPPORTED.has(a) || a.startsWith('plugin:')
 
 type Body = { kind: 'table'; obj: ObjRef; filters?: FilterSet; view?: 'structure' } | { kind: 'query'; n: number; text: string; autorun?: boolean } | { kind: 'diagram'; focus?: ObjRef } | { kind: 'metrics' | 'assistant' }
 type Tab = Body & { id: number; pane: number; name?: string } // pane 0 = left group, 1 = right group; name is a rename
 const PAGES = { diagram: 'Diagram', metrics: 'Metrics', assistant: 'Assistant' }
 const tabLabel = (t: Tab) => (t.name ? t.name : t.kind === 'table' ? t.obj.Name : t.kind === 'query' ? <>Query <span className="font-mono text-[11px] text-ink-3">{t.n}</span></> : PAGES[t.kind])
 
-export function Workspace({ sid }: { sid: string }) {
+export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const qc = useQueryClient()
   const nav = useNavigate()
   const info = useQuery({ queryKey: ['session', sid], queryFn: () => api<SessionInfo>('GET', `/sessions/${sid}`), retry: false, gcTime: 0 })
