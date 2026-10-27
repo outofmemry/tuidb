@@ -744,37 +744,49 @@ const FEATURES: [string, string][] = [['Pin connection to this tab', 'pin_connec
 // URL operation= spellings and the filter operator they mean
 const OPEN_OPS: Record<string, string> = { eq: '=', equal: '=', equals: '=', ne: '<>', neq: '<>', '!=': '<>', gt: '>', lt: '<', gte: '>=', lte: '<=', contain: 'Contains', contains: 'Contains', like: 'LIKE', in: 'IN', isnull: 'IS NULL', isnotnull: 'IS NOT NULL', startswith: 'Has prefix', endswith: 'Has suffix' }
 
-function PaletteHost({ sid, info, dbs, bindings, onTable, onSql, onDb, onAction, onClose }: { sid: string; info: SessionInfo; dbs: string[]; bindings: Meta['keymap']['bindings']; onTable: (o: ObjRef) => void; onSql: (t: string) => void; onDb: (n: string) => void; onAction: (a: string) => void; onClose: () => void }) {
+function PaletteHost({ sid, info, dbs, bindings, onTable, onSql, onDb, onAction, onNotify, onClose }: { sid: string; info: SessionInfo; dbs: string[]; bindings: Meta['keymap']['bindings']; onTable: (o: ObjRef, newTab?: boolean) => void; onSql: (t: string) => void; onDb: (n: string) => void; onAction: (a: string) => void; onNotify: (m: string) => void; onClose: () => void }) {
   const objs = useQuery({ queryKey: ['palette-objs', sid, info.database, info.schema], queryFn: () => api<(ObjRef & { Detail: string })[]>('GET', `/sessions/${sid}/objects` + qs({ schema: info.schema })), gcTime: 0 })
   const saved = useQuery({ queryKey: ['palette-queries'], queryFn: () => api<{ Name: string; Folder: string; SQL: string }[]>('GET', '/queries'), gcTime: 0 })
   const seen = new Set<string>()
   const items: PaletteItem[] = [
-    ...(objs.data ?? []).map((o) => ({ group: o.Kind, label: o.Name, detail: o.Schema, run: () => onTable(o) })),
+    ...(objs.data ?? []).map((o) => ({ group: o.Kind, label: o.Name, detail: o.Schema, run: (nt?: boolean) => onTable(o, nt) })),
     ...(saved.data ?? []).map((q) => ({ group: 'query', label: q.Name, detail: q.Folder, run: () => onSql(q.SQL) })),
     ...dbs.filter((d) => d !== info.database).map((d) => ({ group: info.caps.DatabaseNoun || 'database', label: d, run: () => onDb(d) })),
+    // M15.33: Help-menu equivalents. shortcut: the docs link is the project README; the SSH log needs --ssh-log on the server, which a page cannot switch on
+    { group: 'feature', label: 'Open docs', detail: 'README on GitHub', run: () => { window.open('https://github.com/outofmemory/webtuidb#readme', '_blank', 'noopener') } },
+    { group: 'feature', label: 'Enable SSH log', detail: 'web only: needs --ssh-log', run: () => onNotify('The SSH log is switched on with --ssh-log when the server starts (web only: the page cannot enable it).') },
     ...FEATURES.map(([label, action]) => ({ group: 'feature', label, detail: action, run: () => onAction(action) })),
-    ...bindings.filter((b) => SUPPORTED.has(b.Action) && !seen.has(b.Action) && seen.add(b.Action)).map((b) => ({ group: 'action', label: b.Desc, detail: b.Action, run: () => onAction(b.Action) })),
+    ...bindings.filter((b) => supported(b.Action) && !seen.has(b.Action) && seen.add(b.Action)).map((b) => ({ group: 'action', label: b.Desc, detail: b.Action, run: () => onAction(b.Action) })),
   ]
   return <Palette items={items} onClose={onClose} />
 }
 
 // Help lists every binding the terminal UI has, in the same order, so both screens read the same.
 function Help({ km, onClose }: { km: Meta['keymap']; onClose: () => void }) {
+  const [q, setQ] = useState('')
   const ctxs = [...new Set(km.bindings.map((b) => b.Context))]
+  const t = q.trim().toLowerCase()
+  const hit = (b: Meta['keymap']['bindings'][number]) => !t || b.Desc.toLowerCase().includes(t) || b.Key.toLowerCase().includes(t) || b.Action.includes(t.replace(/\s+/g, '_'))
+  const n = km.bindings.filter(hit).length
   return (
-    <Dialog title="Key bindings" onClose={onClose}>
-      <p className="text-ink-2" style={{ margin: '0 0 10px' }}>Press <kbd>{display(km.prefix)}</kbd> then a key. <kbd>Esc</kbd> cancels, pressing the prefix twice sends it to the page. Greyed bindings only exist in the terminal UI.</p>
+    <Dialog title="Key bindings" onClose={onClose} wide>
+      <p className="text-ink-2 mt-0 mb-2.5">Press <kbd>{display(km.prefix)}</kbd> then a key. <kbd>Esc</kbd> cancels, pressing the prefix twice sends it to the page. Greyed bindings only exist in the terminal UI.</p>
+      <input autoFocus className="w-full mb-2" aria-label="Search the bindings" placeholder="Search by description or key…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape' && q) { e.stopPropagation(); setQ('') } }} />
+      {t && !n && <p className="text-ink-2 my-2">No binding matches.</p>}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-x-7 gap-y-2 font-mono">
-        {ctxs.map((c) => (
-          <section key={c}>
-            <h3 className="mt-3 mb-1 text-[12.5px] text-ink-2">{c}</h3>
-            {km.bindings.filter((b) => b.Context === c).map((b) => (
-              <div key={b.Action + b.Key} className={`flex items-center gap-2.5 py-0.5 text-[12.5px] ${SUPPORTED.has(b.Action) ? '' : 'text-ink-2'}`} title={SUPPORTED.has(b.Action) ? undefined : 'Not in the web UI'}>
-                <kbd className="min-w-[7em] text-center">{b.NoPrefix ? '' : display(km.prefix) + ' '}{display(b.Key)}</kbd><span>{b.Desc}</span>
-              </div>
-            ))}
-          </section>
-        ))}
+        {ctxs.map((c) => {
+          const list = km.bindings.filter((b) => b.Context === c && hit(b))
+          return list.length ? (
+            <section key={c}>
+              <h3 className="mt-3 mb-1 text-[12.5px] text-ink-2">{c}</h3>
+              {list.map((b) => (
+                <div key={b.Action + b.Key} className={`flex items-center gap-2.5 py-0.5 text-[12.5px] ${supported(b.Action) ? '' : 'text-ink-3'}`} title={supported(b.Action) ? undefined : 'Not in the web UI'}>
+                  <kbd className="min-w-[7em] text-center">{b.NoPrefix ? '' : display(km.prefix) + ' '}{display(b.Key)}</kbd><span>{b.Desc}</span>
+                </div>
+              ))}
+            </section>
+          ) : null
+        })}
       </div>
       <div className={ACTIONS}><button onClick={onClose}>Close</button></div>
     </Dialog>
