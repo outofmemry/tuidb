@@ -155,7 +155,7 @@ export function ImportDialog({ sid, table: ref, file: dropped, onClose, onDone, 
     startingRef.current = true; setStarting(true)
     setErr(''); askNotify()
     try {
-      const r = await api<{ job: string }>('POST', `${base}/import`, upload({ source, header, delimiter, createTable: create, ref, mapping: source === 'sql' ? undefined : mapping, confirmed, password }, file!))
+      const r = await api<{ job: string }>('POST', `${base}/import`, upload({ source, header, delimiter, encoding, null_as: nullAs || undefined, empty_is_null: emptyNull, keep_formula_quote: keepQuote, createTable: create, ref, mapping: source === 'sql' ? undefined : mapping, confirmed, password }, file!))
       setGate(null)
       setJob({ done: false, error: '', rows: 0, batches: 0, total: 0, checked: 0, hits: [], lines: [] }) // the job record exists from here, so `running` stays true past the POST
       follow(r.job)
