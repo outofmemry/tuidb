@@ -543,11 +543,12 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     // tab-level actions: the active tab (or the sidebar) claims the event by calling preventDefault
     const ev = new CustomEvent('webtuidb:action', { detail: { action }, cancelable: true })
     window.dispatchEvent(ev)
-    if (!ev.defaultPrevented) notify(SUPPORTED.has(action) ? `${bindings.find((b) => b.Action === action)?.Desc ?? action}: nothing to do here` : `Not in the web UI: ${bindings.find((b) => b.Action === action)?.Desc ?? action}`)
+    if (!ev.defaultPrevented) notify(supported(action) || !bindings.some((b) => b.Action === action) ? `${bindings.find((b) => b.Action === action)?.Desc ?? action}: nothing to do here` : `Not in the web UI: ${bindings.find((b) => b.Action === action)?.Desc ?? action}`)
   }
 
   return (
-    <div className="flex flex-col h-full" style={accent}>
+    <div className="flex flex-col h-full" style={accent} data-zen={zen || undefined}>
+      {risky && <div className="h-[3px] flex-none bg-accent" role="note" aria-label={`${i.tag} database`} title={`${i.tag}: this is not a scratch database`} />}
       <div className="relative flex items-center gap-3 h-10 text-[12px] pr-2.5 bg-panel border-b border-rule font-mono max-[760px]:h-auto max-[760px]:min-h-10 max-[760px]:flex-wrap max-[760px]:gap-x-2.5 max-[760px]:gap-y-1.5 max-[760px]:pr-2">
         <div className="self-stretch flex items-center gap-2.5 px-3.5 bg-accent text-on-accent font-semibold text-[13px] whitespace-nowrap max-[760px]:self-auto max-[760px]:h-10">
           <button className={`${BADGE_GHOST} hover:bg-transparent! hidden max-[760px]:inline-block`} onClick={() => setSide(!side)} aria-expanded={side}>Objects</button>
