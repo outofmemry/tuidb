@@ -121,6 +121,26 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
       for (const d of r.dependents) await runPanel(d, seen)
     } catch (e) { notify(msg(e)) }
   }
+  // dropdown panels without a fixed list load their options from the panel's query
+  const loadOpts = async () => {
+    if (!board) return
+    const mine = board.name, o: Record<string, string[]> = {}
+    for (const p of board.panels) if (p.Kind === 'dropdown' && !p.options?.length && p.Query) {
+      try { const r = await api<{ options: string[]; truncated?: boolean }>('GET', `/sessions/${runSid}/boards/${encodeURIComponent(mine)}/options?panel=${encodeURIComponent(p.Title)}`); o[p.Title] = r.options ?? []; if (r.truncated) notify(`${p.Title}: only the first ${r.options.length} options are listed`) } catch (e) { setErr(msg(e)) }
+    }
+    if (curBoard.current === mine) setOpts(o)
+  }
+  useEffect(() => { loadOpts() }, [board?.name, runSid]) // eslint-disable-line react-hooks/exhaustive-deps
+  // exporter: the server runs the panel's query as an export job, then the file downloads like any other export
+  const exportPanel = async (p: BoardPanel) => {
+    try {
+      const { job } = await api<{ job: string }>('POST', `/sessions/${runSid}/boards/${encodeURIComponent(board!.name)}/export`, { panel: p.Title, format: fmts[p.Title] || p.format || 'csv', vals: valsRef.current })
+      const j = await watchJob(runSid, job, () => {})
+      if (j.error) throw new Error(j.error)
+      const f = await download(`/sessions/${runSid}/jobs/${job}/file`)
+      saveBlob(f.blob, f.name); notify('Export saved')
+    } catch (e) { notify(msg(e)) }
+  }
   // refresh while the board is open and on screen; the timer dies with the tab
   useEffect(() => {
     if (!board || !shown) return
