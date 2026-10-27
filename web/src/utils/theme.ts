@@ -1,8 +1,9 @@
 import type { Meta } from './api'
 
-// config [theme.colors] keys that have a counterpart in the web palette; the syntax keys (keyword, string,
-// comment, number) have no CSS variable here yet, because the SQL editor takes its colours from CodeMirror.
-const VARS: Record<string, string[]> = { accent: ['--accent'], error: ['--del'], ok: ['--new'], warn: ['--edit'], dim: ['--ink-2'], border: ['--rule-2'], selection: ['--raised'] }
+// config [theme.colors] keys and the CSS variables they set; the syntax keys reach the SQL editor through cmtheme.ts.
+const VARS: Record<string, string[]> = { accent: ['--accent'], error: ['--del'], ok: ['--new'], warn: ['--edit'], dim: ['--ink-2'], border: ['--rule-2'], selection: ['--raised'], keyword: ['--syn-keyword'], string: ['--syn-string'], number: ['--syn-number'], comment: ['--syn-comment'],
+  // M15.27: the surfaces TablePlus themes; each falls back to the palette when unset (styles.css reads var(--x, fallback))
+  editor_bg: ['--editor-bg'], window_bg: ['--window-bg'], sidebar_bg: ['--sidebar-bg'], tabs_bg: ['--tabs-bg'], tab_active_bg: ['--tab-active-bg'], notification_bg: ['--notification-bg'], grid_line: ['--grid-line'], cell_selection: ['--cell-selection'] }
 
 // applyTheme sets data-theme from theme.name (the server resolves named palettes to dark | light | auto; auto follows
 // prefers-color-scheme), the colour overrides, and the [web] font size and line height on the root.
