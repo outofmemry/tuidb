@@ -422,8 +422,46 @@ export function AssistantTab({ sid, onRun, notify }: { sid: string; onRun: (sql:
       </div>
       <div className="toolbar bg-canvas items-end">
         <textarea className="flex-1 min-w-0 h-16 bg-canvas resize-none" aria-label="Message" placeholder="Ask a question. Ctrl/Cmd+Enter sends." value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send() } }} />
-        {busy ? <button className="btn-danger" onClick={() => ctrl.current?.abort()}>Stop</button> : <button className="btn-primary" disabled={!text.trim()} onClick={send}>Send</button>}
+        {busy ? <button className="btn-danger" onClick={() => ctrl.current?.abort()} aria-label="Stop the answer">Stop</button> : <button className="btn-primary" disabled={!text.trim()} onClick={send}>Send</button>}
       </div>
+      {hist && <ChatHistory base={chatBase} current={chatId} onOpen={open} onClose={() => setHist(false)} onDeleted={(id) => { if (id === chatId) newChat() }} />}
     </div>
+  )
+}
+
+// The chat history drawer: search over titles and messages, load or delete a saved chat.
+function ChatHistory({ base, current, onOpen, onClose, onDeleted }: { base: string; current: string; onOpen: (id: string) => void; onClose: () => void; onDeleted: (id: string) => void }) {
+  const [q, setQ] = useState(''), [list, setList] = useState<ChatSummary[] | null>(null), [err, setErr] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => {
+      api<ChatSummary[] | { chats: ChatSummary[] }>('GET', base + (q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''))
+        .then((r) => { setList((Array.isArray(r) ? r : r.chats) ?? []); setErr('') }, (e) => setErr(msg(e)))
+    }, 200)
+    return () => clearTimeout(t)
+  }, [q, base])
+  const del = async (c: ChatSummary) => {
+    if (!(await confirm(`Delete the chat "${c.Title || 'untitled'}"?`))) return
+    try { await api('DELETE', `${base}/${encodeURIComponent(c.ID)}`); setList((l) => l && l.filter((x) => x.ID !== c.ID)); onDeleted(c.ID) } catch (e) { setErr(msg(e)) }
+  }
+  return (
+    <aside className="absolute right-0 top-0 bottom-0 w-[min(360px,100%)] z-20 bg-panel border-l border-rule flex flex-col motion-safe:animate-pop" role="dialog" aria-label="Chat history" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
+      <div className="flex items-center gap-2 p-2.5 border-b border-rule">
+        <input autoFocus className="flex-1 min-w-0" type="search" aria-label="Search chats" placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} />
+        <button className="btn-ghost btn-icon" onClick={onClose} aria-label="Close history" title="Close (Esc)">✕</button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto text-[12.5px] font-mono">
+        {err && <div className="p-2.5 text-del">{err}</div>}
+        {list === null && !err && <div className="p-2.5 text-ink-2">Loading…</div>}
+        {list?.length === 0 && <div className="p-2.5 text-ink-2">{q.trim() ? 'No chat matches.' : 'No saved chats yet.'}</div>}
+        {list?.map((c) => (
+          <div key={c.ID} className={`flex items-center gap-1 px-2.5 py-1.5 border-b border-rule ${c.ID === current ? 'bg-raised' : ''}`}>
+            <button className="flex-1 min-w-0 text-left border-transparent" onClick={() => onOpen(c.ID)} title="Open this chat">
+              <div className="truncate">{c.Title || 'untitled'}</div>
+              <div className="text-ink-3 text-[11.5px]">{c.Count} message{c.Count === 1 ? '' : 's'}, {new Date(c.Updated).toLocaleString()}</div>
+            </button>
+            <button className="btn-ghost btn-danger" aria-label={`Delete chat ${c.Title}`} onClick={() => del(c)}>Delete</button>
+          </div>))}
+      </div>
+    </aside>
   )
 }
