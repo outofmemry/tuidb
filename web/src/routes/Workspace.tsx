@@ -656,21 +656,33 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
             )
           })}
         </div>
-        {drawer && <Drawer kind={drawer} conn={i.name} dir={meta.data.queriesDir ?? ''} notify={notify} onUse={(t) => newQuery(t)} onClose={() => setDrawer('')} />}
+        {drawer === 'jobs' && <JobsDrawer sid={sid} jobs={jobs.jobs} items={meta.data.menus?.jobs} notify={notify} refetch={jobs.refetch} onClose={() => setDrawer('')} />}
+        {(drawer === 'history' || drawer === 'queries') && <Drawer kind={drawer} conn={i.name} menus={meta.data.menus} dir={meta.data.queriesDir ?? ''} notify={notify} onUse={(t, p) => newQuery(t, false, p)} onRun={(t) => newQuery(t, true)} onInsert={insertSql} onClose={() => setDrawer('')} />}
       </div>
-      {consoleOn && <ConsolePane conn={i.name} onClose={() => setConsoleOn(false)} />}
-      {tmenu && <TabMenu x={tmenu.x} y={tmenu.y} onClose={() => setTmenu(null)} items={[['Close', () => close(tmenu.id)], ['Close other tabs', () => closeOthers(tmenu.id)], ['Close tabs to the right', () => closeRight(tmenu.id)], ['Close all tabs', () => closeWhere(() => false)], ['Rename tab…', () => rename(tmenu.id)]]} />}
+      {consoleOn && !zen && <ConsolePane conn={i.name} items={meta.data.menus?.console} notify={notify} onClose={() => setConsoleOn(false)} />}
+      {!zen && (
+        <div className="flex items-center gap-3 h-6 flex-none px-3 border-t border-rule bg-panel font-mono text-[11.5px] text-ink-2" role="contentinfo" aria-label="Status">
+          <button className="btn-ghost px-1.5 py-0 leading-5 text-inherit" title="Reconnect: closes this connection and opens it again, keeping the tabs" onClick={() => act.current('reconnect')}><span className="text-new" aria-hidden>●</span> {i.name}</button>
+          <button className="btn-ghost px-1.5 py-0 leading-5 text-inherit" onClick={() => setInfoDlg(true)} title="Connection details">details</button>
+          <span className="truncate max-[760px]:hidden">{i.database}{i.schema && i.caps.Schemas ? `.${i.schema}` : ''}</span>
+          <span className="flex-1" />
+          <button className={`btn-ghost px-1.5 py-0 leading-5 ${drawer === 'jobs' ? 'btn-on' : 'text-inherit'}`} aria-pressed={drawer === 'jobs'} title="Background jobs: imports, exports, backups, searches" onClick={() => setDrawer(drawer === 'jobs' ? '' : 'jobs')}>Jobs{jobs.jobs.length ? <span className={`ml-1.5 chip ${jobs.running ? 'border-accent text-accent' : ''}`}>{jobs.running || jobs.jobs.length}</span> : ''}</button>
+        </div>
+      )}
+      {dropImport && <ImportDialog sid={sid} table={dropImport.obj} file={dropImport.file} notify={notify} onClose={() => setDropImport(null)} onDone={() => { setDropImport(null); qc.invalidateQueries() }} />}
+      {tmenu && <TabMenu x={tmenu.x} y={tmenu.y} label="Tab menu" onClose={() => setTmenu(null)} items={filterMenu(meta.data.menus?.tab ?? [{ label: 'Close', action: 'close_tab' }], {}).map((it): [string, () => void, string?] => [it.label, () => tabAction(it.action, tmenu.id), whyNot(it)])} />}
+      {dbMenuAt && <TabMenu x={dbMenuAt.x} y={dbMenuAt.y} label={dbMenuAt.db} onClose={() => setDbMenuAt(null)} items={filterMenu(meta.data.menus?.database ?? [{ label: 'Open in current tab', action: 'open' }], { kind: 'database', caps: i.caps as unknown as Record<string, unknown> }).map((it): [string, () => void, string?] => [it.label, () => dbAction(it.action, dbMenuAt.db), whyNot(it)])} />}
       {safeDlg && <SafeModeDialog sid={sid} info={i} onClose={() => setSafeDlg(false)} onDone={() => { setSafeDlg(false); qc.invalidateQueries({ queryKey: ['session', sid] }) }} />}
       {infoDlg && <DetailsDialog sid={sid} info={i} onClose={() => setInfoDlg(false)} onSaved={() => { setInfoDlg(false); qc.invalidateQueries({ queryKey: ['session', sid] }) }} />}
       {settingsDlg && <SettingsDialog notify={notify} onClose={() => setSettingsDlg(false)} />}
       {recentDlg && <RecentDialog onClose={() => setRecentDlg(false)} onPick={(e) => openRecentFile(e).then(withFile)} />}
-      {palette && <PaletteHost sid={sid} info={i} dbs={dbs.data?.databases ?? []} bindings={bindings} onTable={openObj} onSql={newQuery} onDb={switchDb} onAction={(a) => act.current(a)} onClose={() => setPalette(false)} />}
+      {palette && <PaletteHost sid={sid} info={i} dbs={dbs.data?.databases ?? []} bindings={bindings} onTable={(o, nt) => openObj(o, true, undefined, !!nt)} onSql={newQuery} onDb={switchDb} onAction={(a) => act.current(a)} onNotify={notify} onClose={() => setPalette(false)} />}
       {plan && <PlanDialog sid={sid} plan={plan} onClose={() => setPlan(null)} onApplied={() => { setPlan(null); qc.invalidateQueries(); notify('Changes sent') }} />}
       {pending && machine.current && (
         <div className="popover fixed right-3 bottom-3 z-[45] w-[min(760px,calc(100vw-24px))] grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-[18px] gap-y-[3px] px-3.5 py-2.5 max-h-[60vh] overflow-auto text-[12px] font-mono" role="status" aria-label="Keys after the prefix">
           <div className={`${WK_ROW} col-span-full mb-1 text-ink-2`}>{display(km!.prefix)} then</div>
-          {machine.current.bindings(pending).map((b) => (
-            <div key={b.Context + b.Key} className={`${WK_ROW} ${SUPPORTED.has(b.Action) ? '' : 'text-ink-2'}`}><kbd>{display(b.Key)}</kbd>{b.Desc}</div>
+          {[...machine.current.bindings(pending)].sort((a, b) => Number(supported(b.Action)) - Number(supported(a.Action))).map((b) => (
+            <div key={b.Context + b.Key} className={`${WK_ROW} ${supported(b.Action) ? '' : 'text-ink-3'}`}><kbd className={supported(b.Action) ? '' : 'text-ink-3'}>{display(b.Key)}</kbd>{b.Desc}</div>
           ))}
         </div>
       )}
