@@ -265,12 +265,22 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   }
   // a search hit opens its table in a fresh tab with the hit's filters, so a tab with edits is never replaced
   const openHit = (o: ObjRef, filters: FilterSet) => { addTab({ kind: 'table', obj: o, filters }) }
-  const newQuery = (text = '', autorun = false) => { texts.current[addTab({ kind: 'query', n: ++queries.current, text, autorun })] = text }
+  const savedPaths = useRef<Record<number, string>>({}) // query tab id -> the saved query it was opened from
+  const newQuery = (text = '', autorun = false, path?: string) => { const id = addTab({ kind: 'query', n: ++queries.current, text, autorun }); texts.current[id] = text; if (path) savedPaths.current[id] = path }
   const openPage = (kind: 'diagram' | 'metrics' | 'assistant', focusOn?: ObjRef) => {
     const ex = tabs.find((t) => t.kind === kind)
     if (ex) { setFocus(ex.pane); setActive(ex.pane, ex.id); if (kind === 'diagram') setTabs((l) => l.map((x) => (x.id === ex.id ? { ...x, focus: focusOn } as Tab : x))) } else addTab(kind === 'diagram' ? { kind, focus: focusOn } : { kind })
   }
   const withFile = (f: { name: string; text: string } | null) => { if (f) newQuery(f.text) }
+  // a file dropped on a tab: CSV / JSON / SQL onto a table's grid opens the import wizard on that table; a .sql file anywhere else opens in an editor
+  const dropFile = (t: Tab, e: React.DragEvent) => {
+    const f = e.dataTransfer.files?.[0]
+    if (!f) return
+    e.preventDefault()
+    if (t.kind === 'table' && t.obj.Kind === 'table' && /\.(csv|tsv|json|sql)$/i.test(f.name)) return setDropImport({ obj: t.obj, file: f })
+    if (/\.sql$/i.test(f.name)) return void f.text().then(newQuery)
+    notify(t.kind === 'table' ? 'Drop a CSV, JSON or SQL file to import it into this table' : 'Drop a .sql file to open it')
+  }
   // Close other connections: every other open workspace of this browser tab is disconnected; this one stays
   const closeOtherConns = async () => {
     const others = Object.entries(openSessions()).filter(([, id]) => id !== sid)
