@@ -591,9 +591,12 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
                 <div className="fixed inset-0 z-40" onClick={() => setDbMenu(false)} aria-hidden />
                 <div className={`${SWITCHER} top-7 -left-2`} role="menu" aria-label={i.caps.DatabaseNoun || 'Databases'}>
                   {dbs.data!.databases.map((d) => (
-                    <button key={d} role="menuitem" className={`${SW_ITEM} ${d === i.database ? 'btn-on' : ''}`} autoFocus={d === i.database} onClick={() => { setDbMenu(false); if (d !== i.database) switchDb(d) }}>
-                      <span className="flex-1 min-w-0 truncate">{d}</span>{d === i.database && <span className="text-ink-2">current</span>}
-                    </button>
+                    <div key={d} className="flex items-center" onContextMenu={(e) => { e.preventDefault(); setDbMenuAt({ x: e.clientX, y: e.clientY, db: d }) }}>
+                      <button role="menuitem" className={`${SW_ITEM} flex-1 min-w-0 ${d === i.database ? 'btn-on' : ''}`} autoFocus={d === i.database} onKeyDown={(e) => { if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setDbMenuAt({ x: r.left + 24, y: r.bottom, db: d }) } }} onClick={() => { setDbMenu(false); if (d !== i.database) switchDb(d) }}>
+                        <span className="flex-1 min-w-0 truncate">{d}</span>{d === i.database && <span className="text-ink-2">current</span>}
+                      </button>
+                      <button className="btn-ghost btn-icon" aria-label={`Actions for ${d}`} aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setDbMenuAt({ x: r.left, y: r.bottom, db: d }) }}>⋯</button>
+                    </div>
                   ))}
                 </div>
               </>
