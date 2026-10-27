@@ -22,10 +22,33 @@ type fakeSess struct {
 	applied [][]db.Statement
 	changes []db.Change
 	execs   []string
+	killed  []string
 }
 
 func (f *fakeSess) Caps() db.Capabilities {
-	return db.Capabilities{Dialect: "postgres", Editor: "sql", Transactions: true}
+	return db.Capabilities{Dialect: "postgres", Editor: "sql", Transactions: true, ProcessList: true, Users: true}
+}
+func (f *fakeSess) Objects(_ context.Context, schema string) ([]db.Object, error) {
+	if schema == "other" {
+		return []db.Object{{ObjRef: db.ObjRef{Schema: "other", Name: "t1", Kind: db.KindTable}}, {ObjRef: db.ObjRef{Schema: "other", Name: "t3", Kind: db.KindTable}}}, nil
+	}
+	return []db.Object{{ObjRef: db.ObjRef{Schema: "public", Name: "t1", Kind: db.KindTable}}, {ObjRef: db.ObjRef{Schema: "public", Name: "t2", Kind: db.KindTable}}}, nil
+}
+func (f *fakeSess) Count(_ context.Context, q db.RowQuery, _ bool) (db.Count, error) {
+	if q.ObjRef.Name == "t2" {
+		return db.Count{N: 2, Exact: true}, nil
+	}
+	return db.Count{Exact: true}, nil
+}
+func (f *fakeSess) DDL(context.Context, db.ObjRef) (string, error) {
+	return "CREATE TABLE t (id int);", nil
+}
+func (f *fakeSess) Processes(context.Context) ([]db.ProcessInfo, error) {
+	return []db.ProcessInfo{{ID: "7", User: "u", DB: "app", State: "active", Query: "select 1"}}, nil
+}
+func (f *fakeSess) Kill(_ context.Context, id string) error {
+	f.killed = append(f.killed, id)
+	return nil
 }
 func (f *fakeSess) ServerInfo() string                          { return "fake 1" }
 func (f *fakeSess) Ping(context.Context) error                  { return nil }
@@ -36,7 +59,17 @@ func (f *fakeSess) Databases(context.Context) ([]string, error) { return []strin
 func (f *fakeSess) Columns(_ context.Context, ref db.ObjRef) ([]db.Column, error) {
 	return []db.Column{{Name: "id", Type: "int", PK: true}, {Name: "name", Type: "text", Nullable: true}}, nil
 }
+func (f *fakeSess) Indexes(context.Context, db.ObjRef) ([]db.Index, error) { return nil, nil }
+func (f *fakeSess) PlanTable(old, nw *db.TableDef) ([]db.Statement, error) {
+	if old == nil {
+		return []db.Statement{{Text: "CREATE " + nw.Name}}, nil
+	}
+	return nil, nil
+}
 func (f *fakeSess) Rows(_ context.Context, q db.RowQuery) (*db.Result, error) {
+	if q.ObjRef.Name == "d2" {
+		return &db.Result{Columns: []db.ResultColumn{{Name: "id"}, {Name: "name"}}, Rows: [][]any{{int64(1), "ann2"}, {int64(2), nil}}, HasRows: true}, nil
+	}
 	return &db.Result{
 		Columns: []db.ResultColumn{{Name: "id", Type: "int"}, {Name: "name", Type: "text"}},
 		Rows:    [][]any{{int64(1), "ann"}, {int64(2), nil}, {int64(3), []byte{0xde, 0xad}}},
@@ -47,6 +80,12 @@ func (f *fakeSess) Exec(_ context.Context, stmt string, limit int) (*db.Result, 
 	f.execs = append(f.execs, stmt)
 	if strings.Contains(stmt, "boom") {
 		return nil, fmt.Errorf("boom")
+	}
+	if strings.HasPrefix(stmt, "EXPLAIN") {
+		return &db.Result{Columns: []db.ResultColumn{{Name: "QUERY PLAN"}}, Rows: [][]any{{`[{"Plan":{"Node Type":"Seq Scan","Relation Name":"t","Total Cost":1.5,"Plan Rows":3}}]`}}, HasRows: true}, nil
+	}
+	if strings.Contains(stmt, "raise") {
+		return &db.Result{Message: "DO\nNOTICE: hello\nWARNING: careful"}, nil
 	}
 	if strings.HasPrefix(strings.ToLower(stmt), "select") {
 		return &db.Result{Columns: []db.ResultColumn{{Name: "x"}}, Rows: [][]any{{int64(1)}}, HasRows: true}, nil
@@ -71,9 +110,12 @@ type env struct {
 	srv  *httptest.Server
 	fake *fakeSess
 	hist *store.History
+	s    *Server
 }
 
-func newEnv(t *testing.T, safe string) *env {
+func newEnv(t *testing.T, safe string) *env { return newEnvCfg(t, safe, nil) }
+
+func newEnvCfg(t *testing.T, safe string, mutate func(*config.Config)) *env {
 	t.Helper()
 	fake := &fakeSess{}
 	dir := t.TempDir()
@@ -82,6 +124,9 @@ func newEnv(t *testing.T, safe string) *env {
 		t.Fatal(err)
 	}
 	cfg := config.Defaults()
+	if mutate != nil {
+		mutate(&cfg)
+	}
 	s := New(Options{
 		Cfg: cfg, ConnPath: dir + "/connections.toml", State: st,
 		Hist: &store.History{Dir: dir + "/history"}, Queries: &store.Queries{Root: dir + "/queries"},
@@ -93,7 +138,7 @@ func newEnv(t *testing.T, safe string) *env {
 	})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
-	return &env{t: t, srv: ts, fake: fake, hist: s.o.Hist}
+	return &env{t: t, srv: ts, fake: fake, hist: s.o.Hist, s: s}
 }
 
 func (e *env) call(method, path string, body any, token string) (int, map[string]any) {
@@ -104,6 +149,7 @@ func (e *env) call(method, path string, body any, token string) (int, map[string
 		rd = *bytes.NewReader(b)
 	}
 	req, _ := http.NewRequest(method, e.srv.URL+path, &rd)
+	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -144,8 +190,8 @@ func TestAuth(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer tok")
 	req.Header.Set("Origin", "http://evil.example")
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != 401 {
-		t.Fatalf("foreign origin: got %d, want 401", resp.StatusCode)
+	if resp.StatusCode != 403 {
+		t.Fatalf("foreign origin: got %d, want 403", resp.StatusCode)
 	}
 }
 
@@ -274,6 +320,7 @@ func TestDeleteQueriesRootAndEmptyConnections(t *testing.T) {
 	}
 	req, _ := http.NewRequest("PUT", e.srv.URL+"/api/connections", strings.NewReader("null"))
 	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != 400 {
 		t.Fatalf("null PUT accepted: %v %v", resp, err)
@@ -296,12 +343,21 @@ func TestExecSplitsGatesAndRecordsHistory(t *testing.T) {
 	}
 	out = e.ok("POST", "/api/sessions/"+id+"/exec", map[string]any{"text": "delete from t; select boom; select 3", "confirmed": true})
 	res := out["results"].([]any)
-	if len(res) != 2 || res[1].(map[string]any)["error"] != "boom" {
-		t.Fatalf("must stop at the first error: %v", res)
+	if len(res) != 3 || res[1].(map[string]any)["error"] != "boom" || res[2].(map[string]any)["error"] != nil {
+		t.Fatalf("later statements must still run: %v", res)
 	}
 	h, _ := e.hist.List("c1", "", 0)
-	if len(h) != 3 { // select 1, select 2, delete
-		t.Fatalf("history has %d entries, want 3 successful statements", len(h))
+	if len(h) != 4 { // select 1, select 2, delete, select 3
+		t.Fatalf("history has %d entries, want 4 successful statements", len(h))
+	}
+}
+
+func TestExecReturnOnError(t *testing.T) {
+	e := newEnvCfg(t, "", func(c *config.Config) { c.Editor.ReturnOnError = true })
+	id := e.open()
+	out := e.ok("POST", "/api/sessions/"+id+"/exec", map[string]any{"text": "select 1; select boom; select 3"})
+	if res := out["results"].([]any); len(res) != 2 {
+		t.Fatalf("must stop at the first error: %v", res)
 	}
 }
 
@@ -338,7 +394,7 @@ func TestConnURL(t *testing.T) {
 	}{
 		{"postgresql://u:p%40w@h:5432/d?sslmode=require", "postgres", "h", "u", "p@w", "d", 5432},
 		{"mysql://root:s@db.local:3307/shop", "mysql", "db.local", "root", "s", "shop", 3307},
-		{"sqlite:///tmp/x.db", "sqlite", "", "", "", "/tmp/x.db", 0},
+		{"redshift://u:p@rh:5439/dw", "redshift", "rh", "u", "p", "dw", 5439},
 		{"mongodb://m:q@mh:27017/logs", "mongodb", "mh", "m", "q", "logs", 27017},
 	} {
 		out := e.ok("POST", "/api/connections/parse", map[string]string{"url": tc.url})
