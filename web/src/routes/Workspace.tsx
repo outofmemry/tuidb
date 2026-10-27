@@ -581,8 +581,8 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
           </>
         )}
         <span className="font-mono text-[11.5px] text-ink-2 truncate max-[760px]:hidden">{i.serverInfo}{i.encoding ? ` · ${i.encoding}` : ''}</span>
-        <span className="px-2 border border-rule-2 rounded-[2px] text-[11.5px] text-ink-2 whitespace-nowrap" title="Safe mode decides what needs confirmation before it is sent">{i.levelLabel}</span>
-        {i.readOnly && <span className="px-2 border border-del rounded-[2px] text-[11.5px] text-del whitespace-nowrap" title="This connection refuses every statement that changes data">read only</span>}
+        <button className="chip hover:text-ink hover:border-ink-3 cursor-pointer" title="Safe mode decides what needs confirmation before it is sent. Click to change it." onClick={() => setSafeDlg(true)}>{i.levelLabel}</button>
+        {i.readOnly && <span className="chip border-del text-del" title="This connection refuses every statement that changes data">read only</span>}
         {(dbs.data?.databases.length ?? 0) > 1 && (
           <div className="relative">
             <button className="flex items-center gap-1.5 px-2 py-0.5 font-medium text-[14px] border-transparent hover:border-rule-2 aria-expanded:border-rule-2" onClick={() => setDbMenu(!dbMenu)} aria-expanded={dbMenu} aria-haspopup="menu" title={`Switch ${i.caps.DatabaseNoun || 'database'}`}>{i.database}<span className={CARET} aria-hidden>▾</span></button>
