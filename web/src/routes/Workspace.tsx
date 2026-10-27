@@ -197,11 +197,12 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     if (!km) return
     const m = (machine.current = new Machine(km))
     const onKey = (e: KeyboardEvent) => {
+      if (keysLocked()) return
       const k = canon(e); if (!k) return
       const ctx = contextOf(), wasPending = m.pending
-      const r = m.feed(ctx, k)
+      const r = m.feed(ctx, k, inTextField())
       if (r.passthrough) return
-      if (r.action && !wasPending && !SUPPORTED.has(r.action)) return // a no-prefix key for an action the web lacks: let the browser have it
+      if (r.action && !wasPending && !supported(r.action)) return // a no-prefix key for an action the web lacks: let the browser have it
       e.preventDefault(); e.stopPropagation()
       setPending(r.pending ? ctx : null)
       if (r.action) act.current(r.action)
