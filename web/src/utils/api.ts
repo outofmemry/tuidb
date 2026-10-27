@@ -1,3 +1,4 @@
+import { linkWithToken } from './links'
 // Types use the Go field names of the db/config structs (the API serializes them as-is).
 const KEY = 'webtuidb-token'
 
@@ -13,6 +14,9 @@ let memToken = ''
 function token() {
   try { return sessionStorage.getItem(KEY) ?? memToken } catch { return memToken }
 }
+// withToken adds the access token as a #token= fragment, so a link opened in another browser tab (a new tab starts with an empty
+// sessionStorage) still signs in; every in-app link and window.open goes through it.
+export const withToken = (url: string) => linkWithToken(url, token())
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body: any) { super(message) }
