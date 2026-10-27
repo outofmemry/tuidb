@@ -170,6 +170,9 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   // a connection URL that named a table (schema, table, column, operation, value, condition) opens it right after the connect
   const openedTarget = useRef(false)
   const dirty = useRef<Record<number, boolean>>({}) // table tabs with pending edits, reported by DataTab
+  const [dirtyIds, setDirtyIds] = useState<Set<number>>(new Set())
+  const markDirty = (id: number, d: boolean) => { if (!!dirty.current[id] === d) return; dirty.current[id] = d; setDirtyIds((x) => { const n = new Set(x); d ? n.add(id) : n.delete(id); return n }) }
+  const [mobileMenu, setMobileMenu] = useState<{ x: number; y: number } | null>(null) // the top bar's ⋯ menu on phones
   const okToDrop = async (ts: Tab[]) => !ts.some((t) => dirty.current[t.id]) || confirm('Discard pending changes in the tab(s) being closed?')
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => { if (Object.values(dirty.current).some(Boolean)) e.preventDefault() }
