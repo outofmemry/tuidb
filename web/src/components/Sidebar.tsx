@@ -82,6 +82,17 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
     setMenu(null); setCreate('')
     try { onPlan(await api<Plan>('POST', `/sessions/${sid}/plan/admin`, { Op: op, Ref: ref, Refs: refs, Opts: opts })); if (refs) setMarked(new Map()) } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
   }
+  // Delete / Truncate of one object asks what the terminal's form asks (M14 check 6): its name typed, Cascade, and Restart identity on PostgreSQL
+  const dropOrTruncate = async (op: 'drop' | 'truncate', o: DbObject) => {
+    const verb = op === 'drop' ? 'Delete' : 'Truncate'
+    const typed = await ask(`${verb} ${o.Name}? This cannot be undone. Type its name to confirm`)
+    if (typed === null) return
+    if (typed !== o.Name) return notify(`Type "${o.Name}" to confirm; nothing changed.`)
+    const opts: Record<string, string> = {}
+    if (await confirm(`Cascade: also ${op === 'drop' ? 'drop' : 'truncate'} everything that depends on ${o.Name}? Cancel: no.`)) opts.cascade = 'true'
+    if (op === 'truncate' && info.caps.Dialect === 'postgres' && await confirm('Restart identity: reset the sequences of the table? Cancel: no.')) opts.restart_identity = 'true'
+    admin(op, o, opts)
+  }
   const marks = [...marked.values()]
   // delete / truncate act on every marked item (a truncate only on the tables among them), else on the item last clicked
   const bulk = (op: 'drop' | 'truncate') => {
