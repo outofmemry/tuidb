@@ -896,14 +896,24 @@ function Drawer({ kind, conn, dir, menus, notify, onUse, onRun, onInsert, onClos
       <div className="overflow-auto flex-1">
         {(kind === 'history' ? hist : saved).error && <div className="text-del p-2.5 text-[12.5px]">{(kind === 'history' ? hist : saved).error!.message} <button className="btn-ghost" onClick={() => (kind === 'history' ? hist : saved).refetch()}>Retry</button></div>}
         {kind === 'history' && (hist.data ?? []).map((h) => (
-          <div key={h.id} className={HIST} onClick={() => onUse(h.sql)}><pre className={HIST_PRE}>{h.sql}</pre><div className="text-ink-2 text-[11.5px]">{new Date(h.time).toLocaleString()}</div></div>
+          <div key={h.id} className={HIST} tabIndex={0} onClick={() => onUse(h.sql)} onKeyDown={(e) => { if (e.target === e.currentTarget) { if (e.key === 'Enter') onUse(h.sql); else menuKey(e, { h: { id: h.id, sql: h.sql } }) } }} onContextMenu={(e) => openMenu(e, { h: { id: h.id, sql: h.sql } })}><pre className={HIST_PRE}>{h.sql}</pre><div className="text-ink-2 text-[11.5px]">{new Date(h.time).toLocaleString()}</div>
+            <div className="flex flex-wrap gap-0.5 mt-1 opacity-60 group-hover/h:opacity-100 group-focus-within/h:opacity-100" onClick={(e) => e.stopPropagation()}>
+              <button className={ITEM_BTN} onClick={() => onRun(h.sql)}>Run</button><button className={ITEM_BTN} aria-haspopup="menu" aria-label="Actions for this statement" onClick={(e) => openMenu(e, { h: { id: h.id, sql: h.sql } })}>⋯</button><button className={`${ITEM_BTN} btn-danger`} onClick={() => delHistory(h.id)}>Delete</button>
+            </div></div>
         ))}
-        {kind === 'queries' && list.map((s) => (
-          <div key={s.Path} className={HIST} onClick={() => onUse(s.SQL)}><strong className="flex items-center gap-1 mb-1 font-medium"><span className="flex-1 min-w-0 truncate">{s.Folder ? s.Folder + ' / ' : ''}{s.Name}{s.Shared && <span className="ml-2 text-ink-3 text-[11px] font-normal">shared</span>}</span>
-            {/* a browser cannot open a file manager, so the full path is shown and copied instead */}
-            <button className="btn-ghost text-[11px]" title="Copy the full path of this file" onClick={(e) => { e.stopPropagation(); const full = s.Path.startsWith('/') || /^[A-Za-z]:/.test(s.Path) ? s.Path : `${dir.replace(/\/$/, '')}/${s.Path}`; copyText(full).then(() => notify(`Path copied: ${full}. A browser cannot reveal it in the file manager.`), (er) => notify(String(er))) }}>Path</button></strong><pre className={HIST_PRE}>{s.SQL}</pre></div>
+        {kind === 'queries' && dragQ && <div className="px-3 py-2 text-[12px] text-ink-2 border-b border-dashed border-accent" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); moveQuery({ Path: dragQ }, ''); setDragQ(null) }}>Drop here to take it out of its folder</div>}
+        {kind === 'queries' && list.map((s, k) => (
+          <Fragment key={s.Path}>
+            {s.Folder && s.Folder !== list[k - 1]?.Folder && <button className={`flex items-center gap-1.5 w-full px-3 py-1.5 text-left text-[12px] text-ink-2 border-0 border-b border-rule bg-panel ${dragQ ? 'outline outline-1 -outline-offset-1 outline-accent' : ''}`} onDragOver={(e) => { if (dragQ) e.preventDefault() }} onDrop={(e) => { if (dragQ) { e.preventDefault(); moveQuery({ Path: dragQ }, s.Folder); setDragQ(null) } }} aria-expanded={!shut.has(s.Folder)} onClick={() => setShut((o) => { const n = new Set(o); n.has(s.Folder) ? n.delete(s.Folder) : n.add(s.Folder); return n })}><span aria-hidden>{shut.has(s.Folder) ? '▸' : '▾'}</span>{s.Folder}<span className="ml-auto text-ink-3">{list.filter((x) => x.Folder === s.Folder).length}</span></button>}
+            {!shut.has(s.Folder) && <div className={HIST} tabIndex={0} draggable={!s.Shared} onDragStart={() => setDragQ(s.Path)} onDragEnd={() => setDragQ(null)} onClick={() => onUse(s.SQL, s.Path)} onKeyDown={(e) => { if (e.target === e.currentTarget) { if (e.key === 'Enter') onUse(s.SQL, s.Path); else menuKey(e, { s }) } }} onContextMenu={(e) => openMenu(e, { s })}><strong className="flex items-center gap-1 mb-1 font-medium"><span className="flex-1 min-w-0 truncate">{s.Name}{s.Shared && <span className="ml-2 text-ink-3 text-[11px] font-normal">shared</span>}</span>
+              <button className="btn-ghost text-[11px]" title="Open the folder of this file in the file manager (a download-free copy of the path when the browser is on another machine)" onClick={(e) => { e.stopPropagation(); reveal(s.Path) }}>Reveal</button></strong><pre className={HIST_PRE}>{s.SQL}</pre>
+              <div className="flex flex-wrap gap-0.5 opacity-60 group-hover/h:opacity-100 group-focus-within/h:opacity-100" onClick={(e) => e.stopPropagation()}>
+                <button className={ITEM_BTN} onClick={() => onUse(s.SQL, s.Path)}>Open</button><button className={ITEM_BTN} onClick={() => onRun(s.SQL)}>Run</button><button className={ITEM_BTN} aria-haspopup="menu" aria-label={`Actions for ${s.Name}`} onClick={(e) => openMenu(e, { s })}>⋯</button>
+              </div></div>}
+          </Fragment>
         ))}
       </div>
+      {menu && <TabMenu x={menu.x} y={menu.y} label={menu.h ? 'History entry' : 'Saved query'} items={menuItems()} onClose={() => setMenu(null)} />}
     </div>
   )
 }
