@@ -2,7 +2,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, api, download, qs, saveBlob, upload, watchJob, type Column, type DbObject, type FilterSet, type Gate, type Job, type Meta, type ObjRef, type SessionInfo } from '../utils/api'
-import { COPY_FORMATS, copyText, type CopyFormat } from '../utils/copy'
+import { COPY_FORMATS, copyText, formatRows, type CopyFormat } from '../utils/copy'
+import { filterMenu, whyNot, type MenuItem } from '../utils/menus'
+import { enterSubmits, previewLength, sortProcs, type ProcRow } from '../utils/m13'
 import { CellEditor } from './CellEditor'
 import { Dialog, GateFields, ask, confirm } from './Dialogs'
 import { Select } from './Select'
@@ -27,6 +29,7 @@ export function ExportDialog({ sid, source, onClose, notify }: { sid: string; so
   const [drop, setDrop] = useState(false)
   const [page, setPage] = useState(false) // current page only
   const [nullAs, setNullAs] = useState('')
+  const [header, setHeader] = useState(true)
   const [lineBreak, setLineBreak] = useState('')
   const ext = format + (gzip && format !== 'xlsx' ? '.gz' : '')
   const [name, setName] = useState('')
