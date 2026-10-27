@@ -15,6 +15,9 @@ export function applyTheme(t: Meta['theme'] | undefined, web?: Meta['web']) {
     const v = t?.Colors?.[k]
     for (const name of vars) v ? root.style.setProperty(name, v) : root.style.removeProperty(name)
   }
+  // grid_line and cell_selection are applied by an attribute, so the stylesheet only overrides the grid when the theme sets them
+  for (const [k, attr] of [['grid_line', 'data-grid-line'], ['cell_selection', 'data-cell-selection']] as const) t?.Colors?.[k] ? root.setAttribute(attr, '') : root.removeAttribute(attr)
+  root.classList.toggle('scrollbars-auto', !!web?.autoHideScrollbars) // M15.28
   web?.fontSize ? root.style.setProperty('--fs', web.fontSize + 'px') : root.style.removeProperty('--fs')
   web?.lineHeight ? root.style.setProperty('--lh', web.lineHeight) : root.style.removeProperty('--lh')
 }
