@@ -175,7 +175,8 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
     try { await api('DELETE', `/boards/${encodeURIComponent(board.name)}`); setName(''); setPanels([]); await list.refetch(); notify('Board deleted') } catch (e) { notify(msg(e)) }
   }
   const conns = Object.keys(others)
-  const actions = (board?.panels ?? []).filter((p) => p.Kind === 'button' || p.Kind === 'import')
+  const actions = (board?.panels ?? []).filter((p) => ACTION_KINDS.has(p.Kind))
+  const failed = panels.filter((p) => p.error)
   const target = (t: string): ObjRef => { const dot = info.caps.Schemas ? t.indexOf('.') : -1; return dot > 0 ? { Schema: t.slice(0, dot), Name: t.slice(dot + 1), Kind: 'table' } : { Schema: info.caps.Schemas ? info.schema : '', Name: t, Kind: 'table' } }
   return (
     <div className="flex-1 min-h-0 flex flex-col">
