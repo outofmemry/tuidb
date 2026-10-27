@@ -240,7 +240,7 @@ export function SearchDialog({ sid, info, onClose, onOpen }: { sid: string; info
   const abort = useRef<AbortController | null>(null)
   useEffect(() => () => abort.current?.abort(), [])
   const run = async () => {
-    setErr(''); setJob(null)
+    setErr(''); setJob(null); setPaused(false)
     try {
       const r = await api<{ job: string; total: number }>('POST', `${base}/search`, { Value: value, Op: op, Schema: info.schema, Tables: some ? picked : [] })
       setId(r.job); setJob({ done: false, error: '', rows: 0, batches: 0, total: r.total, checked: 0, hits: [], lines: [] })
@@ -249,6 +249,8 @@ export function SearchDialog({ sid, info, onClose, onOpen }: { sid: string; info
     } catch (e) { setErr(msg(e)) }
   }
   const stop = () => { api('DELETE', `${base}/jobs/${id}`).catch(() => {}) }
+  const [paused, setPaused] = useState(false)
+  const pause = () => api('POST', `${base}/search/${id}/${paused ? 'resume' : 'pause'}`).then(() => setPaused(!paused), (e) => setErr(msg(e)))
   const running = !!job && !job.done
   return (
     <Dialog title="Search in database" onClose={() => { stop(); onClose() }}>
