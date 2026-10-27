@@ -324,6 +324,39 @@ export function AssistantTab({ sid, onRun, notify }: { sid: string; onRun: (sql:
   const pick = (v: string) => { setProvider(v); setModels([]); setModel('') } // a model name belongs to its provider
   const ctrl = useRef<AbortController | null>(null)
   const end = useRef<HTMLDivElement>(null)
+  const root = useRef<HTMLDivElement>(null)
+  const [chatId, setChatId] = useState('') // '' until the first exchange is saved
+  const [hist, setHist] = useState(false) // the history drawer
+  const chatBase = `/sessions/${sid}/chats`
+  // the whole chat is saved after every exchange; the server keeps it under the connection, shared with the terminal
+  const save = async (list: Msg[], id = chatId) => {
+    if (!list.length) return
+    try {
+      let at = id
+      if (!at) { at = (await api<Chat>('POST', chatBase)).ID; setChatId(at) }
+      const now = new Date().toISOString()
+      await api('PUT', `${chatBase}/${encodeURIComponent(at)}`, { ID: at, Title: chatTitle(list), Updated: now, Messages: list.map((m) => ({ Role: m.role, Content: m.content, At: now })) })
+    } catch (e) { setErr('The chat could not be saved: ' + msg(e)) }
+  }
+  const newChat = () => { ctrl.current?.abort(); ctrl.current = null; setMsgs([]); setChatId(''); setErr(''); setText('') }
+  const clearChat = () => { ctrl.current?.abort(); ctrl.current = null; setMsgs([]); setErr(''); if (chatId) api('PUT', `${chatBase}/${encodeURIComponent(chatId)}`, { ID: chatId, Title: '', Messages: [] }).catch(() => {}) }
+  const open = async (id: string) => {
+    try {
+      const c = await api<Chat>('GET', `${chatBase}/${encodeURIComponent(id)}`)
+      ctrl.current?.abort(); ctrl.current = null; setMsgs((c.Messages ?? []).map((m) => ({ role: m.Role === 'user' ? 'user' : 'assistant', content: m.Content }))); setChatId(c.ID); setHist(false); setErr('')
+    } catch (e) { setErr(msg(e)) }
+  }
+  // the keymap's assistant_* actions, answered only by the tab that is on screen
+  const acts = useRef({ newChat, clearChat, openHist: () => setHist(true) }); acts.current = { newChat, clearChat, openHist: () => setHist(true) }
+  useEffect(() => {
+    const h = (e: Event) => {
+      if (e.defaultPrevented || !root.current || root.current.offsetParent === null) return
+      const a = (e as CustomEvent).detail.action
+      if (a === 'assistant_new') { e.preventDefault(); acts.current.newChat() } else if (a === 'assistant_clear') { e.preventDefault(); acts.current.clearChat() } else if (a === 'assistant_history') { e.preventDefault(); acts.current.openHist() }
+    }
+    window.addEventListener('webtuidb:action', h)
+    return () => window.removeEventListener('webtuidb:action', h)
+  }, [])
   useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [msgs.length, busy])
   useEffect(() => () => ctrl.current?.abort(), [])
   const send = async () => {
