@@ -240,6 +240,7 @@ function ConnForm({ meta, init, error, onSave, onClose }: { meta: Meta; init: Co
     try {
       const p = await api<Connection>('POST', '/connections/parse', { url })
       dirty.current = false
+      setOptText(Object.entries(p.Options ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join(' ;; '))
       setUrlErr('')
       const merge = (x: Connection): Connection => ({ ...x, Driver: p.Driver, Host: p.Host, Port: p.Port, User: p.User, Password: p.Password, Database: p.Database, SSLMode: p.SSLMode, Options: p.Options, SSH: p.SSH ?? x.SSH,
         Name: x.Name || p.Name, Tag: p.Tag || x.Tag, Color: p.Color || x.Color })
