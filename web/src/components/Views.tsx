@@ -383,7 +383,12 @@ export function AssistantTab({ sid, onRun, notify }: { sid: string; onRun: (sql:
     onRun(sql)
   }
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
+    <div ref={root} className="flex-1 min-h-0 flex flex-col relative">
+      <div className="toolbar bg-canvas">
+        <button onClick={newChat} title="Start a new chat (the current one stays in History)">New chat</button>
+        <button onClick={clearChat} disabled={!msgs.length} title="Empty this chat">Clear chat</button>
+        <button onClick={() => setHist(true)} aria-haspopup="dialog">History…</button>
+      </div>
       <div className="flex-1 min-h-0 overflow-auto p-3 flex flex-col gap-3 font-mono text-[12.5px]">
         {msgs.length === 0 && <div className="max-w-[56ch] text-ink-2 text-[15px] leading-normal">Ask about this database. Write @table to send that table&apos;s definition along, for example: how many orders per day in @orders.</div>}
         {msgs.map((m, i) => (
