@@ -35,14 +35,18 @@ export function Connections() {
   const [msg, setMsg] = useState('')
   const [url, setUrl] = useState('')
   const [io, setIo] = useState<'' | 'export' | 'import'>('')
-  const [dlg, setDlg] = useState<'' | 'recent' | 'settings'>('')
+  const [dlg, setDlg] = useState<'' | 'recent' | 'settings' | 'sort'>('')
+  const urlBox = useRef<HTMLInputElement>(null)
+  const [drag, setDrag] = useState<string | null>(null) // a connection being dragged to another group
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; c: Connection; idx: number } | null>(null) // the ⋯ menu of one connection row
+  const open = openSessions() // connections with a workspace open in this browser tab: Connect becomes Resume
   const sortQ = useQuery({ queryKey: ['conn-sort'], queryFn: () => api<{ sort: string; default: string }>('GET', '/state/connection-sort'), gcTime: 0 })
   const sortBy = sortQ.data?.sort || sortQ.data?.default || meta.data?.config.general.ConnectionSort || 'name'
   const fileBased = meta.data?.fileBased ?? []
 
   // the list's version travels back as If-Match: a stale tab gets a 409, reloads, and asks the user to redo the edit
   const save = useMutation({
-    mutationFn: (list: Connection[]) => api('PUT', '/connections', list, undefined, etags['/connections'] ? { 'If-Match': etags['/connections'] } : undefined),
+    mutationFn: (list: Connection[]) => api('PUT', '/connections', list.map(stripLast), undefined, etags['/connections'] ? { 'If-Match': etags['/connections'] } : undefined),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['conns'] }); setEdit(null) },
     onError: (e) => { if (e instanceof ApiError && e.status === 409) { qc.invalidateQueries({ queryKey: ['conns'] }); setEdit(null); setMsg('The connection list changed elsewhere. It was reloaded: make your change again.') } },
   })
