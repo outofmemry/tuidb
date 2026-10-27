@@ -34,9 +34,15 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   const sb = meta.config.sidebar
   const [schema, setSchema] = useState(info.schema)
   const [filter, setFilter] = useState('')
-  const [menu, setMenu] = useState<DbObject | null>(null)
-  const [tool, setTool] = useState<{ kind: 'export' | 'import'; obj: DbObject } | null>(null)
+  const [menuAt, setMenuAt] = useState<{ o: DbObject; x: number; y: number } | null>(null) // the object menu and where it opens
+  const setMenu = (o: DbObject | null, at?: { x: number; y: number }) => setMenuAt(o ? { o, x: at?.x ?? 120, y: at?.y ?? 120 } : null)
+  const [tool, setTool] = useState<{ kind: 'export' | 'import'; obj: DbObject; file?: File } | null>(null)
   const [create, setCreate] = useState<'' | 'menu' | 'database'>('')
+  const [createAt, setCreateAt] = useState({ x: 0, y: 0 })
+  const [colors, setColors] = useState<Record<string, string>>(() => loadColors(info.name))
+  const [colorFor, setColorFor] = useState<DbObject | null>(null)
+  const [over, setOver] = useState('') // the row a file is being dragged over
+  const click = useRef<ReturnType<typeof setTimeout>>(undefined) // a single click opens after a beat, so a double click can open a new tab instead
   const [addTo, setAddTo] = useState<DbObject[] | null>(null) // items about to join a custom group
   const [many, setMany] = useState<DbObject[] | null>(null) // the several-tables export
   const [marked, setMarked] = useState<Map<string, DbObject>>(new Map()) // multi-select: delete, export and truncate act on every marked item
