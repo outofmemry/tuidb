@@ -801,14 +801,79 @@ function onAccent(hex: string) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? '#1e1f23' : '#f6f5f1'
 }
 
-function Drawer({ kind, conn, dir, notify, onUse, onClose }: { kind: 'history' | 'queries'; conn: string; dir: string; notify: (m: string) => void; onUse: (t: string) => void; onClose: () => void }) {
+const encPath = (p: string) => p.split('/').map(encodeURIComponent).join('/')
+const ITEM_BTN = 'btn-ghost text-[11px] px-1.5'
+
+// History and saved queries. Click an item to open it in a new tab; the buttons run it, copy it, insert it into the open editor,
+// save it to Queries (history) or rename / delete it. Saved queries group by folder, like the sidebar's objects.
+function Drawer({ kind, conn, dir, menus, notify, onUse, onRun, onInsert, onClose }: { kind: 'history' | 'queries'; conn: string; dir: string; menus?: Meta['menus']; notify: (m: string) => void; onUse: (t: string, path?: string) => void; onRun: (t: string) => void; onInsert: (t: string) => void; onClose: () => void }) {
   const [q, setQ] = useState('')
+  const [shut, setShut] = useState<Set<string>>(new Set()) // folders folded in the saved-queries list
   const [sort, setSort] = useState<'name' | 'created' | 'modified'>('name')
+  type QRow = { Path: string; Name: string; Folder: string; SQL: string; Shared?: boolean }
+  const [menu, setMenu] = useState<{ x: number; y: number; h?: { id: string; sql: string }; s?: QRow } | null>(null)
+  const [dragQ, setDragQ] = useState<string | null>(null) // a saved query being dragged to another folder
   const hist = useQuery({ queryKey: ['history', conn, q], queryFn: () => api<{ id: string; SQL?: string; sql: string; time: string }[]>('GET', '/history' + qs({ conn, q, limit: 200 })), enabled: kind === 'history', gcTime: 0 })
   const saved = useQuery({ queryKey: ['queries'], queryFn: () => api<{ Path: string; Name: string; Folder: string; SQL: string; Shared?: boolean; Modified?: string }[]>('GET', '/queries'), enabled: kind === 'queries', gcTime: 0 })
   // by name (the server's order) or newest first inside each folder; Created is not tracked, so it uses the modified time too
   const list = [...(saved.data ?? [])].sort((a, b) => a.Folder.localeCompare(b.Folder) || (sort === 'name' ? a.Name.localeCompare(b.Name, undefined, { sensitivity: 'base' }) : (b.Modified ?? '').localeCompare(a.Modified ?? '')))
   const fail = (m: string) => (e: unknown) => notify(`${m}: ${e instanceof Error ? e.message : e}`)
+  const copy = (t: string) => copyText(t).then(() => notify('Copied'), fail('Could not copy'))
+  const addToQueries = async (sql: string) => {
+    const name = await ask('Save query as'); if (!name) return
+    try { await postQuery('/queries', { Name: name, SQL: sql }); saved.refetch(); notify('Saved to Queries') } catch (e) { fail('Could not save')(e) }
+  }
+  const delHistory = (id: string) => api('DELETE', '/history' + qs({ conn, id })).then(() => hist.refetch(), fail('Could not delete'))
+  const renameQuery = async (s: { Path: string; Name: string }) => {
+    const n = (await ask('Rename saved query', s.Name))?.trim()
+    if (!n || n === s.Name) return
+    const dirPart = s.Path.includes('/') ? s.Path.slice(0, s.Path.lastIndexOf('/') + 1) : ''
+    try { await api('POST', '/queries/rename', { from: s.Path, to: dirPart + (n.endsWith('.sql') ? n : n + '.sql') }); saved.refetch() } catch (e) { fail('Could not rename')(e) }
+  }
+  const delQuery = async (s: { Path: string; Name: string }) => {
+    if (!(await confirm(`Delete the saved query ${s.Name}?`))) return
+    try { await api('DELETE', '/queries/' + encPath(s.Path)); saved.refetch() } catch (e) { fail('Could not delete')(e) }
+  }
+  const moveQuery = async (s: { Path: string }, folder: string) => { // POST /queries/rename moves the file; a folder is part of the path
+    const base = s.Path.slice(s.Path.lastIndexOf('/') + 1), to = (folder ? folder.replace(/\/$/, '') + '/' : '') + base
+    if (to === s.Path) return
+    try { await api('POST', '/queries/rename', { from: s.Path, to }); saved.refetch() } catch (e) { fail('Could not move')(e) }
+  }
+  const fullPath = (p: string) => (p.startsWith('/') || /^[A-Za-z]:/.test(p) ? p : `${dir.replace(/\/$/, '')}/${p}`)
+  const reveal = (p: string) => revealPath(fullPath(p), () => copyText(fullPath(p)).then(() => notify(`Path copied: ${fullPath(p)}. The browser is not on the server's machine, so it cannot open the folder.`))).catch(fail('Could not reveal'))
+  // the right-click / ⋯ menus come from menus.SidebarQuery and menus.SidebarHistory, by action name
+  const menuItems = (): [string, () => void, string?][] => {
+    if (menu?.h) {
+      const h = menu.h
+      return (menus?.sidebar_history ?? []).map((it) => [it.label, () => {
+        switch (it.action) {
+          case 'insert': return onInsert(h.sql)
+          case 'open_new_tab': return onRun(h.sql)
+          case 'add_to_queries': return void addToQueries(h.sql)
+          case 'copy': return void copy(h.sql)
+          case 'clear_all': return void (async () => { if (!(await confirm('Clear history for this connection?'))) return; try { await api('DELETE', '/history' + qs({ conn, all: 1 })) } catch (e) { fail('Could not clear history')(e) } finally { hist.refetch() } })()
+        }
+      }, whyNot(it)])
+    }
+    const q = menu?.s
+    if (!q) return []
+    return (menus?.sidebar_query ?? []).map((it) => [it.label, () => {
+      switch (it.action) {
+        case 'open': case 'open_new_tab': return onUse(q.SQL, q.Path)
+        case 'insert': return onInsert(q.SQL)
+        case 'rename': return void renameQuery(q)
+        case 'move': return void ask('Move to folder (empty for none)', q.Folder).then((f) => { if (f !== null) moveQuery(q, f.trim()) })
+        case 'reveal': return void reveal(q.Path)
+        case 'delete_item': return void delQuery(q)
+      }
+    }, q.Shared && ['rename', 'move', 'delete_item'].includes(it.action) ? 'a shared query is read only' : whyNot(it)])
+  }
+  const openMenu = (e: React.MouseEvent | React.KeyboardEvent, m: { h?: { id: string; sql: string }; s?: QRow }) => {
+    e.preventDefault(); e.stopPropagation()
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect(), mouse = 'clientX' in e && e.type === 'contextmenu'
+    setMenu({ x: mouse ? (e as React.MouseEvent).clientX : r.left, y: mouse ? (e as React.MouseEvent).clientY : r.bottom, ...m })
+  }
+  const menuKey = (e: React.KeyboardEvent, m: { h?: { id: string; sql: string }; s?: QRow }) => { if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) openMenu(e, m) }
   const readFile = (e: React.ChangeEvent<HTMLInputElement>, then: (name: string, text: string) => Promise<void> | void) => {
     const f = e.target.files?.[0]; e.target.value = ''
     if (f) f.text().then((t) => then(f.name, t))
