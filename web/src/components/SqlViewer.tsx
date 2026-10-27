@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import CodeMirror from '@uiw/react-codemirror'
+import { cmTheme } from './cmtheme'
 import { StandardSQL, sql } from '@codemirror/lang-sql'
 import { EditorState } from '@codemirror/state'
 import { api, type Meta } from '../utils/api'
@@ -14,8 +15,6 @@ type File = { name: string; text: string }
 let files: File[] = [] // kept for the page's life, so Open file on the list and then coming back here keeps the tabs
 let current = 0
 export function addViewerFile(f: File) { files = [...files, f]; current = files.length - 1 }
-
-const dark = () => { const t = document.documentElement.dataset.theme; return t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches) }
 
 export function SqlViewer() {
   const nav = useNavigate()
