@@ -16,6 +16,9 @@ const PUNCT: Record<string, [string, string]> = {
   BracketLeft: ['[', '{'], BracketRight: [']', '}'], Minus: ['-', '_'], Equal: ['=', '+'], Backquote: ['`', '~'],
 }
 
+// Shifted digit row, folded like PUNCT so "alt+shift+1" and the TUI's "alt+!" are one key.
+const DIGIT_SHIFT: Record<string, string> = { '1': '!', '2': '@', '3': '#', '4': '$', '5': '%', '6': '^', '7': '&', '8': '*', '9': '(', '0': ')' }
+
 // canon turns a browser key event into the canonical string the Go side uses ("ctrl+d", "alt+enter", "P").
 // Cmd on a Mac is left alone so the browser's own shortcuts keep working; null means "not a key we name".
 export function canon(e: KeyboardEvent): string | null {
@@ -28,6 +31,7 @@ export function canon(e: KeyboardEvent): string | null {
     base = e.code.slice(e.code.startsWith('Key') ? 3 : 5).toLowerCase()
     // the TUI reports Option+Shift+k as a capital letter: "alt+K", not "alt+shift+k"
     if (e.altKey && !e.ctrlKey && shift && e.code.startsWith('Key')) { base = base.toUpperCase(); shift = false }
+    if (shift && e.code.startsWith('Digit') && DIGIT_SHIFT[base]) { base = DIGIT_SHIFT[base]; shift = false }
   } else if (!base && (e.ctrlKey || e.altKey) && PUNCT[e.code]) {
     base = PUNCT[e.code][shift ? 1 : 0]
     shift = false // the character already carries the shift
