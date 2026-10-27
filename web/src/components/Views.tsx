@@ -78,7 +78,9 @@ type Layout = { order: number[]; span: Record<number, number>; h: Record<number,
 const layoutKey = (board: string) => 'webtuidb-board:' + board
 // shortcut: the arrangement lives in this browser's localStorage, not in the board's .toml (the engine's Board type would drop unknown keys on its next save)
 const loadLayout = (board: string): Layout => { try { return { order: [], span: {}, h: {}, ...JSON.parse(localStorage.getItem(layoutKey(board)) ?? '{}') } } catch { return { order: [], span: {}, h: {} } } }
-const KINDS = ['number', 'table', 'bar', 'line', 'button', 'import']
+const KINDS = ['number', 'table', 'bar', 'line', 'button', 'import', 'exporter', 'input', 'dropdown']
+const EXPORT_FORMATS = [{ value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }, { value: 'sql', label: 'SQL INSERTs' }, { value: 'excel', label: 'Excel' }]
+const ACTION_KINDS = new Set(['button', 'import', 'exporter', 'input', 'dropdown'])
 
 export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; info: SessionInfo; shown: boolean; others: Record<string, string>; notify: (m: string) => void }) {
   const list = useQuery({ queryKey: ['boards'], queryFn: () => api<BoardInfo[]>('GET', '/boards'), gcTime: 0 })
