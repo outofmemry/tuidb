@@ -43,8 +43,23 @@ const session = createRoute({
   getParentRoute: () => root, path: '/s/$sessionId',
   component: function SessionPage() { return <Workspace sid={session.useParams().sessionId} key={session.useParams().sessionId} /> },
 })
+// deep links (M15.19): /s/<sid>/t/<schema>/<table>?filter=<json FilterSet> opens a table, /s/<sid>/q/<saved query path> opens a saved query
+const tableLinkRoute = createRoute({
+  getParentRoute: () => root, path: '/s/$sessionId/t/$schema/$table', validateSearch: (s: Record<string, unknown>) => ({ filter: s.filter as unknown }),
+  component: function TablePage() {
+    const p = tableLinkRoute.useParams(), { filter } = tableLinkRoute.useSearch()
+    return <Workspace sid={p.sessionId} key={p.sessionId} target={{ kind: 't', schema: p.schema, table: p.table, filter: parseFilter(filter) }} />
+  },
+})
+const queryLinkRoute = createRoute({
+  getParentRoute: () => root, path: '/s/$sessionId/q/$',
+  component: function QueryPage() {
+    const p = queryLinkRoute.useParams() as { sessionId: string; _splat?: string; '*'?: string }
+    return <Workspace sid={p.sessionId} key={p.sessionId} target={{ kind: 'q', path: p._splat ?? p['*'] ?? '' }} />
+  },
+})
 const viewer = createRoute({ getParentRoute: () => root, path: '/sql', component: SqlViewer })
-const router = createRouter({ routeTree: root.addChildren([home, session, viewer]) })
+const router = createRouter({ routeTree: root.addChildren([home, session, tableLinkRoute, queryLinkRoute, viewer]) })
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }
 
 createRoot(document.getElementById('root')!).render(
