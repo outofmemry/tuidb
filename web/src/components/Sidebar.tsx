@@ -50,6 +50,8 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   const filterBox = useRef<HTMLInputElement>(null)
   const last = useRef<DbObject | null>(null) // the item last clicked: truncate / delete_item act on it
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [folders, setFolders] = useState<Set<string>>(new Set()) // open Redis key folders
+  const [newTable, setNewTable] = useState<string | null>(null) // the New table designer, by name
   useEffect(() => {
     const h = (e: Event) => { if (onAction.current((e as CustomEvent).detail.action)) e.preventDefault() }
     window.addEventListener('webtuidb:action', h)
