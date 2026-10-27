@@ -213,11 +213,16 @@ export const sameRef = (a: ObjRef, b: ObjRef) => a.Schema === b.Schema && a.Name
 export const clip = (s: string, n = 120) => (s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s)
 
 // ---- milestone 3 (Board, Var, Panel, User and Grant use the Go field names, like the rest) ----
-export type DbUser = { Name: string; Host: string; Attrs: string[] | null; Grants: { Object: string; Privs: string[]; Columns?: string[] | null }[] | null }
+export type DbUser = { Name: string; Host: string; Attrs: string[] | null; Limits?: Record<string, number> | null; Grants: { Object: string; Privs: string[]; Columns?: string[] | null }[] | null }
 export type BoardVar = { Name: string; Label: string; Default: string; Options: string[] | null }
-export type BoardPanel = { Title: string; Kind: string; Query: string; Chart: string; Target?: string; RefreshOn?: string; Table?: string }
+export type BoardPanel = { Title: string; Kind: string; Query: string; Chart: string; Target?: string; RefreshOn?: string; Table?: string; var?: string; options?: string[] | null; format?: string; default?: string }
 export type BoardInfo = { name: string; refreshSecs: number; connection?: string; vars: BoardVar[]; panels: BoardPanel[]; error: string }
 export type PanelOut = { title: string; kind: string; number?: string; error?: string; result?: ResultData; labels: string[]; values: number[]; series?: { name: string; values: number[] }[] }
 export type ItemGroup = { name: string; items: string[] }
-export type PluginInfo = { name: string; contexts: string[]; output: string; error: string }
+export type PluginInfo = { name: string; contexts: string[]; output: string; error: string; key?: string; js?: boolean }
+export type PluginEffect = { Kind: 'copy' | 'open' | 'notify' | 'sql'; Text: string; Ref?: ObjRef }
+export type ChatMessage = { Role: string; Content: string; At?: string }
+export type Chat = { ID: string; Title: string; Created?: string; Updated?: string; Messages: ChatMessage[] }
+export type ChatSummary = { ID: string; Title: string; Updated: string; Count: number }
+export type MenuItem = { label: string; action: string; when?: string; ui?: string; why?: string }
 export type DiagramTable = { ref: ObjRef; columns: ResultCol[]; fks: { columns: string[]; refSchema: string; refTable: string; refColumns: string[] }[]; cluster: number }
