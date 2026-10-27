@@ -89,7 +89,8 @@ export class Machine {
     }
     return out.sort((a, b) => (a.Key < b.Key ? -1 : a.Key > b.Key ? 1 : 0))
   }
-  feed(ctx: string, key: string): Fed {
+  // typing: a text field has focus. A bare printable key is then text, never a no-prefix shortcut ("/" in the console find box).
+  feed(ctx: string, key: string, typing = false): Fed {
     if (this.pending) {
       this.pending = false
       if (key === 'esc') return {}
@@ -98,10 +99,14 @@ export class Machine {
       return a ? { action: a } : { unknown: true }
     }
     if (key === this.map.prefix) { this.pending = true; return { pending: true } }
+    if (typing && isPrintable(key)) return { passthrough: true }
     const a = this.lookup(ctx, key, true)
     return a ? { action: a } : { passthrough: true }
   }
 }
+
+// keysLocked: the lock screen is up (Lock sets data-locked), so no shortcut may run, whatever order the listeners were added in.
+export const keysLocked = (): boolean => typeof document !== 'undefined' && !!document.documentElement.dataset.locked
 
 // contextOf finds the focused TUI context from the DOM: the nearest data-ctx around the focused element,
 // else around the last thing clicked (grid cells are not focusable), else global.
