@@ -438,7 +438,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   }
   const disconnect = async () => {
     try { await api('DELETE', `/sessions/${sid}`) } catch (e) { if (!(e instanceof ApiError && e.status === 404)) return notify(`Could not disconnect: ${e instanceof Error ? e.message : e}. Try again.`) }
-    forget(sid); qc.clear(); nav({ to: '/' }) }
+    dropWorkspace(i.name); forget(sid); qc.clear(); nav({ to: '/' }) }
   // Switching keeps this session open on the server, so coming back is instant; Disconnect closes it.
   const switchTo = async (name: string) => {
     setSwitcher(false)
