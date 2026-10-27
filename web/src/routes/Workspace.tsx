@@ -217,8 +217,16 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     const list: { kind: string; name?: string; text?: string }[] = tabs.flatMap((t): { kind: string; name?: string; text?: string }[] => (t.kind === 'query' ? [{ kind: 'sql', text: texts.current[t.id] ?? t.text }] : t.kind === 'table' ? [{ kind: 'table', name: recentKey(t.obj) }] : []))
     api('PUT', '/state/tabs' + qs({ conn: i.name }), autoSave === 'first' ? list.filter((x) => x.kind === 'sql').slice(0, 1) : list).catch(() => {})
   }
-  remember(i.name, sid)
-  const accent = i.color ? ({ '--accent': i.color, '--on-accent': onAccent(i.color) } as CSSProperties) : undefined
+  persistTabs.current = () => saveTabs(sid, {
+    tabs: tabs.map((t) => ({ ...t, id: undefined, ...(t.kind === 'query' ? { text: texts.current[t.id] ?? t.text, autorun: false } : {}) })),
+    active: [Math.max(0, tabs.findIndex((t) => t.id === actives[0])), Math.max(0, tabs.findIndex((t) => t.id === actives[1]))], split,
+  })
+  remember(i.name, sid); noteWorkspace(i.name, i.database); markReopened()
+  // the connection's colour is the accent; without one the tag's colour is (M15.46), and a production / staging tag also gets a thin bar across the top
+  const tagColor = meta.data.tags?.find((t) => t.name === i.tag)?.color
+  const accentColor = i.color || tagColor
+  const accent = accentColor ? ({ '--accent': accentColor, '--on-accent': onAccent(accentColor) } as CSSProperties) : undefined
+  const risky = /^(prod|production|live|staging|stage)/i.test(i.tag || '')
 
   const p = split ? focus : 0 // the focused pane; new tabs open there
   const active = actives[p]
