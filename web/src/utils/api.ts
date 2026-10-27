@@ -158,19 +158,26 @@ export type ResultCol = { name: string; type: string; pk?: boolean }
 export type ResultData = {
   resultId?: string; columns: ResultCol[]; cells: (string | null)[][]; docs?: string[]; affected: number
   hasRows: boolean; message?: string; durationMs: number; truncated: boolean; editable: boolean
+  table?: { schema: string; name: string; pk: string[] } // exec results: the table an editable SELECT reads
 }
-export type ExecItem = ResultData & { stmt: string; label?: string; error?: string; noticeId?: string; pageSize?: number }
+export type ExecItem = ResultData & { stmt: string; label?: string; error?: string; noticeId?: string; pageSize?: number; pinned?: boolean }
 export type Meta = {
   drivers: string[]; sslModes: string[]; safeModes: string[]; operators: Record<string, string[]>
   config: { general: Record<string, any>; editor: Record<string, any>; table: Record<string, any>; sidebar: Record<string, any>; csv: { Delimiter: string; Quote: string; LineBreak: string; Decimal: string; NullAs?: string; QuoteMode?: string } }
   theme: { Name: string; Colors: Record<string, string> | null }
-  web?: { fontSize: number; lineHeight: string; notifications: boolean }
+  web?: { fontSize: number; lineHeight: string; notifications: boolean; autoHideScrollbars?: boolean; toolbar?: string[] }
+  security?: { passcode: boolean; lockAfterMins: number }
+  themes?: string[]; version?: string; passwordCmdPresets?: { name: string; command: string; note: string }[]
   keymap: import('./keys').Keymap
   fileBased?: string[]; queriesDir?: string; tags?: { name: string; color: string }[]
   mcp?: { enabled: boolean; listen: string; tls: boolean }; export?: { filename: string }; ai?: { provider: string; model: string; providers?: string[] }; csvWarning?: string
   login?: boolean
+  pluginConflicts?: string[]
+  menus?: Record<string, MenuItem[]>
 }
-export type Job = { done: boolean; error: string; rows: number; batches: number; total: number; checked: number; hits: { ref: ObjRef; count: number; filters: FilterSet; error?: string }[]; lines: string[] }
+// one row of the jobs centre (GET /sessions/{sid}/jobs)
+export type JobRow = { id: string; kind: string; title: string; done: boolean; err: string; progress: number; file: string; created: string; lines: string[] }
+export type Job = { done: boolean; error: string; rows: number; batches: number; total: number; checked: number; file?: string; hits: { ref: ObjRef; count: number; filters: FilterSet; error?: string }[]; lines: string[] }
 // watchJob follows a background job over its event stream (progress, line, done) and calls onSnap with the whole state after each event;
 // when the stream breaks it polls the job instead, so a proxy that buffers event streams only costs the live updates.
 export async function watchJob(sid: string, id: string, onSnap: (j: Job) => void, signal?: AbortSignal): Promise<Job> {
