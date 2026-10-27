@@ -60,8 +60,8 @@ export function Select({ value, options, onChange, className = '', id, title, di
           <div className="fixed inset-0 z-40" onClick={() => setAt(null)} aria-hidden />
           <div className={MENU} style={at} role="menu" aria-label={a['aria-label']} onKeyDown={onKey}>
             {opts.map((o) => (
-              <button key={o.value} type="button" role="menuitem" autoFocus={o.value === value} className={`${ITEM} ${o.value === value ? 'btn-on' : ''}`} onClick={() => { setAt(null); if (o.value !== value) onChange(o.value) }}>
-                <span className="flex-1 min-w-0 truncate">{o.label}</span>
+              <button key={o.value} type="button" role="menuitemradio" aria-checked={o.value === value} autoFocus={o.value === value} className={`${ITEM} ${o.value === value ? 'btn-on' : ''}`} onClick={() => { setAt(null); if (o.value !== value) onChange(o.value) }}>
+                <span className={`w-3 flex-none text-[10px] ${o.value === value ? 'text-accent' : 'opacity-0'}`} aria-hidden>●</span><span className="flex-1 min-w-0 truncate">{o.label}</span>
               </button>
             ))}
           </div>
