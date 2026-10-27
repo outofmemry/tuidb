@@ -89,6 +89,10 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
   const [vals, setVals] = useState<Record<string, string>>({})
   const [panels, setPanels] = useState<PanelOut[]>([])
   const [err, setErr] = useState('')
+  const [ranAt, setRanAt] = useState<Date | null>(null) // M15.13 status: when the board last refreshed and which panels failed
+  const [errsOpen, setErrsOpen] = useState(false)
+  const [opts, setOpts] = useState<Record<string, string[]>>({}) // query-loaded dropdown options by panel title
+  const [fmts, setFmts] = useState<Record<string, string>>({})
   const [layout, setLayoutState] = useState<Layout>({ order: [], span: {}, h: {} })
   const [cols, setCols] = useState(3)
   const [form, setForm] = useState<'' | 'new' | 'panel'>('')
