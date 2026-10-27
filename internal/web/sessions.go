@@ -40,13 +40,43 @@ type session struct {
 
 	mu       sync.Mutex
 	lastUsed time.Time
+	busy     int               // handlers currently running; the reaper leaves such a session alone
 	gen      int               // bumped whenever colCache is cleared, so a stale fetch is not stored
 	planSrc  map[string]string // plan id -> result id it was planned from
+	planOrig map[string]string // plan id -> CSV pre-image (log_original_values)
+	jobs     map[string]*job   // background imports and searches
 	results  map[string]*cached
 	order    []string
 	plans    map[string][]db.Statement
 	colCache map[db.ObjRef][]db.Column
 	applying bool
+	notices  map[string]string // notice id -> the result's message
+	noticeQ  []string
+	sideMu   sync.Mutex
+	sideO    *ui.Opened // second connection for the process list, so it answers while the workspace is busy (M7)
+	pinMu    sync.Mutex
+	pins     map[string]db.Session // query tab id -> its dedicated connection (db.Pinner)
+	pinUsed  map[string]time.Time  // query tab id -> last statement (guarded by pinMu)
+}
+
+// putNotice remembers a result's server notices (kept apart from results so they never evict an editable one).
+func (ss *session) putNotice(msg string) string {
+	if _, ns := noticeLines(msg); len(ns) == 0 {
+		return ""
+	}
+	id := randID(6)
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if ss.notices == nil {
+		ss.notices = map[string]string{}
+	}
+	ss.notices[id] = msg
+	ss.noticeQ = append(ss.noticeQ, id)
+	for len(ss.noticeQ) > maxCachedResults {
+		delete(ss.notices, ss.noticeQ[0])
+		ss.noticeQ = ss.noticeQ[1:]
+	}
+	return id
 }
 
 func (s *Server) findConn(name string) (config.Connection, bool) {
@@ -73,7 +103,7 @@ func (s *Server) newSession(ctx context.Context, c config.Connection) (*session,
 	ss := &session{
 		id: randID(8), conn: c, o: o, level: lvl, srv: s, stop: make(chan struct{}),
 		results: map[string]*cached{}, plans: map[string][]db.Statement{}, colCache: map[db.ObjRef][]db.Column{},
-		planSrc: map[string]string{}, lastUsed: time.Now(),
+		planSrc: map[string]string{}, planOrig: map[string]string{}, jobs: map[string]*job{}, lastUsed: time.Now(),
 	}
 	s.mu.Lock()
 	if len(s.sessions) >= maxSessions {
@@ -114,7 +144,20 @@ func (ss *session) close() {
 		case <-done:
 		case <-time.After(10 * time.Second):
 		}
+		ss.releasePins()
+		ss.sideMu.Lock()
+		if ss.sideO != nil {
+			ss.sideO.Close()
+		}
+		ss.sideMu.Unlock()
 		ss.o.Close()
+		ss.mu.Lock()
+		for _, j := range ss.jobs {
+			j.mu.Lock()
+			j.removeFile()
+			j.mu.Unlock()
+		}
+		ss.mu.Unlock()
 	})
 }
 
@@ -133,21 +176,39 @@ func (s *Server) reapIdle(ctx context.Context, ttl time.Duration) {
 }
 
 func (s *Server) reapOnce(ttl time.Duration) {
-	var old []*session
+	var old, live []*session
 	s.mu.Lock()
 	for id, ss := range s.sessions {
 		ss.mu.Lock()
-		idle := time.Since(ss.lastUsed) > ttl
+		idle := ss.busy == 0 && time.Since(ss.lastUsed) > ttl && !ss.jobsRunning()
 		ss.mu.Unlock()
 		if idle {
 			delete(s.sessions, id)
 			old = append(old, ss)
+		} else {
+			live = append(live, ss)
 		}
 	}
 	s.mu.Unlock()
+	for _, ss := range live {
+		ss.sweepPins(pinTTL) // an active session must not keep a forgotten BEGIN open; closing is network I/O, so outside s.mu
+	}
 	for _, ss := range old {
 		go ss.close()
 	}
+}
+
+// jobsRunning reports an unfinished background job (caller holds ss.mu).
+func (ss *session) jobsRunning() bool {
+	for _, j := range ss.jobs {
+		j.mu.Lock()
+		d := j.done
+		j.mu.Unlock()
+		if !d {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) closeAll() {
@@ -176,7 +237,14 @@ func (s *Server) withSession(h sessHandler) handler {
 		defer ss.live.Done()
 		ss.mu.Lock()
 		ss.lastUsed = time.Now()
+		ss.busy++
 		ss.mu.Unlock()
+		defer func() {
+			ss.mu.Lock()
+			ss.busy--
+			ss.lastUsed = time.Now() // idle time counts from the end of a long request
+			ss.mu.Unlock()
+		}()
 		return h(ss, r)
 	}
 }
@@ -187,6 +255,30 @@ func (ss *session) ctx(r *http.Request) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(r.Context(), time.Duration(n)*time.Second)
 	}
 	return context.WithCancel(r.Context())
+}
+
+// clampLimit bounds a client-supplied row limit by the configured one: 0 or negative means "the
+// configured limit", never "unlimited" (a request must not materialise a whole table).
+func (ss *session) clampLimit(n int) int {
+	if rl := ss.rowLimit(); n <= 0 || (rl > 0 && n > rl) {
+		return rl
+	}
+	return n
+}
+
+// readOnlyViolation is the one place that enforces connection.read_only for the web UI: drivers that
+// do not guard themselves (Redis, Mongo, ClickHouse, ...) would otherwise run the write.
+func (ss *session) readOnlyViolation(stmts []db.Statement) error {
+	if !ss.conn.ReadOnly {
+		return nil
+	}
+	dialect := ss.o.Sess.Caps().Dialect
+	for _, st := range stmts {
+		if !st.ReadOnly && !db.IsReadOnly(dialect, st.Text) {
+			return &apiErr{Code: http.StatusForbidden, Msg: "this connection is read-only; data-changing statements are refused"}
+		}
+	}
+	return nil
 }
 
 func (ss *session) rowLimit() int {
@@ -258,7 +350,7 @@ func (ss *session) columns(ctx context.Context, ref db.ObjRef) ([]db.Column, err
 func (ss *session) resetCaches() {
 	ss.mu.Lock()
 	ss.results, ss.order = map[string]*cached{}, nil
-	ss.plans, ss.planSrc = map[string][]db.Statement{}, map[string]string{}
+	ss.plans, ss.planSrc, ss.planOrig = map[string][]db.Statement{}, map[string]string{}, map[string]string{}
 	ss.colCache = map[db.ObjRef][]db.Column{}
 	ss.gen++
 	ss.mu.Unlock()
@@ -287,7 +379,7 @@ func (ss *session) gate(stmts []db.Statement) gateInfo {
 			readOnly = false
 		}
 	}
-	c, p := ss.level.Gate(readOnly)
+	c, p := ss.lvl().Gate(readOnly)
 	if p && ss.o.Password == "" { // nothing to verify: fall back to confirmation, like check and the TUI
 		c, p = true, false
 	}
@@ -297,12 +389,13 @@ func (ss *session) gate(stmts []db.Statement) gateInfo {
 // check enforces the gate on the server; the browser can never skip it. A password level on a
 // connection with no stored password falls back to plain confirmation, like the TUI.
 func (ss *session) check(g gateInfo, confirmed bool, password string) error {
+	lvl := ss.lvl()
 	deny := func(msg string) error {
-		return &apiErr{Code: http.StatusConflict, Msg: msg, Extra: map[string]any{"gate": g, "level": ss.level.Label()}}
+		return &apiErr{Code: http.StatusConflict, Msg: msg, Extra: map[string]any{"gate": g, "level": lvl.Label()}}
 	}
 	if g.Password && ss.o.Password != "" {
 		if password == "" {
-			return deny(ss.level.Label() + ": enter the database password")
+			return deny(lvl.Label() + ": enter the database password")
 		}
 		if subtle.ConstantTimeCompare([]byte(password), []byte(ss.o.Password)) != 1 {
 			return deny("wrong password")
@@ -310,7 +403,14 @@ func (ss *session) check(g gateInfo, confirmed bool, password string) error {
 		return nil
 	}
 	if (g.Confirm || g.Password) && !confirmed {
-		return deny(ss.level.Label() + ": confirmation required")
+		return deny(lvl.Label() + ": confirmation required")
 	}
 	return nil
+}
+
+// lvl reads the safe-mode level under the lock (setSafeMode writes it from another request).
+func (ss *session) lvl() safemode.Level {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.level
 }
