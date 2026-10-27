@@ -34,17 +34,25 @@ export function Select({ value, options, onChange, className = '', id, title, di
   const cur = opts.find((o) => o.value === value)
   // arrows move between items, Escape closes; focus starts on the current item
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role=menuitem]')]
+    const items = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role^=menuitem]')]
     const i = items.indexOf(document.activeElement as HTMLButtonElement)
     if (e.key === 'ArrowDown') items[(i + 1) % items.length]?.focus()
     else if (e.key === 'ArrowUp') items[(i - 1 + items.length) % items.length]?.focus()
+    else if (e.key === 'Home') items[0]?.focus()
+    else if (e.key === 'End') items[items.length - 1]?.focus()
     else if (e.key === 'Escape') { setAt(null); btn?.focus() }
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { // type the first letter to jump
+      const k = e.key.toLowerCase(), from = i + 1
+      const hit = [...items.slice(from), ...items.slice(0, from)].find((b) => (b.textContent ?? '').trim().toLowerCase().startsWith(k))
+      if (!hit) return
+      hit.focus()
+    }
     else return
     e.preventDefault(); e.stopPropagation()
   }
   return (
     <>
-      <button ref={setBtn} type="button" className={`inline-flex items-center gap-1.5 px-2 ${className}`} onClick={() => (at ? setAt(null) : open())} aria-haspopup="menu" aria-expanded={!!at} aria-label={a['aria-label']} title={title}>
+      <button ref={setBtn} id={id} type="button" className={`inline-flex items-center gap-1.5 px-2 ${className}`} onClick={() => (at ? setAt(null) : open())} aria-haspopup="menu" aria-expanded={!!at} disabled={disabled} aria-label={a['aria-label']} title={title}>
         <span className="flex-1 min-w-0 truncate text-left">{cur?.label ?? value}</span><span className="text-[10px] opacity-70" aria-hidden>▾</span>
       </button>
       {at && (
