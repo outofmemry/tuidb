@@ -57,13 +57,32 @@ export function Connections() {
   })
 
   const list = conns.data ?? []
+  // [general] reopen_workspaces: on the first visit of this browser tab, the workspaces that were open last time come back, each on its database
+  useEffect(() => {
+    if (!meta.data || !conns.data || !meta.data.config.general.ReopenWorkspaces || !reopenDue()) return
+    markReopened()
+    const last = Object.entries(lastWorkspaces()).filter(([n]) => conns.data.some((c) => c.Name === n))
+    if (!last.length) return
+    void (async () => {
+      let to = ''
+      for (const [name, database] of last) {
+        try {
+          const r = await openSession(name)
+          remember(name, r.id)
+          if (database) await api('POST', `/sessions/${r.id}/database`, { Name: database }).catch(() => {})
+          to = r.id
+        } catch (e) { setMsg(`Could not reopen ${name}: ${e instanceof Error ? e.message : e}`) }
+      }
+      if (to) nav({ to: '/s/$sessionId', params: { sessionId: to } })
+    })()
+  }, [meta.data, conns.data])
   const viewFile = (f: { name: string; text: string } | null) => { if (f) { addViewerFile(f); nav({ to: '/sql' }) } }
   useKeymap(meta.data?.keymap, ['open_file', 'open_recent', 'settings'], (a) => { if (a === 'open_file') openSqlFile().then(viewFile); else if (a === 'open_recent') setDlg('recent'); else setDlg('settings') })
   // Sort By: the order inside each group; `idx` stays the connection's place in the saved list, which Edit and Delete use
   // tag order is the tag list's, untagged last, like the terminal UI
   const tagRank = (c: Connection) => { const i = (meta.data?.tags ?? []).findIndex((t) => t.name === c.Tag); return String(c.Tag && i >= 0 ? i : 99).padStart(2, '0') }
   const key = (c: Connection) => (sortBy === 'tag' ? tagRank(c) : sortBy === 'driver' ? c.Driver : '')
-  const shown = list.map((c, idx) => ({ c, idx })).sort((a, b) => key(a.c).localeCompare(key(b.c)) || a.c.Name.localeCompare(b.c.Name, undefined, { sensitivity: 'base' }))
+  const shown = list.map((c, idx) => ({ c, idx })).sort((a, b) => (sortBy === 'recent' ? recentRank(b.c.lastConnected) - recentRank(a.c.lastConnected) : 0) || key(a.c).localeCompare(key(b.c)) || a.c.Name.localeCompare(b.c.Name, undefined, { sensitivity: 'base' }))
   const setSort = (v: string) => api('PUT', '/state/connection-sort', { Sort: v }).then(() => sortQ.refetch(), (e) => setMsg(e.message))
   const inGroup = (c: Connection, g: string) => (c.Group ?? '') === g || (c.Group ?? '').startsWith(g + '/')
   const renameGroup = async (g: string) => {
