@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { clip, type ResultCol, type Sort, type Val } from '../utils/api'
@@ -20,6 +20,9 @@ type Props = {
   onSelect?: (rowKey: string) => void
   onSpace?: () => void
   ctx?: 'grid' | 'results'
+  colRef?: { current: number } // the cursor column, for copy_cells
+  onHeaderMenu?: (col: string, x: number, y: number) => void // right-click on a column header
+  pretty?: boolean // auto_pretty_json
 }
 
 const ROW_H = 28
@@ -31,6 +34,14 @@ const CELL = 'px-[9px] h-[28px] leading-[27px] overflow-hidden text-ellipsis whi
 const LN = 'sticky left-0 z-[2] w-[48px] text-right cursor-pointer pr-[8px] text-[11px]'
 const SEL_BG = 'bg-[color-mix(in_srgb,var(--accent)_12%,var(--canvas))]'
 
+// [table] auto_pretty_json: a JSON value shows with spaces after its separators; in a grid cell only when that still fits the column.
+export function prettyJson(v: string, indent = 2): string {
+  const t = v.trim()
+  if (t.length < 2 || (t[0] !== '{' && t[0] !== '[')) return v
+  try { return JSON.stringify(JSON.parse(t), null, indent) } catch { return v }
+}
+const prettyCell = (v: string) => { const one = prettyJson(v, 1).replace(/\n\s*/g, ' '); return one.length <= 20 ? one : v }
+
 export const show = (v: Val | undefined, server: string | null): string | null => {
   if (v === undefined) return server
   if (v === null) return null
@@ -39,9 +50,15 @@ export const show = (v: Val | undefined, server: string | null): string | null =
   return v.$ === 'null' ? null : v.$ === 'default' ? 'DEFAULT' : ''
 }
 
-export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, selected, onSelect, onSpace, ctx = 'grid' }: Props) {
+export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, selected, onSelect, onSpace, ctx = 'grid', colRef, onHeaderMenu, pretty }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
-  const [col, setCol] = useState(0) // the cursor column; the cursor row is `selected`
+  const [col, setColState] = useState(0) // the cursor column; the cursor row is `selected`
+  const setCol = (c: number) => { setColState(c); if (colRef) colRef.current = c }
+  // hiding the cursor column leaves the cursor past the end: pull it back so reads of columns[col] stay valid
+  useEffect(() => {
+    if (columns.length && col > columns.length - 1) setCol(columns.length - 1)
+    else if (colRef && colRef.current > Math.max(0, columns.length - 1)) colRef.current = Math.max(0, columns.length - 1)
+  }, [columns.length]) // eslint-disable-line react-hooks/exhaustive-deps
   const defs = useMemo<ColumnDef<GridRow>[]>(
     () => columns.map((c, i) => ({ id: c.name, header: c.name, accessorFn: (r) => r.cells[i] })),
     [columns],
@@ -51,7 +68,7 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
   const width = 48 + columns.length * COL_W
   const sortOf = (name: string) => sort?.findIndex((s) => s.Column === name) ?? -1
 
-  const open = (row: GridRow, c: number) => onOpen?.({ row: row.key, col: columns[c].name, readOnly: !editable || row.state === 'deleted' })
+  const open = (row: GridRow, c: number) => columns[c] && onOpen?.({ row: row.key, col: columns[c].name, readOnly: !editable || row.state === 'deleted' })
   const onKey = (e: React.KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return
     const idx = rows.findIndex((r) => r.key === selected)
@@ -91,9 +108,9 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
           const i = sortOf(h.column.id)
           return (
             <div key={h.id} className={`${CELL} border-b-0 font-sans font-medium text-[12px] text-ink-2 cursor-pointer select-none hover:text-ink hover:bg-raised`} style={{ width: COL_W }} title={`${h.column.id} (${columns[h.index]?.type})`}
-              onClick={(e) => onSort?.(h.column.id, e.shiftKey)}>
+              onClick={(e) => onSort?.(h.column.id, e.shiftKey)} onContextMenu={(e) => { if (onHeaderMenu) { e.preventDefault(); onHeaderMenu(h.column.id, e.clientX, e.clientY) } }}>
               {columns[h.index]?.pk ? <span className="text-accent mr-1" title="primary key" aria-label="primary key">◆</span> : null}{flexRender(h.column.columnDef.header, h.getContext())}
-              {i >= 0 && <span className="text-accent ml-1 text-[10px]" aria-label={sort![i].Desc ? 'descending' : 'ascending'}>{sort![i].Desc ? '▼' : '▲'}</span>}
+              {i >= 0 && <span className="text-accent ml-1 text-[10px]" aria-label={sort![i].Desc ? 'descending' : 'ascending'}>{sort![i].Desc ? '▼' : '▲'}{sort!.length > 1 ? i + 1 : ''}</span>}
             </div>
           )
         })}
@@ -118,7 +135,7 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
                     title={clip(ed !== undefined ? `was: ${row.cells[i] ?? 'NULL'}` : (val ?? 'NULL'), 200)}
                     onClick={() => { onSelect?.(row.key); setCol(i) }}
                     onDoubleClick={() => open(row, i)}>
-                    {val === null ? 'NULL' : val}
+                    {val === null ? 'NULL' : pretty ? prettyCell(val) : val}
                   </div>
                 )
               })}
