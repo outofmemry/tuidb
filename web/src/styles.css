@@ -30,6 +30,7 @@
   --ink: #2c3250; --ink-2: #6c7086; --ink-3: #8a8fa8;
   --edit: #a8680a; --del: #c4264a; --new: #3a7d0a;
   --accent: #2e5cb8; --on-accent: #ffffff;
+  --syn-keyword: #7847bd; --syn-string: #3a7d0a; --syn-number: #b15c00; --syn-comment: #8a8fa8; --syn-fn: #006a83; --syn-type: #0f7b8c;
   --backdrop: rgba(30, 34, 50, .4); --shadow: 0 20px 60px rgba(30, 34, 50, .25);
   color-scheme: light;
 }
@@ -42,6 +43,7 @@
   --color-ink: var(--ink); --color-ink-2: var(--ink-2); --color-ink-3: var(--ink-3);
   --color-edit: var(--edit); --color-del: var(--del); --color-new: var(--new);
   --color-accent: var(--accent); --color-on-accent: var(--on-accent);
+  --color-syn-keyword: var(--syn-keyword); --color-syn-string: var(--syn-string); --color-syn-number: var(--syn-number); --color-syn-comment: var(--syn-comment); --color-syn-fn: var(--syn-fn);
   --color-backdrop: var(--backdrop); --color-transparent: transparent; --color-current: currentColor;
   --font-sans: 'Bricolage Grotesque Variable', 'Bricolage Grotesque', system-ui, sans-serif;
   --font-mono: 'Martian Mono Variable', 'Martian Mono', ui-monospace, Menlo, Consolas, monospace;
