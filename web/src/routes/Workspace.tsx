@@ -604,34 +604,51 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
           </div>
         )}
         <span className="flex-1 min-w-0" />
-        <button onClick={() => newQuery()}>New query</button>
-        <button className={drawer === 'history' ? 'btn-on' : ''} onClick={() => setDrawer(drawer === 'history' ? '' : 'history')}>History</button>
-        <button className={drawer === 'queries' ? 'btn-on' : ''} onClick={() => setDrawer(drawer === 'queries' ? '' : 'queries')}>Saved queries</button>
-        <button onClick={disconnect}>Disconnect</button>
+        {toolbar.map((t) => <button key={t.name} className={`max-[760px]:hidden ${t.icon ? 'btn-icon' : ''} ${t.on ? 'btn-on' : ''}`} aria-pressed={t.on === undefined ? undefined : t.on} aria-label={t.icon ? t.title : undefined} title={t.title} onClick={t.run}>{t.label}</button>)}
+        <button className="btn-icon hidden max-[760px]:inline-block text-[15px] leading-none" aria-label="Menu" aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMobileMenu({ x: r.right - 220, y: r.bottom + 2 }) }}>⋯</button>
       </div>
+      {mobileMenu && <TabMenu x={mobileMenu.x} y={mobileMenu.y} onClose={() => setMobileMenu(null)} items={[['New query', () => newQuery()], ['History', () => setDrawer(drawer === 'history' ? '' : 'history')], ['Saved queries', () => setDrawer(drawer === 'queries' ? '' : 'queries')], ['Open anything', () => setPalette(true)], ['Key bindings', () => setHelp(true)], ['-', () => {}], ['Disconnect', disconnect]]} />}
       <div className="flex flex-1 min-h-0 relative">
         {side && <div className="hidden max-[760px]:block fixed inset-0 z-[25] bg-backdrop" onClick={() => setSide(false)} aria-hidden />}
-        <Sidebar key={i.database} open={side} collapsed={collapsed} sid={sid} info={i} meta={meta.data} onOpen={openObj} onQueryText={newQuery} onPlan={setPlan} notify={notify} onDiagram={(o) => openPage('diagram', o)} />
+        <Sidebar key={i.database} open={side} collapsed={collapsed || zen} sid={sid} info={i} meta={meta.data} onOpen={openObj} onQueryText={newQuery} onPlan={setPlan} notify={notify} onDiagram={(o) => openPage('diagram', o)} />
         <div className={`flex-1 min-w-0 grid bg-canvas grid-rows-[auto_minmax(0,1fr)] ${split ? 'grid-cols-2 max-[760px]:grid-cols-1 max-[760px]:grid-rows-[auto_minmax(0,1fr)_auto_minmax(0,1fr)]' : 'grid-cols-1'}`}>
           {(split ? [0, 1] : [0]).map((pn) => (
-            <div key={pn} className={`flex h-8 min-w-0 text-[12px] border-b border-rule overflow-x-auto [scrollbar-width:none] bg-canvas font-mono border-t-2 ${split && pn === focus ? 'border-t-accent' : 'border-t-transparent'} ${pn ? 'col-start-2 row-start-1 border-l border-l-rule max-[760px]:col-start-1 max-[760px]:row-start-3' : 'col-start-1 row-start-1'}`} onMouseDownCapture={() => setFocus(pn)}>
+            <div key={pn} className={`flex h-8 min-w-0 text-[12px] border-b border-rule overflow-x-auto [scrollbar-width:none] bg-[var(--tabs-bg,var(--canvas))] font-mono border-t-2 ${split && pn === focus ? 'border-t-accent' : 'border-t-transparent'} ${pn ? 'col-start-2 row-start-1 border-l border-l-rule max-[760px]:col-start-1 max-[760px]:row-start-3' : 'col-start-1 row-start-1'}`} onMouseDownCapture={() => setFocus(pn)} onDoubleClick={(e) => { if (e.target === e.currentTarget) { setFocus(pn); act.current('new_tab') } }} role="tablist" aria-label={split ? `Tabs, pane ${pn + 1}` : 'Tabs'}>
               {tabs.filter((t) => t.pane === pn).map((t) => (
-                <div key={t.id} className={`group flex items-center gap-2 pl-3.5 pr-2.5 cursor-pointer whitespace-nowrap border-r border-rule hover:text-ink hover:bg-panel ${t.id === actives[pn] ? 'text-ink bg-panel shadow-[inset_0_-2px_0_var(--accent)]' : 'text-ink-2'}`} onClick={() => setActive(pn, t.id)} onContextMenu={(e) => { e.preventDefault(); setTmenu({ x: e.clientX, y: e.clientY, id: t.id }) }}>
-                  {tabLabel(t)}
-                  <button className={`btn-ghost px-1 ${t.id === actives[pn] ? '' : 'opacity-0 group-hover:opacity-100'}`} aria-label="Tab menu" aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setTmenu({ x: r.left, y: r.bottom, id: t.id }) }}>▾</button>
-                  <button className={`btn-ghost ${t.id === actives[pn] ? '' : 'opacity-0 group-hover:opacity-100'}`} onClick={(e) => { e.stopPropagation(); close(t.id) }}>✕</button>
+                <div key={t.id} role="tab" aria-selected={t.id === actives[pn]} tabIndex={t.id === actives[pn] ? 0 : -1} draggable
+                  className={`group flex items-center gap-2 pl-3.5 pr-2.5 cursor-pointer whitespace-nowrap border-r border-rule hover:text-ink hover:bg-panel ${t.id === actives[pn] ? 'text-ink bg-[var(--tab-active-bg,var(--panel))] shadow-[inset_0_-2px_0_var(--accent)]' : 'text-ink-2'} ${dragTab === t.id ? 'opacity-40' : ''}`}
+                  onClick={() => setActive(pn, t.id)} onContextMenu={(e) => { e.preventDefault(); setTmenu({ x: e.clientX, y: e.clientY, id: t.id }) }}
+                  onKeyDown={(e) => { // keyboard: Enter shows the tab, shift+F10 / the menu key opens its menu, alt+arrows move it
+                    if (e.target !== e.currentTarget) return
+                    const r = e.currentTarget.getBoundingClientRect()
+                    if (e.key === 'Enter') setActive(pn, t.id)
+                    else if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) { e.preventDefault(); setTmenu({ x: r.left, y: r.bottom, id: t.id }) }
+                    else if (e.altKey && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); moveTab(t.id, e.key === 'ArrowLeft' ? -1 : 1) }
+                  }}
+                  onDragStart={(e) => { setDragTab(t.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-webtuidb-tab', String(t.id)) }} onDragEnd={() => setDragTab(null)}
+                  onDragOver={(e) => { if (dragTab !== null && dragTab !== t.id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
+                  onDrop={(e) => { if (dragTab === null) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); reorder(dragTab, t.id, e.clientX > r.left + r.width / 2); setDragTab(null) }}>
+                  {t.kind === 'table' && t.obj.Schema && t.obj.Schema !== i.schema && <span className="text-ink-3 text-[11px]">{t.obj.Schema}.</span>}{tabLabel(t)}
+                  <button className={`btn-ghost px-1 ${t.id === actives[pn] ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`} aria-label="Tab menu" aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setTmenu({ x: r.left, y: r.bottom, id: t.id }) }}>▾</button>
+                  <button className={`btn-ghost btn-icon w-5 ${dirtyIds.has(t.id) ? 'text-edit hover:text-ink' : t.id === actives[pn] ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`} aria-label={dirtyIds.has(t.id) ? 'Close tab (has unsent changes)' : 'Close tab'} title={dirtyIds.has(t.id) ? 'Unsent changes. Click to close.' : 'Close'} onClick={(e) => { e.stopPropagation(); close(t.id) }}>{dirtyIds.has(t.id) ? <><span className="group-hover:hidden [button:hover_&]:hidden">●</span><span className="hidden group-hover:inline">✕</span></> : '✕'}</button>
                 </div>
               ))}
+              <button className="btn-ghost btn-icon self-center ml-1 text-ink-3 hover:text-ink" aria-label="New query tab" title={`New query (${display(km!.prefix)} e)`} onClick={() => { setFocus(pn); newQuery() }}>+</button>
             </div>
           ))}
-          {!tabs.some((t) => t.pane === 0) && <div className={`${EMPTY} col-start-1 row-start-2`}>Pick a table from the list, or start a new query.</div>}
+          {!tabs.some((t) => t.pane === 0) && <div className={`${EMPTY} col-start-1 row-start-2 font-sans`}>
+            <p className="m-0">Pick a table from the list, or start a new query.</p>
+            <p className="mt-4 mb-0 flex flex-wrap gap-2"><button className="btn-primary" onClick={() => newQuery()}>New query</button><button onClick={() => setPalette(true)}>Open anything</button><button className="btn-ghost" onClick={() => setHelp(true)}>Key bindings</button></p>
+            <p className="mt-5 mb-0 text-[12.5px] text-ink-3 font-mono">Shortcuts start with <kbd>{display(km!.prefix)}</kbd>: then <kbd>e</kbd> for a query, <kbd>p</kbd> to open anything, <kbd>?</kbd> for the list.</p>
+          </div>}
           {split && !tabs.some((t) => t.pane === 1) && <div className={`${EMPTY} col-start-2 row-start-2 max-[760px]:col-start-1 max-[760px]:row-start-4`} onMouseDownCapture={() => setFocus(1)}>This pane is empty. Open a tab here, or <button className="btn-ghost" onClick={splitRight}>close the split</button>.</div>}
           {tabs.map((t) => {
             const shownHere = t.id === actives[t.pane] && (split || t.pane === 0), live = shownHere && t.pane === p // only the focused pane answers keys
             return (
-              <div key={t.id} className={`min-h-0 min-w-0 flex flex-col row-start-2 ${t.pane ? 'col-start-2 border-l border-rule max-[760px]:col-start-1 max-[760px]:row-start-4' : 'col-start-1'}`} hidden={!shownHere} onMouseDownCapture={() => setFocus(t.pane)}>
-                {t.kind === 'table' ? <DataTab sid={sid} info={i} meta={meta.data!} obj={t.obj} initFilters={t.filters} initView={t.view} notify={notify} active={live} onFollow={openHit} onDirty={(d) => { dirty.current[t.id] = d }} />
-                  : t.kind === 'query' ? <QueryTab sid={sid} info={i} meta={meta.data!} tabKey={`${i.name}/tab${t.n}`} initial={t.text} autorun={t.autorun} notify={notify} shown={live} onCancel={afterCancel} onText={(x) => { texts.current[t.id] = x; schedule() }} />
+              <div key={t.id} className={`min-h-0 min-w-0 flex flex-col row-start-2 ${t.pane ? 'col-start-2 border-l border-rule max-[760px]:col-start-1 max-[760px]:row-start-4' : 'col-start-1'}`} hidden={!shownHere} onMouseDownCapture={() => setFocus(t.pane)}
+                onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }} onDrop={(e) => dropFile(t, e)}>
+                {t.kind === 'table' ? <DataTab sid={sid} info={i} meta={meta.data!} obj={t.obj} initFilters={t.filters} initView={t.view} notify={notify} active={live} onFollow={openHit} onDirty={(d) => markDirty(t.id, d)} />
+                  : t.kind === 'query' ? <QueryTab sid={sid} info={i} meta={meta.data!} tabKey={`${i.name}/tab${t.n}`} initial={t.text} autorun={t.autorun} notify={notify} shown={live} onCancel={afterCancel} onText={(x) => { texts.current[t.id] = x; schedule() }} onDirty={(d) => markDirty(t.id, d)} onClose={() => close(t.id)} />
                   : t.kind === 'diagram' ? <DiagramTab sid={sid} info={i} focus={t.focus} onStructure={(r) => openObj(r, true, 'structure')} onPlan={setPlan} />
                   : t.kind === 'metrics' ? <MetricsTab sid={sid} info={i} shown={shownHere} others={openSessions()} notify={notify} />
                   : <AssistantTab sid={sid} notify={notify} onRun={(q) => newQuery(q, true)} />}
