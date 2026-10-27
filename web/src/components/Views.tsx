@@ -259,28 +259,36 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
 function BoardForm({ mode, board, onSave, onClose }: { mode: 'new' | 'panel'; board?: BoardInfo; onSave: (from: string, b: BoardInfo, name: string) => void; onClose: () => void }) {
   const [name, setName] = useState(mode === 'new' ? '' : board!.name)
   const [secs, setSecs] = useState(String(board?.refreshSecs ?? 30))
-  const [p, setP] = useState<BoardPanel>({ Title: '', Kind: 'number', Query: '', Chart: '', Target: '', RefreshOn: '', Table: '' })
+  const [p, setP] = useState<BoardPanel>({ Title: '', Kind: 'number', Query: '', Chart: '', Target: '', RefreshOn: '', Table: '', var: '', options: [], format: 'csv', default: '' })
+  const [optText, setOptText] = useState('')
   const set = (k: keyof BoardPanel, v: string) => setP({ ...p, [k]: v })
-  const titles = (board?.panels ?? []).filter((x) => x.Kind !== 'button' && x.Kind !== 'import').map((x) => x.Title)
+  const titles = (board?.panels ?? []).filter((x) => !ACTION_KINDS.has(x.Kind)).map((x) => x.Title)
   const all = (board?.panels ?? []).map((x) => x.Title)
   const plot = p.Kind === 'bar' || p.Kind === 'line'
-  const runs = p.Kind !== 'button' && p.Kind !== 'import'
-  const ok = name.trim() && p.Title.trim() && (runs ? p.Query.trim() : p.Kind === 'button' ? p.Target : p.Table?.trim())
+  const runs = !ACTION_KINDS.has(p.Kind) // panels the board itself runs
+  const hasQuery = runs || p.Kind === 'exporter' || p.Kind === 'dropdown'
+  const fixed = optText.split(',').map((x) => x.trim()).filter(Boolean)
+  const ok = name.trim() && p.Title.trim() && (runs || p.Kind === 'exporter' ? p.Query.trim() : p.Kind === 'button' ? p.Target : p.Kind === 'import' ? p.Table?.trim() : p.Kind === 'input' ? p.var?.trim() : p.var?.trim() && (fixed.length || p.Query.trim()))
   const go = () => {
-    const keep: BoardPanel = { Title: p.Title.trim(), Kind: p.Kind, Query: runs ? p.Query : '', Chart: plot ? p.Chart : '', Target: p.Kind === 'button' ? p.Target : '', RefreshOn: runs ? p.RefreshOn : '', Table: p.Kind === 'import' ? p.Table?.trim() : '' }
+    const keep: BoardPanel = { Title: p.Title.trim(), Kind: p.Kind, Query: hasQuery ? p.Query : '', Chart: plot ? p.Chart : '', Target: p.Kind === 'button' ? p.Target : '', RefreshOn: runs ? p.RefreshOn : '', Table: p.Kind === 'import' ? p.Table?.trim() : '',
+      ...(isVarPanel(p) ? { var: p.var?.trim(), default: p.default ?? '', options: p.Kind === 'dropdown' ? fixed : [] } : {}), ...(p.Kind === 'exporter' ? { format: p.format || 'csv' } : {}) }
     const b: BoardInfo = { name: name.trim(), refreshSecs: Number(secs) || 0, vars: board?.vars ?? [], panels: [...(board?.panels ?? []), keep], error: '' }
     onSave(board?.name ?? name.trim(), b, name.trim())
   }
   return (
     <Dialog title={mode === 'new' ? 'New board' : `Add a panel to ${board!.name}`} onClose={onClose}>
-      <div className="grid grid-cols-[130px_1fr] gap-x-3 gap-y-2 items-center text-[12.5px] [&_label]:text-ink-2">
-        {mode === 'new' && <><label>Board name</label><input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+      <div className="grid grid-cols-[130px_1fr] gap-x-3 gap-y-2 items-center text-[12.5px] [&_label]:text-ink-2" onKeyDown={(e) => enterSubmits(e, () => ok && go())}>
+        {mode === 'new' && <><label>Board name</label><input aria-label="Board name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
           <label>Refresh (seconds)</label><input type="number" min={0} value={secs} onChange={(e) => setSecs(e.target.value)} /></>}
-        <label>Panel title</label><input autoFocus={mode === 'panel'} value={p.Title} onChange={(e) => set('Title', e.target.value)} />
+        <label>Panel title</label><input aria-label="Panel title" autoFocus={mode === 'panel'} value={p.Title} onChange={(e) => set('Title', e.target.value)} />
         <label>Kind</label><Select aria-label="Kind" value={p.Kind} onChange={(v) => set('Kind', v)} options={KINDS} />
-        {runs && <><label>Query</label><textarea className="font-mono min-h-[5em] bg-canvas" aria-label="Query" placeholder="select count(*) from orders" value={p.Query} onChange={(e) => set('Query', e.target.value)} /></>}
+        {hasQuery && <><label>{p.Kind === 'dropdown' ? 'Options query' : 'Query'}</label><textarea className="font-mono min-h-[5em] bg-canvas" aria-label="Query" placeholder={p.Kind === 'dropdown' ? 'select name from regions (first column)' : 'select count(*) from orders'} value={p.Query} onChange={(e) => set('Query', e.target.value)} /></>}
         {plot && <><label>Chart columns</label><input aria-label="Chart columns" placeholder="x: day, y: orders, refunds" value={p.Chart} onChange={(e) => set('Chart', e.target.value)} /></>}
         {p.Kind === 'button' && <><label>Runs panel</label><Select aria-label="Target" value={p.Target ?? ''} onChange={(v) => set('Target', v)} options={[{ value: '', label: 'pick a panel' }, ...titles]} /></>}
+        {isVarPanel(p) && <><label>Variable</label><input aria-label="Variable" placeholder="region (used as $region in queries)" value={p.var ?? ''} onChange={(e) => set('var', e.target.value)} />
+          <label>Default</label><input aria-label="Default" value={p.default ?? ''} onChange={(e) => set('default', e.target.value)} /></>}
+        {p.Kind === 'dropdown' && <><label>Fixed options</label><input aria-label="Fixed options" placeholder="a, b, c (empty: use the query)" value={optText} onChange={(e) => setOptText(e.target.value)} /></>}
+        {p.Kind === 'exporter' && <><label>Format</label><Select aria-label="Format" value={p.format || 'csv'} onChange={(v) => set('format', v)} options={EXPORT_FORMATS} /></>}
         {p.Kind === 'import' && <><label>Import into</label><input aria-label="Table" placeholder="table name" value={p.Table ?? ''} onChange={(e) => set('Table', e.target.value)} /></>}
         {runs && all.length > 0 && <><label>Refresh on</label><Select aria-label="Refresh on" value={p.RefreshOn ?? ''} onChange={(v) => set('RefreshOn', v)} options={[{ value: '', label: 'nothing' }, ...all]} /></>}
       </div>
