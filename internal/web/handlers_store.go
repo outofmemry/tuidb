@@ -1,10 +1,15 @@
 package web
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"path"
 	"strings"
 
+	"webtuidb/internal/db"
 	"webtuidb/internal/store"
 )
 
@@ -20,7 +25,8 @@ func (s *Server) history(r *http.Request) (any, error) {
 	return l, err
 }
 
-// deleteHistory removes one entry (?id=) or the whole connection's history when id is empty.
+// deleteHistory removes one entry (?id=), or the whole connection's history when all=1 is passed.
+// A missing id alone is a 400: a client sending an undefined id must not wipe the history.
 func (s *Server) deleteHistory(r *http.Request) (any, error) {
 	q := r.URL.Query()
 	if s.o.Hist == nil || q.Get("conn") == "" {
@@ -28,6 +34,9 @@ func (s *Server) deleteHistory(r *http.Request) (any, error) {
 	}
 	if id := q.Get("id"); id != "" {
 		return nil, s.o.Hist.Delete(q.Get("conn"), id)
+	}
+	if q.Get("all") != "1" {
+		return nil, bad("id is required (pass all=1 to clear the whole history)")
 	}
 	return nil, s.o.Hist.Clear(q.Get("conn"))
 }
@@ -44,6 +53,7 @@ func (s *Server) saveQuery(r *http.Request) (any, error) {
 	var req struct {
 		Folder, Name, SQL string
 		Keywords          []string
+		Overwrite         bool
 	}
 	if err := decode(r, &req); err != nil {
 		return nil, err
@@ -51,25 +61,69 @@ func (s *Server) saveQuery(r *http.Request) (any, error) {
 	if req.Name == "" {
 		return nil, bad("name is required")
 	}
-	return s.o.Queries.Save(req.Folder, req.Name, req.Keywords, req.SQL)
+	return s.saveNew(req.Folder, req.Name, req.Keywords, req.SQL, req.Overwrite)
+}
+
+// saveNew saves a query; an existing file is a 409 {exists:true} unless overwrite is set.
+func (s *Server) saveNew(folder, name string, kw []string, sql string, overwrite bool) (any, error) {
+	if overwrite {
+		return s.o.Queries.Save(folder, name, kw, sql)
+	}
+	q, err := s.o.Queries.SaveIfAbsent(folder, name, kw, sql)
+	if errors.Is(err, store.ErrExists) {
+		return nil, &apiErr{Code: http.StatusConflict, Msg: "a saved query with this name already exists", Extra: map[string]any{"exists": true}}
+	}
+	return q, err
 }
 
 func (s *Server) updateQuery(r *http.Request) (any, error) {
-	var req struct{ SQL string }
+	var req struct{ SQL *string } // a pointer: a missing field is not the empty query
 	if err := decode(r, &req); err != nil {
 		return nil, err
+	}
+	if req.SQL == nil {
+		return nil, bad("sql is required")
 	}
 	p, err := queryPath(r)
 	if err != nil {
 		return nil, err
 	}
-	return nil, s.o.Queries.Update(p, req.SQL)
+	s.queryMu.Lock()
+	defer s.queryMu.Unlock()
+	if m := r.Header.Get("If-Match"); m != "" { // another tab saved this query since it was loaded
+		cur, err := s.o.Queries.Read(p)
+		if err != nil {
+			return nil, err
+		}
+		if m != queryETag(cur) {
+			return nil, &apiErr{Code: http.StatusConflict, Msg: "this saved query changed elsewhere; reload it before saving"}
+		}
+	}
+	if err := s.o.Queries.Update(p, *req.SQL); err != nil {
+		return nil, err
+	}
+	if w := rw(r); w != nil {
+		if cur, err := s.o.Queries.Read(p); err == nil {
+			w.Header().Set("ETag", queryETag(cur))
+		}
+	}
+	return nil, nil
+}
+
+func queryETag(q store.Query) string {
+	return fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(q.Name+"\x00"+strings.Join(q.Keywords, ",")+"\x00"+q.SQL)))
 }
 
 func (s *Server) deleteQuery(r *http.Request) (any, error) {
 	p, err := queryPath(r)
 	if err != nil {
 		return nil, err
+	}
+	if !strings.HasSuffix(p, ".sql") { // "reports/" would otherwise remove the whole folder
+		return nil, bad("%q is not a saved query file", p)
+	}
+	if _, err := s.o.Queries.Read(p); err != nil { // a regular, readable file
+		return nil, bad("%q is not a saved query file", p)
 	}
 	return nil, s.o.Queries.Delete(p)
 }
@@ -104,9 +158,34 @@ func (s *Server) putTableState(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var ts store.TableState
-	if err := decode(r, &ts); err != nil {
+	var raw map[string]json.RawMessage
+	if err := decode(r, &raw); err != nil {
 		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, bad("a table state object is required")
+	}
+	// merge: fields that are present replace the saved ones, absent ones (the TUI's widths) are kept
+	ts := s.o.State.Table(k)
+	for key, v := range raw {
+		switch key {
+		case "widths":
+			ts.ColWidths = nil
+		case "filters":
+			ts.Filters = db.FilterSet{}
+		case "hidden":
+			ts.Hidden = nil
+		case "sort":
+			ts.Sort = nil
+		case "show_filters":
+			ts.ShowBar = false
+		default:
+			continue
+		}
+		field, _ := json.Marshal(map[string]json.RawMessage{key: v})
+		if err := json.Unmarshal(field, &ts); err != nil {
+			return nil, bad("invalid %s: %v", key, err)
+		}
 	}
 	return nil, s.o.State.SetTable(k, ts)
 }
