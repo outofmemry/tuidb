@@ -20,7 +20,12 @@ import { AssistantTab, DiagramTab, MetricsTab } from '../components/Views'
 import { Logo } from '../components/logos'
 import { Select } from '../components/Select'
 import { copyText } from '../utils/copy'
-import { Machine, canon, contextOf, display, moveFocus } from '../utils/keys'
+import { queryLink, tableLink } from '../utils/links'
+import { Machine, canon, contextOf, display, inTextField, keysLocked, moveFocus } from '../utils/keys'
+import { dropWorkspace, forget, loadTabs, markReopened, noteWorkspace, openSessions, remember, saveTabs } from '../utils/workspaces'
+
+// a deep link (M15.19): /s/<sid>/t/<schema>/<table>?filter=… opens that table, /s/<sid>/q/<saved query> opens that query
+export type Target = { kind: 't'; schema: string; table: string; filter?: FilterSet } | { kind: 'q'; path: string }
 
 // Actions the web UI answers (its own plus the ones tabs and the sidebar handle via the webtuidb:action event).
 // Everything else in the keymap is listed as "not in the web UI" so the help screen stays identical to the terminal's.
