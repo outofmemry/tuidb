@@ -2,7 +2,10 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,20 +31,37 @@ func (s *Server) meta(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	out := map[string]any{
 		"drivers": config.Drivers, "sslModes": config.SSLModes, "safeModes": safemode.All, "operators": ops,
-		"config": map[string]any{"general": c.General, "editor": c.Editor, "table": c.Table, "sidebar": c.Sidebar},
+		"config": map[string]any{"general": c.General, "editor": c.Editor, "table": c.Table, "sidebar": c.Sidebar, "csv": c.CSV},
+		"theme":  webTheme(c.Theme),
+		"web":    map[string]any{"fontSize": c.Web.FontSize, "lineHeight": c.Web.LineHeight, "notifications": c.Web.Notifications},
 		"keymap": map[string]any{"prefix": km.Prefix, "bindings": km.All()},
-	}, nil
+		"login":  c.Web.Password != "",
+	}
+	for k, v := range s.metaExtra() {
+		out[k] = v
+	}
+	return out, nil
 }
 
 func (s *Server) getConns(r *http.Request) (any, error) {
 	s.connMu.Lock()
 	defer s.connMu.Unlock()
+	s.reloadConns()
+	s.setStamp(r)
 	if s.o.Conns == nil {
 		return []config.Connection{}, nil
 	}
 	return s.o.Conns, nil
+}
+
+// setStamp puts the connection files' version in the ETag header. shortcut: it is a header, not a body
+// field, so the array body (and the current client) keep working; PUT checks If-Match only when sent.
+func (s *Server) setStamp(r *http.Request) {
+	if w := rw(r); w != nil {
+		w.Header().Set("ETag", fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(s.stamp))))
+	}
 }
 
 // putConns replaces the whole list, exactly like the TUI saves it.
@@ -53,35 +73,72 @@ func (s *Server) putConns(r *http.Request) (any, error) {
 	if in == nil { // empty body or null would otherwise wipe every saved connection
 		return nil, bad("a JSON array of connections is required (send [] to clear)")
 	}
-	conns := *in
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	// GET publishes and PUT compares the same value: the stamp of the last successful (re)load
+	if err := s.reloadConns(); err != nil {
+		return nil, &apiErr{Code: http.StatusConflict, Msg: "connections.toml does not parse, so nothing can be saved until it is fixed: " + err.Error()}
+	}
+	if m := r.Header.Get("If-Match"); m != "" { // a tab that loaded the list before another one changed it must reload first
+		cur := fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(s.stamp)))
+		if m != cur {
+			return nil, &apiErr{Code: http.StatusConflict, Msg: "the connection list changed elsewhere; reload it and retry", Extra: map[string]any{"stamp": cur}}
+		}
+	}
+	conns, fromSource, err := s.splitSources(*in)
+	if err != nil {
+		return nil, err
+	}
 	names := map[string]bool{}
+	old := map[string]config.Connection{}
+	for _, c := range s.o.Conns {
+		old[c.Name] = c
+	}
 	for _, c := range conns {
 		if err := c.Validate(); err != nil {
 			return nil, bad("%v", err)
+		}
+		// password_cmd and bootstrap run on the server: only the file may introduce them.
+		if o := old[c.Name]; c.PasswordCmd != o.PasswordCmd || !slices.Equal(c.Bootstrap, o.Bootstrap) {
+			return nil, bad("%q: password_cmd and bootstrap can only be edited in connections.toml", c.Name)
+		}
+		if err := checkTools(c, old[c.Name]); err != nil {
+			return nil, err
 		}
 		if names[c.Name] {
 			return nil, bad("duplicate connection name %q", c.Name)
 		}
 		names[c.Name] = true
 	}
-	s.connMu.Lock()
-	defer s.connMu.Unlock()
 	if s.o.ConnPath != "" {
 		if err := config.SaveConnections(s.o.ConnPath, conns); err != nil {
 			return nil, err
 		}
+		s.stamp = s.connStamp()
 	}
-	s.o.Conns = conns
+	s.o.Conns = append(conns, fromSource...)
+	s.setStamp(r)
 	return nil, nil
 }
 
 func (s *Server) testConn(r *http.Request) (any, error) {
-	var c config.Connection
-	if err := decode(r, &c); err != nil {
+	var req struct {
+		config.Connection
+		AskedPassword string `json:"askedPassword"` // the typed password for a password = "ask" connection
+	}
+	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	c := req.Connection
 	if err := c.Validate(); err != nil {
 		return nil, bad("%v", err)
+	}
+	// The body is a whole connection: it must not be able to run a program on the server.
+	if c.PasswordCmd != "" || len(c.Bootstrap) > 0 {
+		return nil, bad("password_cmd and bootstrap are not accepted in a test; save the connection and open it")
+	}
+	if err := askPassword(&c, req.AskedPassword); err != nil {
+		return nil, err
 	}
 	o, err := s.o.Connect(r.Context(), c)
 	if err != nil {
@@ -94,6 +151,18 @@ func (s *Server) testConn(r *http.Request) (any, error) {
 		return nil, bad("%v", err)
 	}
 	return map[string]any{"ok": true, "serverInfo": o.Sess.ServerInfo()}, nil
+}
+
+// askPassword fills in the typed password of a password = "ask" connection, or asks the client for it.
+func askPassword(c *config.Connection, pw string) error {
+	if c.Password != config.PasswordAsk {
+		return nil
+	}
+	if pw == "" {
+		return &apiErr{Code: http.StatusUnprocessableEntity, Msg: "this connection asks for its password", Extra: map[string]any{"passwordRequired": true}}
+	}
+	c.Password = pw
+	return nil
 }
 
 // parseConnURL turns a connection URL into a Connection. The error text never echoes the URL.
@@ -132,24 +201,40 @@ func (ss *session) info() map[string]any {
 	sess := ss.o.Sess
 	return map[string]any{
 		"id": ss.id, "name": ss.conn.Name, "driver": ss.conn.Driver, "caps": sess.Caps(), "serverInfo": sess.ServerInfo(),
-		"database": sess.CurrentDatabase(), "schema": sess.CurrentSchema(),
-		"level": ss.level, "levelLabel": ss.level.Label(), "rowLimit": ss.rowLimit(),
-		"color": ss.conn.Color, "tag": ss.conn.Tag,
+		"encoding": ss.conn.Encoding, "database": sess.CurrentDatabase(), "schema": sess.CurrentSchema(),
+		"level": ss.lvl(), "levelLabel": ss.lvl().Label(), "rowLimit": ss.rowLimit(),
+		"color": ss.color(), "tag": ss.conn.Tag, "readOnly": ss.conn.ReadOnly, "open": ss.conn.Open, "pinnable": isPinner(sess),
+		"host": ss.conn.Host, "port": ss.conn.EffectivePort(), "user": ss.conn.User, "sslMode": ss.conn.SSLMode, "ssh": ss.conn.SSH != nil && ss.conn.SSH.Host != "",
 	}
 }
 
 func (s *Server) openSession(r *http.Request) (any, error) {
-	var req struct{ Name string }
+	var req struct{ Name, Password string }
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
+	s.connMu.Lock()
+	s.reloadConns()
+	s.connMu.Unlock()
 	c, ok := s.findConn(req.Name)
 	if !ok {
 		return nil, bad("no saved connection named %q", req.Name)
 	}
+	if err := askPassword(&c, req.Password); err != nil {
+		return nil, err
+	}
 	ss, err := s.newSession(r.Context(), c)
 	if err != nil {
 		return nil, bad("%v", err)
+	}
+	if c.Open != nil { // a URL's open target applies to this connect only
+		s.connMu.Lock()
+		for i := range s.o.Conns {
+			if s.o.Conns[i].Name == c.Name {
+				s.o.Conns[i].Open = nil
+			}
+		}
+		s.connMu.Unlock()
 	}
 	return ss.info(), nil
 }
@@ -312,9 +397,7 @@ func (s *Server) rows(ss *session, r *http.Request) (any, error) {
 	if req.Ref.Name == "" {
 		return nil, bad("ref.name is required")
 	}
-	if rl := ss.rowLimit(); req.Limit <= 0 || (rl > 0 && req.Limit > rl) { // never above the configured limit
-		req.Limit = rl
-	}
+	req.Limit = ss.clampLimit(req.Limit) // never above the configured limit
 	ctx, cancel := ss.ctx(r)
 	defer cancel()
 	// columns first: Any-column filters and the PK flags need them
@@ -325,7 +408,7 @@ func (s *Server) rows(ss *session, r *http.Request) (any, error) {
 	}
 	out := toJSON(res, cols)
 	// like the TUI: only plain tables with a primary key are editable (a key-less WHERE can hit many rows)
-	if cerr == nil && res.HasRows && req.Ref.Kind == db.KindTable && hasPK(cols) {
+	if cerr == nil && !ss.conn.ReadOnly && res.HasRows && req.Ref.Kind == db.KindTable && hasPK(cols) {
 		out.Editable = true
 		out.ResultID = ss.put(&cached{ref: req.Ref, cols: cols, res: res})
 	}
@@ -360,79 +443,128 @@ func (s *Server) count(ss *session, r *http.Request) (any, error) {
 }
 
 type execItem struct {
-	Stmt  string `json:"stmt"`
-	Error string `json:"error,omitempty"`
+	Stmt     string `json:"stmt"`
+	Label    string `json:"label,omitempty"` // from a leading "-- name:" (or label: / tab:) comment: the result tab's title
+	Error    string `json:"error,omitempty"`
+	NoticeID string `json:"noticeId,omitempty"` // GET .../notices/{id}: the server notices (PostgreSQL RAISE NOTICE)
 	resultJSON
 }
 
-func (s *Server) exec(ss *session, r *http.Request) (any, error) {
+// execPrep decodes an exec request and does everything before the first statement runs:
+// split, bind parameters, safe-mode gate, row limit. Shared by /exec and /exec/stream.
+func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit int, sess db.Session, err error) {
 	var req struct {
-		Text      string
-		Limit     int // 0 = the connection's row limit, <0 = no limit
-		Current   bool
-		Offset    int // cursor, with Current
-		Confirmed bool
-		Password  string
+		Text        string
+		Limit       int // 0 = the connection's row limit, <0 = no limit
+		Current     bool
+		Offset      int // cursor, with Current
+		Confirmed   bool
+		Password    string
+		Vars        map[string]string // query parameter values; nil = ask when the statements have any
+		ParamFormat string            // overrides [editor] param_format for this run (the Variables dialog's picker)
+		Pin         string            // a query tab's id: its statements run on one dedicated connection (see session.pinned)
 	}
 	if err := decode(r, &req); err != nil {
-		return nil, err
+		return nil, 0, nil, err
 	}
 	dialect := ss.o.Sess.Caps().Dialect
-	stmts := db.Split(dialect, req.Text)
+	stmts = db.Split(dialect, req.Text)
 	if req.Current {
 		st, ok := db.StatementAt(stmts, req.Offset)
 		if !ok {
-			return nil, bad("no statement at the cursor")
+			return nil, 0, nil, bad("no statement at the cursor")
 		}
 		stmts = []db.Stmt{st}
 	}
 	if len(stmts) == 0 {
-		return nil, bad("nothing to run")
+		return nil, 0, nil, bad("nothing to run")
+	}
+	ed := ss.srv.o.Cfg.Editor
+	if req.Vars != nil || ed.QueryParams || req.ParamFormat != "" {
+		pf := db.ParamFormat(ed.ParamFormat)
+		if req.ParamFormat != "" {
+			pf = db.ParamFormat(req.ParamFormat)
+		}
+		names := paramNames(stmts, pf, dialect)
+		var missing bool
+		for _, n := range names {
+			if _, ok := req.Vars[n]; !ok { // a nil map (no "vars") and {} both land here
+				missing = true
+			}
+		}
+		if missing {
+			return nil, 0, nil, &apiErr{Code: http.StatusUnprocessableEntity, Msg: "the statements have query parameters", Extra: map[string]any{"params": names}}
+		}
+		for i := range stmts {
+			stmts[i].Text = db.Bind(stmts[i].Text, pf, req.Vars, dialect)
+		}
 	}
 	gated := make([]db.Statement, len(stmts))
 	shown := make([]string, len(stmts))
 	for i, st := range stmts {
 		gated[i], shown[i] = db.Statement{Text: st.Text}, st.Text
 	}
+	if err := ss.readOnlyViolation(gated); err != nil {
+		return nil, 0, nil, err
+	}
 	g := ss.gate(gated)
 	if err := ss.check(g, req.Confirmed, req.Password); err != nil {
 		if ae, ok := err.(*apiErr); ok {
 			ae.Extra["statements"] = shown
 		}
+		return nil, 0, nil, err
+	}
+	limit = ss.clampLimit(req.Limit)
+	if sess, err = ss.pinned(req.Pin); err != nil {
+		return nil, 0, nil, err
+	}
+	return stmts, limit, sess, nil
+}
+
+// execOne runs one statement; a failure is the item's Error, not a request error.
+func (ss *session) execOne(r *http.Request, sess db.Session, st db.Stmt, limit int) execItem {
+	ctx, cancel := ss.ctx(r)
+	start := time.Now()
+	res, err := sess.Exec(ctx, st.Text, limit)
+	cancel()
+	item := execItem{Stmt: st.Text, Label: st.Label}
+	if err != nil {
+		item.Error = err.Error()
+		ss.srv.con.add(ss.conn.Name, "ERROR: "+err.Error()+"\n"+st.Text)
+		return item
+	}
+	item.resultJSON = toJSON(res, nil) // not cached: exec results are never editable
+	item.NoticeID = ss.putNotice(res.Message)
+	if !db.IsReadOnly(ss.o.Sess.Caps().Dialect, st.Text) {
+		ss.clearColCache() // DDL may have changed table structure
+	}
+	ss.record(st.Text, "editor", time.Since(start), "")
+	return item
+}
+
+func (s *Server) exec(ss *session, r *http.Request) (any, error) {
+	stmts, limit, sess, err := s.execPrep(ss, r)
+	if err != nil {
 		return nil, err
 	}
-	limit := req.Limit
-	switch {
-	case limit == 0:
-		limit = ss.rowLimit()
-	case limit < 0:
-		limit = 0
+	if len(stmts) > summarizeOver {
+		return map[string]any{"results": []execItem{ss.runSummary(r, sess, stmts, limit)}}, nil
 	}
 	var out []execItem
 	for _, st := range stmts {
-		ctx, cancel := ss.ctx(r)
-		start := time.Now()
-		res, err := ss.o.Sess.Exec(ctx, st.Text, limit)
-		cancel()
-		item := execItem{Stmt: st.Text}
-		if err != nil {
-			item.Error = err.Error()
-			out = append(out, item)
-			break // stop at the first error, like the editor
-		}
-		item.resultJSON = toJSON(res, nil) // not cached: exec results are never editable
-		if !db.IsReadOnly(dialect, st.Text) {
-			ss.clearColCache() // DDL may have changed table structure
-		}
+		item := ss.execOne(r, sess, st, limit)
 		out = append(out, item)
-		ss.record(st.Text, "editor", time.Since(start))
+		if item.Error != "" && ss.srv.o.Cfg.Editor.ReturnOnError {
+			break // otherwise later statements still run, each with its own error tab
+		}
 	}
 	return map[string]any{"results": out}, nil
 }
 
-func (ss *session) record(sql, source string, dur time.Duration) {
+func (ss *session) record(sql, source string, dur time.Duration, orig string) {
+	ss.srv.con.add(ss.conn.Name, sql)
 	if h := ss.srv.o.Hist; h != nil {
-		h.Append(ss.conn.Name, store.HistoryEntry{Database: ss.o.Sess.CurrentDatabase(), SQL: sql, Duration: dur, Source: source})
+		h.Append(ss.conn.Name, store.HistoryEntry{Database: ss.o.Sess.CurrentDatabase(), SQL: sql, Duration: dur, Source: source, Original: orig})
 	}
 }
 
@@ -460,12 +592,18 @@ type stmtJSON struct {
 	ReadOnly bool   `json:"readOnly"`
 }
 
-func (ss *session) storePlan(stmts []db.Statement, resultID string) (any, error) {
+func (ss *session) storePlan(stmts []db.Statement, resultID, orig string) (any, error) {
+	if err := ss.readOnlyViolation(stmts); err != nil {
+		return nil, err
+	}
 	id := randID(6)
 	ss.mu.Lock()
 	ss.plans[id] = stmts
 	if resultID != "" {
 		ss.planSrc[id] = resultID
+	}
+	if orig != "" {
+		ss.planOrig[id] = orig
 	}
 	ss.mu.Unlock()
 	list := make([]stmtJSON, len(stmts))
@@ -474,7 +612,7 @@ func (ss *session) storePlan(stmts []db.Statement, resultID string) (any, error)
 	}
 	return map[string]any{
 		"planId": id, "statements": list, "gate": ss.gate(stmts),
-		"transactions": ss.o.Sess.Caps().Transactions, "levelLabel": ss.level.Label(),
+		"transactions": ss.o.Sess.Caps().Transactions, "levelLabel": ss.lvl().Label(),
 	}, nil
 }
 
@@ -495,23 +633,36 @@ func (s *Server) plan(ss *session, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, bad("%v", err)
 	}
-	return ss.storePlan(stmts, req.ResultID)
+	orig := ""
+	if ss.srv.o.Cfg.General.LogOriginalValues {
+		orig = db.Preimage(changes)
+	}
+	return ss.storePlan(stmts, req.ResultID, orig)
 }
 
 func (s *Server) planAdmin(ss *session, r *http.Request) (any, error) {
 	var req struct {
 		Op   db.AdminOp
 		Ref  db.ObjRef
+		Refs []db.ObjRef // marked sidebar items: one plan holds the statements for every one of them
 		Opts map[string]string
 	}
 	if err := decode(r, &req); err != nil {
 		return nil, err
 	}
-	stmts, err := ss.o.Sess.PlanAdmin(req.Op, req.Ref, req.Opts)
-	if err != nil {
-		return nil, bad("%v", err)
+	refs := req.Refs
+	if len(refs) == 0 {
+		refs = []db.ObjRef{req.Ref}
 	}
-	return ss.storePlan(stmts, "")
+	var stmts []db.Statement
+	for _, ref := range refs {
+		one, err := ss.o.Sess.PlanAdmin(req.Op, ref, req.Opts)
+		if err != nil {
+			return nil, bad("%v", err)
+		}
+		stmts = append(stmts, one...)
+	}
+	return ss.storePlan(stmts, "", "")
 }
 
 // apply runs a stored plan after re-checking the gate. Only statements the server planned
@@ -538,16 +689,24 @@ func (s *Server) apply(ss *session, r *http.Request) (any, error) {
 		return nil, &apiErr{Code: http.StatusConflict, Msg: "a change is still being sent; wait for it to finish"}
 	}
 	ss.applying = true
-	src := ss.planSrc[req.PlanID]
+	src, orig := ss.planSrc[req.PlanID], ss.planOrig[req.PlanID]
 	delete(ss.plans, req.PlanID)
 	delete(ss.planSrc, req.PlanID)
+	delete(ss.planOrig, req.PlanID)
 	ss.mu.Unlock()
 	defer func() { ss.mu.Lock(); ss.applying = false; ss.mu.Unlock() }()
-	if err := ss.check(ss.gate(stmts), req.Confirmed, req.Password); err != nil {
+	err := ss.readOnlyViolation(stmts)
+	if err == nil {
+		err = ss.check(ss.gate(stmts), req.Confirmed, req.Password)
+	}
+	if err != nil {
 		ss.mu.Lock()
 		ss.plans[req.PlanID] = stmts
 		if src != "" {
 			ss.planSrc[req.PlanID] = src
+		}
+		if orig != "" {
+			ss.planOrig[req.PlanID] = orig
 		}
 		ss.mu.Unlock()
 		return nil, err
@@ -564,8 +723,12 @@ func (s *Server) apply(ss *session, r *http.Request) (any, error) {
 		}}
 	}
 	dur := time.Since(start)
-	for _, st := range stmts {
-		ss.record(st.Shown(), "gui", dur/time.Duration(len(stmts)))
+	for i, st := range stmts {
+		o := ""
+		if i == 0 { // one pre-image per commit, on its first statement
+			o = orig
+		}
+		ss.record(st.Shown(), "gui", dur/time.Duration(len(stmts)), o)
 	}
 	ss.clearColCache() // structure may have changed
 	if src != "" {     // the snapshot is stale now; a retry must reload instead of re-planning old rows
