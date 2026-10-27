@@ -113,6 +113,7 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   const schemaOps = info.caps.Schemas && info.caps.Dialect === 'postgres'
   onAction.current = (a) => {
     switch (a) {
+      case 'new_database': setCreate('database'); return true // the database picker's menu asks for it
       case 'sidebar_search': filterBox.current?.focus(); filterBox.current?.select(); return true
       case 'new_schema': if (schemaOps) newSchema(); else notify(info.caps.Schemas ? 'A schema is a database here: use New database' : `${info.driver} has no schemas`); return true
       case 'mark': if (last.current) toggleMark(last.current); else notify('Click an item in the list first'); return true
