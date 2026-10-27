@@ -79,8 +79,9 @@ export function ExportDialog({ sid, source, onClose, notify }: { sid: string; so
         <label className={ROW}><input type="checkbox" checked={structure} onChange={(e) => setStructure(e.target.checked)} />Include the table structure (CREATE TABLE)</label>
         <label className={ROW}><input type="checkbox" checked={drop} onChange={(e) => setDrop(e.target.checked)} />Drop the table first</label>
       </>}
-      <div className={ROW}><label className="w-28 text-ink-2">File name</label><input className="flex-1 min-w-0" aria-label="File name" placeholder={`${meta?.export?.filename || '{table}'}.${ext}`} value={name} onChange={(e) => setName(e.target.value)} /></div>
-      <div className="text-ink-2 text-[12px]">{source.columns.length ? `${source.columns.length} visible column${source.columns.length === 1 ? '' : 's'}.` : 'All columns.'} The pattern may use {'{connection} {database} {table} {tag} {date} {time}'}.</div>
+      <div className={ROW}><label className="w-28 text-ink-2">File name</label><input className="flex-1 min-w-0" aria-label="File name" placeholder={`${meta?.export?.filename || '{table}'}.${ext}`} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => enterSubmits(e, () => !busy && go())} /></div>
+      <div className="text-ink-2 text-[12px]">Pattern tokens: <code>{'{connection} {database} {table} {tag} {date} {time}'}</code>. Default: <code>{meta?.export?.filename || '{table}'}</code>.</div>
+      <div className="text-ink-2 text-[12px]">{source.columns.length ? `${source.columns.length} visible column${source.columns.length === 1 ? '' : 's'}.` : 'All columns.'}</div>
       {rows !== null && <div className="mt-2 text-[12.5px]" role="status">{rows} rows written…</div>}
       {err && <div className="text-del mt-2">{err}</div>}
       <div className={ACTIONS}><button onClick={() => { abort.current?.abort(); onClose() }}>Cancel</button><button className="btn-primary" disabled={busy} onClick={go}>{busy ? 'Exporting…' : 'Export'}</button></div>
