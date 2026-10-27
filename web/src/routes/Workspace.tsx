@@ -451,14 +451,32 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const afterCancel = () => { if ((i.caps.Dialect === 'postgres' || i.caps.Dialect === 'mysql') && i.caps.ProcessList) setTool('procs') }
   const cancelQueries = () => { const n = cancelInflight(); if (n) afterCancel(); return notify(n ? `Cancelled ${n} running quer${n === 1 ? 'y' : 'ies'}` : 'No queries are running') }
   const bindings = meta.data.keymap.bindings
+  // the top bar's buttons: [web] toolbar names them in order (action names, plus history and saved_queries); unset = the built-in set
+  const toolbar = (meta.data.web?.toolbar?.length ? meta.data.web.toolbar : ['new_query_tab', 'history', 'saved_queries', 'open_anything', 'help', 'disconnect']).flatMap((name) => {
+    const key = (a: string) => { const b = bindings.find((x) => x.Action === a); return b ? ` (${b.NoPrefix ? '' : display(km!.prefix) + ' '}${display(b.Key)})` : '' }
+    const known: Record<string, { label: string; title: string; on?: boolean; icon?: boolean; run: () => void }> = {
+      new_query_tab: { label: 'New query', title: 'New query' + key('new_query_tab'), run: () => newQuery() },
+      history: { label: 'History', title: 'History', on: drawer === 'history', run: () => setDrawer(drawer === 'history' ? '' : 'history') },
+      saved_queries: { label: 'Saved queries', title: 'Saved queries', on: drawer === 'queries', run: () => setDrawer(drawer === 'queries' ? '' : 'queries') },
+      open_anything: { label: 'Open anything', title: 'Open anything: tables, saved queries, databases and actions' + key('open_anything'), run: () => setPalette(true) },
+      help: { label: '?', title: 'Key bindings' + key('help'), icon: true, run: () => setHelp(true) },
+      disconnect: { label: 'Disconnect', title: 'Close this workspace', run: disconnect },
+      jobs: { label: 'Jobs', title: 'Background jobs' + key('jobs'), on: drawer === 'jobs', run: () => setDrawer(drawer === 'jobs' ? '' : 'jobs') },
+    }
+    const b = bindings.find((x) => x.Action === name)
+    const t = known[name] ?? (b && supported(name) ? { label: b.Desc, title: b.Desc + key(name), run: () => act.current(name) } : undefined)
+    return t ? [{ name, ...t }] : []
+  })
+  const shortcutOf = (a: string) => { const b = bindings.find((x) => x.Action === a); return b ? (b.NoPrefix ? '' : display(km!.prefix) + ' ') + display(b.Key) : a }
   act.current = (action: string) => {
     const mine = tabs.filter((t) => t.pane === p) // tab keys cycle inside the focused pane
     const idx = mine.findIndex((t) => t.id === active)
     const go = (j: number) => mine.length && setActive(p, mine[(j + mine.length) % mine.length].id)
     const n = /^tab_(\d)$/.exec(action)
+    if (action.startsWith('plugin:')) return pluginRun.current(action.slice(7))
     switch (action) {
       case 'help': return setHelp(true)
-      case 'reconnect': return reconnect()
+      case 'reconnect': return void confirm(`Reconnect to ${i.name}? Unsent changes in open tabs are lost.`).then((ok) => { if (ok) reconnect() })
       case 'safe_mode': return setSafeDlg(true)
       case 'toggle_console': return setConsoleOn((c) => !c)
       case 'open_anything': return setPalette(true)
