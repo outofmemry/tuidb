@@ -53,6 +53,18 @@ export function display(k: string): string {
   return parts.map((p) => ({ ctrl: 'C-', alt: 'M-', shift: 'S-' })[p] ?? '').join('') + last
 }
 
+// isPrintable: a single character with no ctrl or alt, which is what a text field types.
+export const isPrintable = (k: string): boolean => [...k].length === 1
+
+// inTextField: the focused element takes typed text.
+export function inTextField(el: Element | null = typeof document !== 'undefined' ? document.activeElement : null): boolean {
+  const h = el as HTMLElement | null
+  if (!h) return false
+  if (h.isContentEditable) return true
+  if (h.tagName === 'TEXTAREA') return true
+  return h.tagName === 'INPUT' && !/^(checkbox|radio|button|submit|reset|file|range|color|image)$/i.test((h as HTMLInputElement).type)
+}
+
 export type Fed = { action?: string; pending?: boolean; passthrough?: boolean; unknown?: boolean }
 
 export class Machine {
