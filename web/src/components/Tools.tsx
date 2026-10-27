@@ -70,6 +70,7 @@ export function ExportDialog({ sid, source, onClose, notify }: { sid: string; so
       {table && <div className={ROW}><label className="w-28 text-ink-2">Rows</label><Select aria-label="Rows" value={page ? 'page' : 'all'} onChange={(v) => setPage(v === 'page')} options={[{ value: 'all', label: 'Whole table (filters applied)' }, { value: 'page', label: 'Current page only' }]} /></div>}
       {format === 'csv' && meta?.csvWarning && <div className="text-edit text-[12px] mb-1" role="alert">{meta.csvWarning}</div>}
       {format === 'csv' && <>
+        <label className={ROW}><input type="checkbox" checked={header} onChange={(e) => setHeader(e.target.checked)} />Header row</label>
         <div className={ROW}><label className="w-28 text-ink-2">NULL as</label><input className="flex-1 min-w-0" aria-label="NULL as" placeholder={meta?.config.csv.NullAs ? `${meta.config.csv.NullAs} (from the settings)` : 'empty (from the settings)'} value={nullAs} onChange={(e) => setNullAs(e.target.value)} /></div>
         <div className={ROW}><label className="w-28 text-ink-2">Line breaks</label><Select aria-label="Line breaks" value={lineBreak} onChange={setLineBreak} options={[{ value: '', label: 'As in the settings' }, { value: '\n', label: 'LF (Unix)' }, { value: '\r\n', label: 'CRLF (Windows)' }]} /></div>
       </>}
