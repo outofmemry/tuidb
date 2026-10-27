@@ -8,6 +8,8 @@ import { api, ApiError, initToken, type Meta } from './utils/api'
 import { applyTheme, notifyCfg } from './utils/theme'
 import { Connections } from './routes/Connections'
 import { Workspace } from './routes/Workspace'
+import { Lock } from './components/Lock'
+import { parseFilter } from './utils/links'
 import { SqlViewer } from './components/SqlViewer'
 import { Prompts } from './components/Dialogs'
 import './styles.css'
@@ -20,7 +22,7 @@ const root = createRootRoute({ component: function Root() {
   const meta = useQuery({ queryKey: ['meta'], queryFn: () => api<Meta>('GET', '/meta'), staleTime: Infinity })
   if (meta.data) { applyTheme(meta.data.theme, meta.data.web); notifyCfg.on = !!meta.data.web?.notifications }
   if (meta.error instanceof ApiError && meta.error.status === 401 && meta.error.body.login) return <Login onDone={() => meta.refetch()} />
-  return <><Outlet /><Prompts /></>
+  return <><Lock ready={!!meta.data || !!meta.error} on={!!meta.data?.security?.passcode} afterMins={meta.data?.security?.lockAfterMins ?? 0}><Outlet /><Prompts /></Lock></>
 } })
 
 // [web] password: the page asks for it before anything else; the server answers with a session cookie.
