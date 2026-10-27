@@ -118,8 +118,45 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const saveReady = useRef(false), saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined), saveNow = useRef<() => void>(() => {})
   const autoSave: string = meta.data?.config.editor.AutoSaveTabs || 'none'
   const schedule = () => { if (!saveReady.current || autoSave === 'none') return; clearTimeout(saveTimer.current); saveTimer.current = setTimeout(() => saveNow.current(), 800) }
+  // M12.5: a reload comes back to the tabs this browser tab had open (per session, editor text included); only a fresh session reads auto_save_tabs
+  const restored = useRef(false)
+  useEffect(() => {
+    if (!info.data || !meta.data || restored.current) return
+    restored.current = true
+    const sv = loadTabs(sid)
+    if (!sv?.tabs.length) return
+    const ts = sv.tabs.map((t) => ({ ...t, id: seq.current++ }) as unknown as Tab)
+    for (const t of ts) if (t.kind === 'query') { texts.current[t.id] = t.text; queries.current = Math.max(queries.current, t.n) }
+    setTabs(ts); setSplit(sv.split && ts.some((t) => t.pane === 1)); setActives([ts[sv.active[0]]?.id ?? 0, ts[sv.active[1]]?.id ?? 0])
+    saveReady.current = true; openedTarget.current = true
+  }, [info.data, meta.data])
+  useEffect(() => { // keep the browser tab's copy current (debounced; editor text is read from texts)
+    if (!restored.current) return
+    const t = setTimeout(() => persistTabs.current(), 300)
+    return () => clearTimeout(t)
+  }, [tabs, actives, split])
+  const persistTabs = useRef<() => void>(() => {})
+  const openRef = useRef<(o: ObjRef, record?: boolean, view?: 'structure', newTab?: boolean) => void>(() => {})
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d?.obj) { e.preventDefault(); openRef.current(d.obj, true, d.view, !!d.newTab) } }
+    window.addEventListener('webtuidb:open', h)
+    return () => window.removeEventListener('webtuidb:open', h)
+  }, [])
+  const pluginRun = useRef<(name: string) => void>(() => {})
+  useEffect(() => { // webtuidb:plugin {name}: another component asks for a plugin to run
+    const h = (e: Event) => { const n = (e as CustomEvent).detail?.name; if (n) pluginRun.current(n) }
+    window.addEventListener('webtuidb:plugin', h)
+    return () => window.removeEventListener('webtuidb:plugin', h)
+  }, [])
+  const deepRun = useRef<() => void>(() => {})
+  const deepDone = useRef(false)
+  useEffect(() => { // the route named a table or a saved query: open it once the workspace is up
+    if (!target || deepDone.current || !info.data || !meta.data) return
+    deepDone.current = true; deepRun.current()
+  }, [info.data, meta.data]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!info.data || !meta.data || saveReady.current) return
+    if (restored.current && loadTabs(sid)?.tabs.length) return
     if (autoSave === 'none') { saveReady.current = true; return }
     api<{ kind: string; name?: string; text?: string }[]>('GET', '/state/tabs' + qs({ conn: info.data.name })).then((list) => {
       for (const t of autoSave === 'first' ? list.filter((x) => x.kind === 'sql').slice(0, 1) : list) {
