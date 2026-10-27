@@ -189,10 +189,25 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
           </label>))}
         {conns.length > 1 && <label className="flex items-center gap-1.5 text-[12px]">Run on
           <Select className="bg-raised border-transparent" aria-label="Run on connection" value={conns.find((c) => others[c] === runSid) ?? ''} onChange={(c) => setRunSid(others[c])} options={conns} /></label>}
-        <button onClick={run} disabled={!board}>Refresh</button>
+        <button onClick={() => { run(); loadOpts() }} disabled={!board}>Refresh</button>
+        {ranAt && <span className="text-ink-2 text-[12px]" role="status">Updated {ranAt.toLocaleTimeString()}</span>}
+        {failed.length > 0 && <span className="relative">
+          <button className="btn-danger" aria-expanded={errsOpen} aria-haspopup="true" onClick={() => setErrsOpen(!errsOpen)}>{failed.length} error{failed.length === 1 ? '' : 's'}</button>
+          {errsOpen && <div className="popover absolute left-0 top-full mt-1 z-30 w-[min(420px,90vw)] max-h-[40vh] overflow-auto p-2 text-[12px] motion-safe:animate-pop" role="dialog" aria-label="Panel errors" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setErrsOpen(false) } }}>
+            {failed.map((p) => <div key={p.title} className="mb-1.5"><b className="font-medium">{p.title}</b><div className="text-del whitespace-pre-wrap">{p.error}</div></div>)}
+            <button className="btn-ghost" autoFocus onClick={() => setErrsOpen(false)}>Close</button>
+          </div>}
+        </span>}
         {actions.map((a) => a.Kind === 'button'
           ? <button key={a.Title} className="btn-primary" onClick={() => runPanel(a.Target ?? '')} title={`Runs the panel ${a.Target}`}>{a.Title}</button>
-          : <button key={a.Title} onClick={() => setImportInto(target(a.Table ?? ''))} title={`Import into ${a.Table}`}>{a.Title}</button>)}
+          : a.Kind === 'import' ? <button key={a.Title} onClick={() => setImportInto(target(a.Table ?? ''))} title={`Import into ${a.Table}`}>{a.Title}</button>
+          : a.Kind === 'exporter' ? <span key={a.Title} className="flex items-center gap-1">
+              <Select className="bg-raised border-transparent" aria-label={`${a.Title} format`} value={fmts[a.Title] || a.format || 'csv'} onChange={(v) => setFmts({ ...fmts, [a.Title]: v })} options={EXPORT_FORMATS} />
+              <button onClick={() => exportPanel(a)} title={`Exports the result of ${a.Title}`}>{a.Title}</button></span>
+          : a.var ? <label key={a.Title} className="flex items-center gap-1.5 text-[12px]">{a.Title}
+              {a.Kind === 'dropdown'
+                ? <Select className="bg-raised border-transparent" aria-label={a.Title} value={vals[a.var] ?? ''} onChange={(x) => { setVals({ ...vals, [a.var!]: x }); setTimeout(() => runRef.current(), 0) }} options={a.options?.length ? a.options : opts[a.Title] ?? []} />
+                : <input className="w-28" aria-label={a.Title} value={vals[a.var] ?? ''} onChange={(e) => setVals({ ...vals, [a.var!]: e.target.value })} onKeyDown={(e) => e.key === 'Enter' && run()} />}</label> : null)}
         <span className="flex-1 min-w-0" />
         <button onClick={() => setForm('new')}>New board…</button>
         <button onClick={() => setForm('panel')} disabled={!board}>Add panel…</button>
