@@ -40,7 +40,7 @@ export function SqlViewer() {
           </div>
         ))}
       </div>
-      {f ? <div className="flex-1 min-h-0 overflow-auto" data-ctx="editor"><CodeMirror key={current + f.name} value={f.text} height="100%" theme={dark() ? 'dark' : 'light'} editable={false} extensions={[sql({ dialect: StandardSQL }), EditorState.readOnly.of(true)]} basicSetup={{ lineNumbers: true, foldGutter: true }} /></div>
+      {f ? <div className="flex-1 min-h-0 overflow-auto" data-ctx="editor"><CodeMirror key={current + f.name} value={f.text} height="100%" theme={cmTheme} editable={false} extensions={[sql({ dialect: StandardSQL }), EditorState.readOnly.of(true)]} basicSetup={{ lineNumbers: true, foldGutter: true }} /></div>
         : <div className="px-8 py-14 max-w-[46ch] text-ink-2 text-[15px] leading-normal">Open a .sql file to read it here.</div>}
       {recent && <RecentDialog onClose={() => setRecent(false)} onPick={(e) => openRecentFile(e).then(add)} />}
     </div>
