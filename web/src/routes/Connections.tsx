@@ -314,8 +314,11 @@ function ConnForm({ meta, init, error, onSave, onClose }: { meta: Meta; init: Co
             <label>SSH user</label><input value={c.SSH.User} onChange={(e) => set('SSH', { ...c.SSH!, User: e.target.value })} />
             <label>SSH port</label><input type="number" value={c.SSH.Port || ''} placeholder="22" onChange={(e) => set('SSH', { ...c.SSH!, Port: Number(e.target.value) })} />
             <label>SSH key file</label><input value={c.SSH.Key} placeholder="empty = password or agent" onChange={(e) => set('SSH', { ...c.SSH!, Key: e.target.value })} />
+            <label>SSH password</label><input type="password" autoComplete="new-password" value={c.SSH.Password} onChange={(e) => set('SSH', { ...c.SSH!, Password: e.target.value })} />
           </>}
         </>}
+        <label>Options</label><input aria-label="Options" placeholder="key=value ;; key=value (driver extras)" value={optText} onChange={(e) => { setOptText(e.target.value); set('Options', optsOf(e.target.value)) }} />
+        <label>Bootstrap SQL</label><input aria-label="Bootstrap SQL" placeholder="statements run on every new connection, separated by ;;" value={bootText} onChange={(e) => { setBootText(e.target.value); set('Bootstrap', parts(e.target.value)) }} />
       </div>
       {error && <p className="my-[1em] text-del" role="alert">{error}</p>}
       <div className="flex justify-end gap-2 mt-[18px]">
