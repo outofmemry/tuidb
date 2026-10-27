@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Machine, canon, contextOf, type Keymap } from './keys'
+import { Machine, canon, contextOf, keysLocked, type Keymap } from './keys'
 
 // useKeymap runs the prefix key state machine for a page that has no workspace (the connection list, the SQL viewer): the same bindings as everywhere else.
 export function useKeymap(km: Keymap | undefined, supported: string[], run: (action: string) => void) {
@@ -9,6 +9,7 @@ export function useKeymap(km: Keymap | undefined, supported: string[], run: (act
     if (!km) return
     const m = new Machine(km), ok = new Set(names.split(','))
     const onKey = (e: KeyboardEvent) => {
+      if (keysLocked()) return
       const k = canon(e); if (!k) return
       const was = m.pending, r = m.feed(contextOf(), k)
       if (r.passthrough || (r.action && !was && !ok.has(r.action))) return
