@@ -1,21 +1,32 @@
 import { Select } from './Select'
 import { useEffect, useState } from 'react'
-import type { Filter, FilterSet } from '../utils/api'
+import { api, type Filter, type FilterSet, type ObjRef } from '../utils/api'
+import { copyText } from '../utils/copy'
 
 const ANY = ''
 const RAW = '\x00raw'
 
 // FilterBar edits a draft and pushes it up on Apply, so typing does not refetch on every key.
-export function FilterBar({ value, columns, operators, onApply }: { value: FilterSet; columns: string[]; operators: string[]; onApply: (f: FilterSet) => void }) {
+export function FilterBar({ sid, obj, value, columns, operators, onApply, active }: { active?: boolean; sid: string; obj: ObjRef; value: FilterSet; columns: string[]; operators: string[]; onApply: (f: FilterSet) => void }) {
   const [draft, setDraft] = useState<FilterSet>(value.Filters.length ? value : { Filters: [blank(columns, operators)], Or: false })
   const set = (i: number, p: Partial<Filter>) => setDraft({ ...draft, Filters: draft.Filters.map((f, j) => (j === i ? { ...f, ...p } : f)) })
   const noValue = (op: string) => op === 'IS NULL' || op === 'IS NOT NULL'
+  const [sql, setSql] = useState<{ text: string; err?: boolean } | null>(null) // filter_sql: the WHERE the filters make
+  const showSql = async () => {
+    try { setSql({ text: (await api<{ where: string }>('POST', `/sessions/${sid}/filters/sql`, { Ref: obj, Filters: cleaned() })).where }) } catch (e) { setSql({ text: e instanceof Error ? e.message : String(e), err: true }) }
+  }
   useEffect(() => {
-    const h = (e: Event) => { if ((e as CustomEvent).detail.action === 'apply_filters') { e.preventDefault(); apply() } }
+    if (!active) return // hidden tabs stay mounted; only the visible one answers
+    const h = (e: Event) => {
+      if (e.defaultPrevented) return
+      const a = (e as CustomEvent).detail.action
+      if (a === 'apply_filters') { e.preventDefault(); apply() } else if (a === 'filter_sql') { e.preventDefault(); showSql() }
+    }
     window.addEventListener('webtuidb:action', h)
     return () => window.removeEventListener('webtuidb:action', h)
   })
-  const apply = () => onApply({ ...draft, Filters: draft.Filters.filter((f) => f.Column === RAW ? f.Value.trim() : f.Value || noValue(f.Op)) })
+  const cleaned = (): FilterSet => ({ ...draft, Filters: draft.Filters.filter((f) => f.Column === RAW ? f.Value.trim() : f.Value || noValue(f.Op)) })
+  const apply = () => onApply(cleaned())
   return (
     <div className="flex flex-col gap-1.5 px-2.5 py-2 border-b border-rule bg-panel" data-ctx="filterbar" onKeyDown={(e) => e.key === 'Enter' && !(e.target as HTMLElement).closest('[role=menu]') && apply()}>
       {draft.Filters.map((f, i) => (
@@ -35,8 +46,12 @@ export function FilterBar({ value, columns, operators, onApply }: { value: Filte
         <button onClick={() => setDraft({ ...draft, Filters: [...draft.Filters, blank(columns, operators)] })}>Add filter</button>
         <label className="flex items-center gap-1.5 text-ink-2"><input type="checkbox" checked={draft.Or} onChange={(e) => setDraft({ ...draft, Or: e.target.checked })} /> Match any filter</label>
         <button className="btn-primary" onClick={apply}>Apply filters</button>
+        <button onClick={showSql} title="Show the WHERE clause these filters make">SQL</button>
         <button onClick={() => { setDraft({ Filters: [blank(columns, operators)], Or: false }); onApply({ Filters: [], Or: false }) }}>Clear filters</button>
       </div>
+      {sql && <div className="flex items-start gap-2 border border-rule-2 bg-canvas p-2" role="status" aria-label="Generated WHERE clause">
+        <pre className={`flex-1 min-w-0 m-0 whitespace-pre-wrap wrap-anywhere text-[12px] ${sql.err ? 'text-del' : ''}`}>{sql.err ? sql.text : sql.text ? 'WHERE ' + sql.text : 'No active filters: no WHERE clause.'}</pre>
+        {!sql.err && sql.text && <button onClick={() => copyText(sql.text)}>Copy</button>}<button className="btn-ghost" onClick={() => setSql(null)} aria-label="Close">✕</button></div>}
     </div>
   )
 }
