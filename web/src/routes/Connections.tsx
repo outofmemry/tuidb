@@ -3,13 +3,27 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { ApiError, api, download, etags, saveBlob, type Connection, type Meta } from '../utils/api'
 import { Dialog, ask, askSecret, confirm, openSession } from '../components/Dialogs'
-import { RecentDialog, SettingsDialog } from '../components/Extras'
+import { RecentDialog, TabMenu } from '../components/Extras'
+import { SettingsDialog } from '../components/Settings'
 import { addViewerFile } from '../components/SqlViewer'
 import { openRecentFile, openSqlFile } from '../utils/files'
 import { useKeymap } from '../utils/useKeymap'
 import { Select } from '../components/Select'
 import { LABELS, Logo } from '../components/logos'
+import { lastWorkspaces, markReopened, openSessions, remember, reopenDue } from '../utils/workspaces'
+import { ago, recentRank } from '../utils/ago'
+import { whyNot } from '../utils/menus'
 
+// shortcut: the same four presets as config.PasswordCmdPresets, used until GET /api/meta carries passwordCmdPresets
+const PRESETS = [
+  { name: 'macOS Keychain', command: 'security find-generic-password -s webtuidb -a <name> -w', note: 'add it with: security add-generic-password -s webtuidb -a <name> -w' },
+  { name: 'Linux secret-tool', command: 'secret-tool lookup service webtuidb account <name>', note: 'add it with: secret-tool store --label=webtuidb service webtuidb account <name>' },
+  { name: 'pass', command: 'pass show webtuidb/<name>', note: 'add it with: pass insert webtuidb/<name>' },
+  { name: '1Password', command: 'op read "op://Private/<name>/password"', note: 'needs the op CLI signed in' },
+]
+
+const stripLast = ({ lastConnected: _l, ...c }: Connection): Connection => c // the list's lastConnected is output only
+const SORTS = [{ value: 'name', label: 'Name' }, { value: 'tag', label: 'Tag' }, { value: 'driver', label: 'Driver' }, { value: 'recent', label: 'Recent' }]
 const blank = (driver = 'postgres'): Connection => ({ Name: '', Driver: driver, Host: '127.0.0.1', Database: '', SafeMode: '' })
 
 export function Connections() {
