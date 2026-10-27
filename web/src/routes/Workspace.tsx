@@ -524,7 +524,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
       case 'fake_rows': { const t = tabs.find((x) => x.id === active); return t?.kind === 'table' ? setFake(t.obj) : notify('Open a table first: fake data fills the table of the current tab') }
       case 'mcp_log': return setTool('mcp')
       case 'clear_console': return void api('DELETE', '/console').then(() => { qc.invalidateQueries({ queryKey: ['console'] }); notify('Console cleared') }, (e) => notify(String(e.message ?? e)))
-      case 'users': return setTool('users')
+      case 'users': return i.caps.Users ? setTool('users') : notify(`user management is not supported by ${i.driver}`)
       case 'backup': return setTool('backup')
       case 'restore': return setTool('restore')
       case 'plugins': return onPlugin()
