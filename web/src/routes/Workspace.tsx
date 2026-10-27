@@ -698,7 +698,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
       {tool === 'procs' && <ProcessDialog sid={sid} info={i} notify={notify} onClose={() => setTool('')} />}
       {help && <Help km={km!} onClose={() => setHelp(false)} />}
       {toast && (
-        <div className="fixed bottom-[18px] left-1/2 -translate-x-1/2 flex items-center gap-2.5 bg-ink text-canvas py-1.5 pr-2 pl-4 rounded-[2px] z-[60] font-mono font-medium max-w-[min(720px,90vw)] shadow-pop" role="status">
+        <div className="fixed bottom-[18px] left-1/2 -translate-x-1/2 flex items-center gap-2.5 bg-[var(--notification-bg,var(--ink))] text-canvas py-1.5 pr-2 pl-4 rounded-[2px] z-[60] font-mono font-medium max-w-[min(720px,90vw)] shadow-pop motion-safe:animate-rise" role="status">
           <span className="flex-1 min-w-0 truncate">{clip(toast.split('\n')[0], 140)}</span>
           {(toast.length > 140 || toast.includes('\n')) && <button className={TOAST_GHOST} onClick={() => setDetails(toast)}>Details</button>}
           <button className={TOAST_GHOST} onClick={() => setToast('')} aria-label="Dismiss">✕</button>
