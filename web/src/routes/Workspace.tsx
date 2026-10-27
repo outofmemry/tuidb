@@ -314,6 +314,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const reconnect = async () => { // a fresh session for the same connection; the old one is closed once the new one is up
     try {
       const r = await openSession(i.name)
+      persistTabs.current(); const sv = loadTabs(sid); if (sv) saveTabs(r.id, sv) // the new session starts with the tabs this one had
       await api('DELETE', `/sessions/${sid}`).catch(() => {})
       forget(sid); qc.clear(); nav({ to: '/s/$sessionId', params: { sessionId: r.id } })
     } catch (e) { notify(`Could not reconnect: ${e instanceof Error ? e.message : e}`) }
