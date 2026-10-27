@@ -67,8 +67,10 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   const pin = useMutation({ mutationFn: (o: ObjRef) => api('POST', '/state/pin', { Conn: info.name, Item: keyOf(o) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['shortcuts', sid] }) })
 
   const all = objects.data ?? []
-  const f = filter.toLowerCase()
-  const hide = (k: string) => (k === 'function' || k === 'procedure') ? sb.ShowFunctions === false : k === 'sequence' ? sb.ShowSequences === false : k === 'type' ? sb.ShowTypes === false : false
+  const fz = isFuzzy(sb.Matching)
+  // [sidebar] matching: fuzzy or contains, with ^ and $ anchors, as matchName does in the TUI; a search lists best matches first
+  const found = <T extends { Name: string }>(l: T[]): T[] => (filter ? l.map((o) => ({ o, m: matchName(filter, o.Name, fz) })).filter((x) => x.m[1]).sort((a, b) => b.m[0] - a.m[0]).map((x) => x.o) : l)
+  const hide = (k: string) => (k === 'function' || k === 'procedure') ? sb.ShowFunctions === false || !info.caps.Functions : k === 'sequence' ? sb.ShowSequences === false || !info.caps.Sequences : k === 'type' ? sb.ShowTypes === false : false
   const byKey = (k: string) => all.find((o) => keyOf(o) === k || recentKey(o) === k)
   // pins and recents can name another schema's objects, which are not in `all`; keep them (assumed tables) so they can still be opened or unpinned
   const lookup = (k: string) => byKey(k) ?? (objects.data && k.includes('.') ? { Schema: k.slice(0, k.indexOf('.')), Name: k.slice(k.indexOf('.') + 1), Kind: 'table', Detail: '' } : undefined)
