@@ -169,8 +169,8 @@ export function ImportDialog({ sid, table: ref, file: dropped, onClose, onDone, 
     const ac = abort.current = new AbortController()
     try {
       const j = await watchJob(sid, id, setJob, ac.signal)
-      desktopNotify(j.error ? `Import failed: ${j.error}` : `Imported ${j.rows} rows`)
-      if (!j.error) { notify(`Imported ${j.rows} rows`); onDone() }
+      desktopNotify(j.error ? `Import failed: ${j.error}` : `Processed ${j.rows} rows`)
+      if (!j.error) { notify(`Processed ${j.rows} rows`); onDone() }
     } catch (e) { if (!ac.signal.aborted) setErr(msg(e)) }
   }
   const running = (!!job && !job.done) || starting
