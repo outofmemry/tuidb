@@ -16,7 +16,15 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 // ---- ER diagram ---------------------------------------------------------------------------------
 
 export function DiagramTab({ sid, info, focus, onStructure, onPlan }: { sid: string; info: SessionInfo; focus?: ObjRef; onStructure: (r: ObjRef) => void; onPlan: (p: Plan) => void }) {
-  const q = useQuery({ queryKey: ['diagram', sid, info.database, info.schema], queryFn: () => api<{ schema?: string; tables: DiagramTable[] }>('GET', `/sessions/${sid}/diagram`), gcTime: 0 })
+  const [schema, setSchema] = useState('') // '' = the connection's own schema; the switcher lists the others
+  const q = useQuery({ queryKey: ['diagram', sid, info.database, info.schema, schema], queryFn: () => api<{ schema?: string; schemas?: string[]; tables: DiagramTable[] }>('GET', `/sessions/${sid}/diagram${schema ? '?schema=' + encodeURIComponent(schema) : ''}`), gcTime: 0 })
+  const [note, setNote] = useState('')
+  const shownSchema = q.data?.schema ?? info.schema
+  const colourKey = `webtuidb-er-colors:${info.name}/${info.database}/${shownSchema}`
+  // shortcut: table colours live in this browser's localStorage beside the positions, not in state.json (the terminal keeps its own)
+  const [colors, setColors] = useState<Record<string, string>>({})
+  useEffect(() => { try { setColors(JSON.parse(localStorage.getItem(colourKey) ?? '{}')) } catch { setColors({}) } }, [colourKey])
+  const setColour = (t: string, c: string) => setColors((m) => { const n = { ...m }; if (c) n[t] = c; else delete n[t]; try { localStorage.setItem(colourKey, JSON.stringify(n)) } catch { /* private mode */ } return n })
   const [sort, setSort] = useState('name')
   const [filter, setFilter] = useState(focus?.Name ?? '') // opened from a table's menu: the filter starts on that table and the canvas centres on it
   useEffect(() => { if (focus) setFilter(focus.Name) }, [focus])
