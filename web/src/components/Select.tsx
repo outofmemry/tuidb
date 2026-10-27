@@ -7,19 +7,21 @@ export type Opt = { value: string; label: string }
 export type SelectHandle = { open: () => void }
 
 const MENU = 'popover fixed z-[41] w-max min-w-[160px] max-w-[min(480px,calc(100vw-24px))] max-h-[60vh] overflow-auto m-0 p-1.5'
-const ITEM = 'flex items-center gap-2.5 w-full text-left border-transparent hover:border-ink-3'
+const ITEM = 'menu-item'
 
 type Props = {
   value: string
   options: (string | Opt)[]
   onChange: (v: string) => void
   className?: string
+  id?: string
   'aria-label'?: string
   title?: string
+  disabled?: boolean
   ref?: Ref<SelectHandle>
 }
 
-export function Select({ value, options, onChange, className = '', title, ref, ...a }: Props) {
+export function Select({ value, options, onChange, className = '', id, title, disabled, ref, ...a }: Props) {
   const [at, setAt] = useState<CSSProperties | null>(null) // null = closed
   const [btn, setBtn] = useState<HTMLButtonElement | null>(null)
   const open = () => {
