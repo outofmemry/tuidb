@@ -38,20 +38,21 @@ export function DiagramTab({ sid, info, focus, onStructure, onPlan }: { sid: str
       <div className="toolbar bg-canvas">
         <input className="w-48 max-w-full" placeholder="Filter tables" aria-label="Filter tables" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <Select className="bg-raised border-transparent" aria-label="Sort" value={sort} onChange={setSort} options={[{ value: 'name', label: 'Sort by name' }, { value: 'columns', label: 'Sort by columns' }]} />
+        {!!q.data?.schemas?.length && q.data.schemas.length > 1 && <Select className="bg-raised border-transparent" aria-label="Schema" value={shownSchema} onChange={setSchema} options={q.data.schemas} />}
         <button onClick={() => q.refetch()}>Reload</button>
         <button onClick={() => { setList(!list); try { localStorage.setItem('webtuidb-er-view', list ? 'canvas' : 'list') } catch { /* private mode */ } }}>{list ? 'Canvas' : 'List'}</button>
-        <span className="text-ink-2 text-[12px]">{tables.length} tables. One colour per group of tables joined by foreign keys.{!list && info.caps.ForeignKeys && ' Drag from the dot at the end of a column onto another table to add a foreign key.'}</span>
+        <span className="text-ink-2 text-[12px]">{tables.length} tables.{note && <b className="font-medium text-ink"> {note}.</b>} One colour per group of tables joined by foreign keys; right-click a table for its own colour.{!list && info.caps.ForeignKeys && ' Drag from the dot at the end of a column onto another table to add a foreign key.'}</span>
       </div>
       {q.isLoading && <div className="p-2.5 text-[12.5px] text-ink-2">Loading…</div>}
       {q.error && <div className="p-2.5 text-[12.5px] text-del">{q.error.message}</div>}
-      {!list && q.data && <DiagramCanvas key={q.dataUpdatedAt} tables={q.data.tables} storageKey={`${info.name}/${info.database}/${q.data.schema ?? info.schema}`} query={filter} centerOn={focus ? focus.Schema + '.' + focus.Name : undefined} canLink={info.caps.ForeignKeys} onStructure={onStructure} onLink={(from, col, to) => setLink({ from, col, to })} />}
-      {link && <AddFkDialog sid={sid} {...link} onPlan={onPlan} onClose={() => setLink(null)} />}
+      {!list && q.data && <DiagramCanvas key={q.dataUpdatedAt} tables={q.data.tables} storageKey={`${info.name}/${info.database}/${shownSchema}`} colors={colors} onColor={setColour} onNote={setNote} onDelete={(t) => dropTable(sid, t.ref, onPlan, setNote)} query={filter} centerOn={focus ? focus.Schema + '.' + focus.Name : undefined} canLink={info.caps.ForeignKeys} onStructure={onStructure} onLink={(from, col, to) => setLink({ from, col, to })} />}
+      {link && <FkDialog sid={sid} {...link} onPlan={onPlan} onClose={() => setLink(null)} />}
       {list && <div className="flex-1 min-h-0 overflow-auto p-3 grid gap-3 content-start grid-cols-[repeat(auto-fill,minmax(230px,1fr))] font-mono text-[12px]">
         {tables.map((t) => {
-          const hue = (t.cluster * 67) % 360, fkCols = new Set(t.fks.flatMap((k) => k.columns))
+          const hue = (t.cluster * 67) % 360, tint = validColour(colors[t.ref.Schema + '.' + t.ref.Name]), fkCols = new Set(t.fks.flatMap((k) => k.columns))
           return (
-            <section key={t.ref.Schema + '.' + t.ref.Name} className="border bg-panel rounded-[2px] min-w-0" style={{ borderColor: `hsl(${hue} 40% 50% / .55)` }}>
-              <header className="flex items-center gap-2 px-2.5 py-1.5 font-medium" style={{ background: `hsl(${hue} 45% 50% / .22)` }}>
+            <section key={t.ref.Schema + '.' + t.ref.Name} className="border bg-panel rounded-[2px] min-w-0" style={{ borderColor: tint ?? `hsl(${hue} 40% 50% / .55)` }}>
+              <header className="flex items-center gap-2 px-2.5 py-1.5 font-medium" style={{ background: tint ? `color-mix(in srgb, ${tint} 25%, transparent)` : `hsl(${hue} 45% 50% / .22)` }}>
                 <span className="flex-1 min-w-0 truncate" title={t.ref.Name}>{t.ref.Name}</span>
                 <button className="btn-ghost" onClick={() => onStructure(t.ref)} title="Open the structure of this table">Structure</button>
               </header>
