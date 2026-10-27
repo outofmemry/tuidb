@@ -43,8 +43,10 @@ export function ExportDialog({ sid, source, onClose, notify }: { sid: string; so
     try {
       const body = {
         mode: source.mode === 'query' ? 'query' : page ? 'page' : 'table', format, gzip: gzip && format !== 'xlsx',
-        structure: structure && format === 'sql' && table, drop: drop && format === 'sql' && table, columns: source.columns, fileName: name.trim() || undefined,
-        nullAs: format === 'csv' && nullAs !== '' ? nullAs : undefined, lineBreak: format === 'csv' && lineBreak !== '' ? lineBreak : undefined,
+        structure: structure && format === 'sql' && table, drop: drop && format === 'sql' && table, columns: source.columns, filename: name.trim() || undefined, fileName: name.trim() || undefined,
+        header: format === 'csv' ? header : undefined,
+        // shortcut: the camelCase twins are the older spelling, drop them once the server only reads the snake_case names
+        null_as: format === 'csv' && nullAs !== '' ? nullAs : undefined, nullAs: format === 'csv' && nullAs !== '' ? nullAs : undefined, lineBreak: format === 'csv' && lineBreak !== '' ? lineBreak : undefined,
         ...(source.mode === 'table' ? { ref: source.ref, filters: source.filters, sort: source.sort, limit: source.limit, offset: source.offset } : { text: source.text, limit: source.limit }),
       }
       if (body.mode === 'table') {
