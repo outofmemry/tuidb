@@ -181,12 +181,20 @@ export function ImportDialog({ sid, table: ref, file: dropped, onClose, onDone, 
       {file && <>
         <div className={ROW}>
           <Select aria-label="Source" value={source} onChange={setSource} options={[{ value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }, { value: 'sql', label: 'SQL dump' }]} />
+          {source !== 'sql' && <label className="flex items-center gap-1.5">Encoding <Select aria-label="Encoding" value={encoding} onChange={setEncoding} options={ENCODINGS} /></label>}
           {source === 'csv' && <>
             <label className="flex items-center gap-1.5"><input type="checkbox" checked={header} onChange={(e) => setHeader(e.target.checked)} />Header row</label>
             <label className="flex items-center gap-1.5">Delimiter <input className="w-12" aria-label="Delimiter" placeholder="," value={delimiter} maxLength={1} onChange={(e) => setDelimiter(e.target.value)} /></label>
           </>}
           {source !== 'sql' && <label className="flex items-center gap-1.5"><input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />Create the table</label>}
         </div>
+        {source !== 'sql' && <div className={ROW}>
+          <label className="flex items-center gap-1.5">NULL as <input className="w-56" aria-label="NULL as" placeholder="(empty: the [csv] null_as setting)" value={nullAs} onChange={(e) => setNullAs(e.target.value)} /></label>
+          <label className="flex items-center gap-1.5"><input type="checkbox" checked={emptyNull} onChange={(e) => setEmptyNull(e.target.checked)} />Empty is NULL</label>
+          <label className="flex items-center gap-1.5" title="Keep the apostrophe before = + - @ instead of reading it as spreadsheet formula quoting"><input type="checkbox" checked={keepQuote} onChange={(e) => setKeepQuote(e.target.checked)} />Keep formula apostrophe</label>
+        </div>}
+        {source !== 'sql' && !create && <div className={ROW}><label className="text-ink-2">Match columns by</label><Select aria-label="Match columns by" value={match} onChange={setMatch} options={[{ value: 'both', label: 'Name, then order' }, { value: 'name', label: 'Name (ignore case)' }, { value: 'order', label: 'Order' }]} /></div>}
+        {source !== 'sql' && create && <div className="text-ink-2 text-[12px]">The new table gets one TEXT column per file column; choose skip to leave a column out.</div>}
         {source === 'sql' && <div className="text-ink-2 text-[12px]">The file is run as it is. {fileName}</div>}
         {prev && <>
           <div className="text-ink-2 text-[12px] mb-1">Preview of {prev.rows.length} row{prev.rows.length === 1 ? '' : 's'} from {fileName}</div>
