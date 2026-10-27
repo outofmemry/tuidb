@@ -333,9 +333,98 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     setTabs(tabs.map((x) => (x.id === t.id ? { ...x, pane: 1 } : x)))
     setActives([tabs.filter((x) => x.pane === 0 && x.id !== t.id).at(-1)?.id ?? 0, t.id])
   }
+  // close_pane: the focused pane goes away and its tabs join the other one
+  const closePane = () => {
+    if (!split) return notify('No split pane to close')
+    const from = focus, to = 1 - focus
+    const ordered = [...tabs.filter((t) => t.pane === to), ...tabs.filter((t) => t.pane === from)].map((t) => ({ ...t, pane: 0 }))
+    setTabs(ordered); setActives([actives[to] || actives[from] || 0, 0]); setSplit(false); setFocus(0)
+  }
+  // move a tab one place left / right inside its pane (menu, move_tab_left / move_tab_right)
+  const moveTab = (id: number, d: number) => {
+    const t = tabs.find((x) => x.id === id); if (!t) return
+    const mates = tabs.filter((x) => x.pane === t.pane), at = mates.findIndex((x) => x.id === id), other = mates[at + d]
+    if (!other) return
+    setTabs(tabs.map((x) => (x.id === id ? other : x.id === other.id ? t : x)))
+  }
+  // drag a tab onto another to put it before (or, from the right half, after) it; across the split it changes pane
+  const reorder = (dragId: number, onto: number, after: boolean) => {
+    const d = tabs.find((x) => x.id === dragId), o = tabs.find((x) => x.id === onto)
+    if (!d || !o || d.id === o.id) return
+    const rest = tabs.filter((x) => x.id !== dragId), at = rest.findIndex((x) => x.id === onto) + (after ? 1 : 0)
+    const moved = { ...d, pane: o.pane }
+    setTabs([...rest.slice(0, at), moved, ...rest.slice(at)])
+    if (d.pane !== o.pane) {
+      setActive(o.pane, d.id)
+      if (actives[d.pane] === d.id) setActive(d.pane, rest.filter((x) => x.pane === d.pane).at(-1)?.id ?? 0) // the source pane must not keep pointing at the moved tab
+    }
+  }
+  // plugin shortcuts (plugin:<name>): run through POST /plugins/run and apply the effects, as the Plugins dialog does
+  // the grid cursor's cell value (the TUI's Cell); the active data tab answers the event
+  const gridCell = () => { const o: { v?: string } = {}; window.dispatchEvent(new CustomEvent('webtuidb:cell', { detail: o })); return o.v ?? '' }
+  pluginRun.current = async (name) => {
+    const c = contextOf(), cur = tabs.find((t) => t.id === active), context = c === 'editor' ? 'editor' : c === 'sidebar' ? 'sidebar' : c === 'global' ? '' : 'grid'
+    const selection = window.getSelection()?.toString() ?? '', cell = context === 'grid' ? gridCell() : ''
+    try {
+      const r = await api<{ output?: string; text?: string; effects?: { Kind?: string; kind?: string; Text?: string; text?: string; Ref?: ObjRef; ref?: ObjRef }[] }>('POST', `/sessions/${sid}/plugins/run`, { Name: name, Context: context, Object: cur?.kind === 'table' ? cur.obj : undefined, Selection: selection, Cell: cell })
+      for (const ef of r.effects ?? []) {
+        const kind = ef.Kind ?? ef.kind, text = ef.Text ?? ef.text ?? '', ref = ef.Ref ?? ef.ref
+        if (kind === 'copy') await copyText(text).then(() => notify('Copied'), (e) => notify(String(e)))
+        else if (kind === 'open' && ref) openObj(ref, true, undefined, true)
+        else if (kind === 'notify') notify(text)
+        else if (kind === 'sql') newQuery(text)
+      }
+      if (r.text) { if (r.output === 'sql') insertSql(r.text); else setDetails(r.text) }
+    } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
+  }
+  deepRun.current = async () => {
+    if (!target) return
+    if (target.kind === 't') {
+      const ref: ObjRef = { Schema: target.schema === '-' ? '' : target.schema, Name: target.table, Kind: 'table' }
+      return target.filter ? openHit(ref, target.filter) : openObj(ref)
+    }
+    try {
+      const q = (await api<{ Path: string; SQL: string }[]>('GET', '/queries')).find((x) => x.Path === target.path)
+      q ? newQuery(q.SQL) : notify(`No saved query ${target.path}`)
+    } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
+  }
+  // entries of the tab menu (menus.Tab), by action name
+  const tabAction = (a: string, id: number) => {
+    switch (a) {
+      case 'close_tab': return close(id)
+      case 'close_other_tabs': return closeOthers(id)
+      case 'close_tabs_right': return closeRight(id)
+      case 'close_all_tabs': return closeWhere(() => false)
+      case 'rename_tab': return rename(id)
+      case 'move_tab_left': return moveTab(id, -1)
+      case 'move_tab_right': return moveTab(id, 1)
+      case 'copy_link': { // (a plain link: the token fragment would hand the API to whoever the link is pasted to) a table or saved-query tab copies its own link, any other tab the workspace link
+        const t = tabs.find((x) => x.id === id), path = t?.kind === 'query' ? savedPaths.current[id] : undefined
+        const rel = t?.kind === 'table' ? tableLink(sid, t.obj.Schema, t.obj.Name, t.filters?.Filters?.length ? t.filters : undefined) : path ? queryLink(sid, path) : `/s/${sid}`
+        return void copyText(location.origin + rel).then(() => notify('Copied the link'), (e) => notify(String(e)))
+      }
+      case 'open_window': return void window.open(withToken(`/s/${sid}`), '_blank', 'noopener') // the token travels in the fragment, so the new browser tab signs in
+    }
+  }
+  // entries of the database picker's menu (menus.Database)
+  const dbAdmin = async (op: string, db: string, opts?: Record<string, string>) => {
+    try { setPlan(await api<Plan>('POST', `/sessions/${sid}/plan/admin`, { Op: op, Ref: { Schema: '', Name: db, Kind: '' }, Opts: opts })) } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
+  }
+  const dbAction = async (a: string, db: string) => {
+    switch (a) {
+      case 'open': return db === i.database ? undefined : switchDb(db)
+      case 'open_workspace': // a second workspace for this connection, on that database
+        try { const r = await openSession(i.name); await api('POST', `/sessions/${r.id}/database`, { Name: db }); nav({ to: '/s/$sessionId', params: { sessionId: r.id } }) } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
+        return
+      case 'copy_name': return void copyText(db).then(() => notify('Copied the name'), (e) => notify(String(e)))
+      case 'new_database': return kick('new_database')
+      case 'rename': { const n = await ask(`Rename ${db} to`, db); if (n && n !== db) dbAdmin('rename_database', db, { new_name: n }); return }
+      case 'drop': { const t = await ask(`Type ${db} to drop it`); if (t === null) return; if (t !== db) return notify('The names did not match; nothing dropped.'); return dbAdmin('drop_database', db) }
+    }
+  }
   const onPlugin = () => {
     const c = contextOf(), cur = tabs.find((t) => t.id === active)
-    setPluginCtx({ context: c === 'editor' ? 'editor' : c === 'sidebar' ? 'sidebar' : c === 'global' ? '' : 'grid', object: cur?.kind === 'table' ? cur.obj : undefined, selection: window.getSelection()?.toString() ?? '' })
+    setPluginCtx({ context: c === 'editor' ? 'editor' : c === 'sidebar' ? 'sidebar' : c === 'global' ? '' : 'grid', object: cur?.kind === 'table' ? cur.obj : undefined, selection: window.getSelection()?.toString() ?? '', cell: c === 'editor' || c === 'sidebar' || c === 'global' ? '' : gridCell() })
     setTool('plugins')
   }
   const insertSql = (text: string) => {
