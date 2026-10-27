@@ -283,26 +283,53 @@ export function SearchDialog({ sid, info, onClose, onOpen }: { sid: string; info
 
 // ---- process list ------------------------------------------------------------------------
 
-type Proc = { id: string; user: string; db: string; state: string; elapsedMs: number; query: string }
+type Proc = ProcRow
+
+const PROC_MENU: MenuItem[] = [{ label: 'Kill selected', action: 'kill' }, { label: 'Quick look', action: 'quick_look' }, { label: 'Copy as…', action: 'copy_rows_as' }, { label: 'Export…', action: 'export' }, { label: 'Dismiss', action: 'close' }]
 
 export function ProcessDialog({ sid, info, onClose, notify }: { sid: string; info: SessionInfo; onClose: () => void; notify: (m: string) => void }) {
   const q = useQuery({ queryKey: ['procs', sid], queryFn: () => api<{ supported: boolean; processes: Proc[] }>('GET', `/sessions/${sid}/processes`), gcTime: 0 })
-  const [by, setBy] = useState('elapsed') // sort column; elapsed puts the slowest first
+  const meta = useQuery({ queryKey: ['meta'], queryFn: () => api<Meta>('GET', '/meta'), staleTime: Infinity }).data
+  const menu = filterMenu(meta?.menus?.process_list, {}).length ? filterMenu(meta?.menus?.process_list, {}) : PROC_MENU // the labels come from the shared list (menus.ProcessList)
+  const label = (a: string) => menu.find((m) => m.action === a)?.label ?? a
+  const [by, setBy] = useState('elapsed'), [desc, setDesc] = useState(true) // sort column; elapsed puts the slowest first
+  const [sel, setSel] = useState<Set<string>>(new Set()) // multi-select for Kill selected, Copy as and Export
   const [look, setLook] = useState<string | null>(null) // quick look at a query
-  const [kill, setKill] = useState<{ id: string; gate: Gate } | null>(null)
+  const [copyAs, setCopyAs] = useState(false), [ctx, setCtx] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [kill, setKill] = useState<{ ids: string[]; gate: Gate } | null>(null)
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
-  const send = async (id: string, confirmed: boolean) => {
-    setErr('')
-    try { await api('POST', `/sessions/${sid}/processes/kill`, { ID: id, Confirmed: confirmed, Password: password }); setKill(null); setPassword(''); notify(`Killed process ${id}`); q.refetch() } catch (e) {
-      if (e instanceof ApiError && e.status === 409 && e.body.gate) { setKill({ id, gate: e.body.gate }); if (confirmed) setErr(e.message) } else setErr(msg(e))
+  // kills the ids one after the other; a safe-mode gate stops the loop and asks, the rest follows once confirmed
+  const send = async (ids: string[], confirmed: boolean) => {
+    setErr(''); let n = 0
+    for (const id of ids) {
+      try { await api('POST', `/sessions/${sid}/processes/kill`, { ID: id, Confirmed: confirmed, Password: password }); n++ } catch (e) {
+        if (e instanceof ApiError && e.status === 409 && e.body.gate) { setKill({ ids: ids.slice(n), gate: e.body.gate }); if (confirmed) setErr(e.message) } else setErr(msg(e))
+        break
+      }
     }
+    if (n === ids.length) { setKill(null); setPassword('') }
+    if (n) { notify(n === 1 ? `Killed process ${ids[0]}` : `Killed ${n} processes`); setSel((s) => new Set([...s].filter((x) => !ids.slice(0, n).includes(x)))); q.refetch() }
   }
-  const procs = [...(q.data?.processes ?? [])].sort((a, b) => (by === 'elapsed' ? b.elapsedMs - a.elapsedMs : String(a[by as 'id']).localeCompare(String(b[by as 'id']), undefined, { numeric: true })))
-  const table = () => [['id', 'user', 'db', 'state', 'elapsed_ms', 'query'], ...procs.map((p) => [p.id, p.user, p.db, p.state, String(p.elapsedMs), p.query])]
-  const copyRows = () => copyText(table().map((r) => r.join('\t')).join('\n')).then(() => notify(`Copied ${procs.length} processes`), (e) => notify(msg(e)))
-  const exportPage = () => saveBlob(new Blob([table().map((r) => r.map((v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v)).join(',')).join('\n') + '\n'], { type: 'text/csv;charset=utf-8' }), 'processes.csv')
-  const ask = async (id: string) => { if (await confirm(`Kill process ${id}?`)) send(id, true) }
+  const procs = sortProcs(q.data?.processes ?? [], by, desc)
+  const chosen = sel.size ? procs.filter((p) => sel.has(p.id)) : procs // no selection = every row
+  const header = (k: string) => { if (k === by) setDesc(!desc); else { setBy(k); setDesc(k === 'elapsed') } }
+  const rowsOf = (l: Proc[]) => l.map((p) => [p.id, p.user, p.db, p.state, String(p.elapsedMs), p.query])
+  const COLS = ['id', 'user', 'db', 'state', 'elapsed_ms', 'query'].map((name) => ({ name, type: 'text' }))
+  const copyRows = (f: CopyFormat) => { setCopyAs(false); copyText(formatRows(f, COLS, rowsOf(chosen), meta?.config.csv ?? { Delimiter: ',', Quote: '"', LineBreak: '\n', Decimal: '.' }, info.caps.Dialect, 'processes')).then(() => notify(`Copied ${chosen.length} processes as ${f}`), (e) => notify(msg(e))) }
+  const exportPage = () => saveBlob(new Blob([formatRows('CSV with Header', COLS, rowsOf(chosen), meta?.config.csv ?? { Delimiter: ',', Quote: '"', LineBreak: '\n', Decimal: '.' }, info.caps.Dialect) + '\n'], { type: 'text/csv;charset=utf-8' }), 'processes.csv')
+  const askKill = async (ids: string[]) => { if (ids.length && await confirm(ids.length === 1 ? `Kill process ${ids[0]}?` : `Kill ${ids.length} processes?`)) send(ids, true) }
+  const killSelected = () => (sel.size ? askKill([...sel]) : notify('Tick the processes to kill first'))
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const run = (a: string, id?: string) => {
+    setCtx(null)
+    if (a === 'kill') id && !sel.has(id) ? askKill([id]) : killSelected()
+    else if (a === 'quick_look') { const p = procs.find((x) => x.id === (id ?? [...sel][0])); if (p) setLook(p.query); else notify('Click a row first') }
+    else if (a === 'copy_rows_as') setCopyAs(true)
+    else if (a === 'export') exportPage()
+    else if (a === 'close') onClose()
+  }
+  const HEADS = [['Id', 'id'], ['User', 'user'], ['Database', 'db'], ['State', 'state'], ['Elapsed', 'elapsed']] as const
   return (
     <Dialog title="Process list" onClose={onClose}>
       {q.isLoading && <div className="text-ink-2">Loading…</div>}
