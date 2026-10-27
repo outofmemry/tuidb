@@ -99,6 +99,61 @@ export function Connections() {
     if (t !== g) return setMsg('The name did not match; nothing deleted.')
     save.mutate(list.filter((c) => !inGroup(c, g)))
   }
+  // Duplicate: a local, editable copy ("name copy", "name copy2" when taken), as the TUI's c
+  const duplicate = (c: Connection) => {
+    let name = c.Name + ' copy'
+    while (list.some((o) => o.Name === name)) name += '2'
+    save.mutate([...list, { ...structuredClone(c), Name: name, Source: undefined }])
+  }
+  // Copy as URL: without the password unless asked for (clipboards are shared and synced), as the TUI's u / U
+  const copyUrl = async (c: Connection, withPassword: boolean) => {
+    if (withPassword && !(await confirm('Copy the URL with the password to the clipboard? Clipboard managers and synced clipboards keep what is copied.'))) return
+    try {
+      const r = await api<{ url: string }>('POST', '/connections/format', { ...c, Password: withPassword ? c.Password : '' })
+      await navigator.clipboard.writeText(r.url)
+      setMsg(`Copied ${c.Name} as URL${withPassword ? ' with its password' : ' without the password'}.`)
+    } catch (e) { setMsg(`Could not copy: ${e instanceof Error ? e.message : e}`) }
+  }
+  const testConn = async (c: Connection) => {
+    setMsg(`Testing ${c.Name}…`)
+    const go = (askedPassword?: string) => api<{ serverInfo: string }>('POST', '/connections/test', { ...stripLast(c), Port: c.Port ? Number(c.Port) : undefined, askedPassword })
+    try {
+      let r
+      try { r = await go() } catch (e) {
+        if (!(e instanceof ApiError && e.status === 422 && e.body.passwordRequired)) throw e
+        const pw = await askSecret(`Password for ${c.Name}`)
+        if (pw === null) return setMsg('')
+        r = await go(pw)
+      }
+      setMsg(`Connected to ${c.Name}: ${r.serverInfo}`)
+    } catch (e) { setMsg(`${c.Name}: ${e instanceof Error ? e.message : e}`) }
+  }
+  // the connection menu is meta.menus.welcome (labels and order); entries are dispatched by action name, as the terminal does
+  const openConn = (c: Connection) => { setMsg(''); open[c.Name] ? nav({ to: '/s/$sessionId', params: { sessionId: open[c.Name] } }) : connect.mutate(c.Name) }
+  const doRow = (a: string, c: Connection, idx: number) => {
+    switch (a) {
+      case 'connect': return openConn(c)
+      case 'edit': return setEdit({ c: structuredClone(c), idx })
+      case 'duplicate': return duplicate(c)
+      case 'delete_item': return void confirm(`Delete ${c.Name}?`).then((ok) => ok && save.mutate(list.filter((_, i) => i !== idx)))
+      case 'test': return void testConn(c)
+      case 'copy_url': return void copyUrl(c, false)
+      case 'copy_url_password': return void copyUrl(c, true)
+      case 'import_url': urlBox.current?.focus(); return void setMsg('Paste a connection URL and press Enter.')
+      case 'export_connections': return setIo('export')
+      case 'import_connections': return setIo('import')
+      case 'sort': return setDlg('sort')
+    }
+  }
+  const rowItems = (c: Connection, idx: number): [string, () => void, string?][] => (meta.data?.menus?.welcome ?? [{ label: 'Connect', action: 'connect' }, { label: 'Edit…', action: 'edit' }, { label: 'Duplicate', action: 'duplicate' }, { label: 'Delete…', action: 'delete_item' }]).map((it) => [it.label, () => doRow(it.action, c, idx),
+    c.Source && ['edit', 'delete_item'].includes(it.action) ? 'this connection comes from a connection source file: edit that file' : whyNot(it)])
+  // dropping a connection on a group header (or the no-group strip) moves it there; source connections live in their own files
+  const moveTo = (name: string, group: string) => {
+    const c = list.find((x) => x.Name === name)
+    if (!c || (c.Group ?? '') === group) return
+    if (c.Source) return setMsg('That connection comes from a connection source file. Edit that file to move it.')
+    save.mutate(list.map((x) => (x.Name === name ? { ...x, Group: group || undefined } : x)))
+  }
   const tagColor = (c: Connection) => meta.data?.tags?.find((t) => t.name === c.Tag)?.color
   const groups = [...new Set(list.map((c) => c.Group ?? ''))].sort()
   const upsert = (c: Connection, idx: number) => save.mutate(idx < 0 ? [...list, c] : list.map((x, i) => (i === idx ? c : x)))
