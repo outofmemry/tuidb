@@ -131,14 +131,16 @@ export type SSH = { Host: string; Port: number; User: string; Key: string; Passw
 export type Connection = {
   Name: string; Driver: string; Host: string; Port?: number; User?: string; Password?: string; PasswordCmd?: string
   Database?: string; Tag?: string; Color?: string; SafeMode?: string; Group?: string; SSLMode?: string; Encoding?: string
+  SSLCA?: string; SSLCert?: string; SSLKey?: string; SocksProxy?: string; IAMAuth?: boolean; Bootstrap?: string[] | null
   Options?: Record<string, string>; SSH?: SSH | null
   ReadOnly?: boolean; Source?: string; Open?: OpenTarget | null; Tools?: Record<string, string>
+  lastConnected?: string // RFC3339, or "" when never connected (GET /connections only)
 }
 export type OpenTarget = { Schema: string; Table: string; Column: string; Operation: string; Value: string; Condition: string }
 export type Caps = {
   Schemas: boolean; Indexes: boolean; Triggers: boolean; ForeignKeys: boolean; Views: boolean; MatViews: boolean
   Functions: boolean; Sequences: boolean; Transactions: boolean; Document: boolean; Editor: string; Dialect: string
-  DatabaseNoun: string; Types: string[] | null; ReorderColumns?: boolean; ProcessList?: boolean
+  DatabaseNoun: string; Types: string[] | null; ReorderColumns?: boolean; ProcessList?: boolean; Users?: boolean
 }
 export type SessionInfo = {
   id: string; name: string; driver: string; caps: Caps; serverInfo: string; database: string; schema: string
