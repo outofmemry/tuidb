@@ -370,8 +370,10 @@ export function AssistantTab({ sid, onRun, notify }: { sid: string; onRun: (sql:
     const mine = ctrl.current = new AbortController()
     try {
       const r = await api<{ reply: string; blocks: Block[] }>('POST', `/sessions/${sid}/assistant`, { messages: next.map(({ role, content }) => ({ role, content })), model: model || undefined, provider: provider || undefined }, mine.signal)
-      setMsgs([...next, { role: 'assistant', content: r.reply, blocks: r.blocks }])
+      const all: Msg[] = [...next, { role: 'assistant', content: r.reply, blocks: r.blocks }]
+      setMsgs(all); save(all)
     } catch (e) {
+      if (ctrl.current !== mine) return // the chat was replaced meanwhile
       if (e instanceof DOMException && e.name === 'AbortError') setErr('Stopped.'); else setErr(msg(e))
     } finally { setBusy(false) }
   }
