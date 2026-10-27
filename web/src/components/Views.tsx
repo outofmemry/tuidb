@@ -101,14 +101,14 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
   const board = (list.data ?? []).find((b) => b.name === name && !b.error)
   const valsRef = useRef(vals); valsRef.current = vals
   useEffect(() => { if (!name && list.data?.length) setName(list.data.find((b) => !b.error)?.name ?? '') }, [list.data, name])
-  useEffect(() => { if (board) setVals(Object.fromEntries(board.vars.map((v) => [v.Name, v.Default]))) }, [board?.name])
+  useEffect(() => { if (board) setVals(panelVals(board.vars, board.panels)) }, [board?.name])
   useEffect(() => { if (name) setLayoutState(loadLayout(name)) }, [name])
   const setLayout = (l: Layout) => { setLayoutState(l); try { localStorage.setItem(layoutKey(name), JSON.stringify(l)) } catch { /* private mode: the arrangement lasts until reload */ } }
   const curBoard = useRef(''); curBoard.current = board?.name ?? ''
   const run = async () => {
     if (!board) return
     const mine = board.name // a slow run of another board must not land on this one
-    try { const p = (await api<{ panels: PanelOut[] }>('POST', `/sessions/${runSid}/boards/run`, { Name: mine, Vals: valsRef.current })).panels; if (curBoard.current === mine) { setPanels(p); setErr('') } } catch (e) { if (curBoard.current === mine) setErr(msg(e)) }
+    try { const p = (await api<{ panels: PanelOut[] }>('POST', `/sessions/${runSid}/boards/run`, { Name: mine, Vals: valsRef.current })).panels; if (curBoard.current === mine) { setPanels(p); setErr(''); setRanAt(new Date()) } } catch (e) { if (curBoard.current === mine) setErr(msg(e)) }
   }
   const runRef = useRef(run); runRef.current = run
   // a button runs its target panel alone, then the panels set to refresh on it (a panel runs once per click, so a cycle ends)
