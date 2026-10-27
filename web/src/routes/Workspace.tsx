@@ -729,19 +729,14 @@ const START_H1 = "m-0 text-[36px] leading-none tracking-[-.03em] font-medium fon
 const BADGE_GHOST = 'btn-ghost text-inherit! opacity-75 hover:opacity-100 hover:border-transparent!'
 const CARET = 'text-[10px] opacity-70'
 const SWITCHER = 'popover absolute z-[41] w-max min-w-[240px] max-w-[min(480px,calc(100vw-24px))] max-h-[70vh] overflow-auto m-0 p-1.5'
-const SW_ITEM = 'flex items-center gap-2.5 w-full text-left border-transparent hover:border-ink-3'
+const SW_ITEM = 'menu-item'
 const WK_ROW = 'flex gap-2 items-center whitespace-nowrap'
 const TOAST_GHOST = 'btn-ghost text-inherit! opacity-80 flex-none hover:opacity-100 hover:bg-[rgb(128_128_128/0.25)]!'
 const ACTIONS = 'flex justify-end gap-2 mt-[18px]'
-const HIST = 'px-3 py-2.5 border-b border-rule cursor-pointer hover:bg-panel'
+const HIST = 'group/h px-3 py-2.5 border-b border-rule cursor-pointer hover:bg-panel'
 const HIST_PRE = 'm-0 mb-1 whitespace-pre-wrap [word-break:break-word] text-[11.5px] max-h-[5em] overflow-hidden'
 
-// Open sessions survive navigation within this browser tab, so the switcher can jump back to one.
-const OPEN = 'webtuidb-open'
 const ASK_DB = 'webtuidb-ask-db' // new_session: focus the database picker once the next workspace has loaded
-function openSessions(): Record<string, string> { try { return JSON.parse(sessionStorage.getItem(OPEN) || '{}') } catch { return {} } }
-function remember(name: string, sid: string) { const o = openSessions(); if (o[name] !== sid) { o[name] = sid; try { sessionStorage.setItem(OPEN, JSON.stringify(o)) } catch { /* private mode */ } } }
-function forget(sid: string) { const o = openSessions(); for (const k in o) if (o[k] === sid) delete o[k]; try { sessionStorage.setItem(OPEN, JSON.stringify(o)) } catch { /* private mode */ } }
 
 // Open Anything: tables and other objects, saved queries, databases and the actions the web UI answers (Cancel running queries among them).
 // Open Anything entries that have no key binding; the labels are the terminal's.
