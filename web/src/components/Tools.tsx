@@ -275,7 +275,7 @@ export function SearchDialog({ sid, info, onClose, onOpen }: { sid: string; info
       {err && <div className="text-del mt-2">{err}</div>}
       <div className={ACTIONS}>
         <button onClick={() => { stop(); onClose() }}>Close</button>
-        {running ? <button onClick={stop}>Stop</button> : <button className="btn-primary" disabled={!value || (some && !picked.length)} onClick={run}>Search</button>}
+        {running ? <><button onClick={pause}>{paused ? 'Resume' : 'Pause'}</button><button onClick={stop}>Stop</button></> : <button className="btn-primary" disabled={!value || (some && !picked.length)} onClick={run}>Search</button>}
       </div>
     </Dialog>
   )
