@@ -84,9 +84,14 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const [tmenu, setTmenu] = useState<{ x: number; y: number; id: number } | null>(null)
   const [tool, setTool] = useState<'' | 'search' | 'procs' | 'users' | 'backup' | 'restore' | 'plugins' | 'mcp' | 'schemadiff' | 'datadiff'>('')
   const [fake, setFake] = useState<ObjRef | null>(null)
-  const [pluginCtx, setPluginCtx] = useState<PluginCtx>({ context: '', selection: '' })
+  const [pluginCtx, setPluginCtx] = useState<PluginCtx>({ context: '', selection: '', cell: '' })
   const setAskDb = (from: string | null) => { try { from ? sessionStorage.setItem(ASK_DB, from) : sessionStorage.removeItem(ASK_DB) } catch { /* private mode */ } }
   const nDbs = dbs.data?.databases.length
+  const conflictsShown = useRef(false)
+  useEffect(() => { // plugins whose shortcuts clash with a built-in binding: say so once
+    const c = meta.data?.pluginConflicts
+    if (c?.length && !conflictsShown.current) { conflictsShown.current = true; notify(`Plugin shortcut conflicts: ${c.join('; ')}`) }
+  }, [meta.data]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { // new_session: once the workspace we switched to has its database list, offer it
     let from: string | null = null
     try { from = sessionStorage.getItem(ASK_DB) } catch { /* private mode */ }
