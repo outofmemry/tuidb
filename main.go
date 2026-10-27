@@ -1,36 +1,44 @@
-// webtuidb is a terminal TablePlus: connect to PostgreSQL, MySQL, MariaDB, CockroachDB, SQLite, DuckDB, ClickHouse, Cassandra, DynamoDB, Cloudflare D1, Redis and MongoDB,
+// webtuidb is a terminal TablePlus: connect to PostgreSQL, MySQL, MariaDB, Redshift, Greenplum, Vertica, SingleStore, ClickHouse, Cassandra, DynamoDB, Redis and MongoDB,
 // browse and edit data, and run queries, with tmux-style prefix key bindings.
 package main
 
 import (
+	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"webtuidb/internal/config"
+	"webtuidb/internal/db"
 	"webtuidb/internal/keymap"
+	"webtuidb/internal/mcp"
 	"webtuidb/internal/store"
 	"webtuidb/internal/ui"
 	"webtuidb/internal/web"
 
+	_ "webtuidb/internal/db/all"
 	_ "webtuidb/internal/db/cassandra"
 	_ "webtuidb/internal/db/clickhouse"
-	_ "webtuidb/internal/db/cockroach"
-	_ "webtuidb/internal/db/d1"
-	_ "webtuidb/internal/db/duckdb"
 	_ "webtuidb/internal/db/dynamodb"
 	_ "webtuidb/internal/db/mariadb"
 	_ "webtuidb/internal/db/mongo"
 	_ "webtuidb/internal/db/mysql"
 	_ "webtuidb/internal/db/postgres"
 	_ "webtuidb/internal/db/redis"
-	_ "webtuidb/internal/db/sqlite"
 )
+
+// Version is set at release time with -ldflags "-X main.Version=v1.2.3".
+var Version = "dev"
+
+//go:embed docs/webtuidb.1
+var manPage string
 
 func main() {
 	if err := run(); err != nil {
@@ -42,16 +50,59 @@ func main() {
 func run() error {
 	cfgPath := flag.String("config", filepath.Join(config.ConfigDir(), "config.toml"), "path to config.toml")
 	keys := flag.Bool("keys", false, "print the key bindings (after config overrides) and exit")
+	theme := flag.Bool("theme", false, "print the resolved theme as [theme.colors] TOML (paste it into config.toml) and exit")
 	frontend := flag.Bool("frontend", false, "serve the web UI instead of starting the terminal UI")
 	listen := flag.String("listen", "127.0.0.1:7788", "with --frontend: address to listen on")
 	openBrowser := flag.Bool("open", false, "with --frontend: open the browser")
 	token := flag.String("token", "", "with --frontend: API token (default: random)")
 	insecure := flag.Bool("insecure-listen", false, "with --frontend: allow a non-loopback --listen address (credentials go over the network)")
+	mcpStdio := flag.Bool("mcp", false, "serve the MCP tools over stdio and exit")
+	version := flag.Bool("version", false, "print the version and exit")
+	sshLog := flag.String("ssh-log", "", "write an SSH tunnel debug log to this file")
+	mcpConfig := flag.String("mcp-config", "", "print the MCP server entry for a client (claude-code | codex | cursor | vscode) and exit")
+	completion := flag.String("completion", "", "print a shell completion script (bash | zsh | fish) and exit")
+	man := flag.Bool("man", false, "print the man page (roff) and exit")
+	listConns := flag.Bool("list-connections", false, "print the saved connection names, one per line (used by the completion scripts) and exit")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: webtuidb [flags] [connection-name | URL]\n       webtuidb --frontend [--listen addr] [--open]\n\n  URL: postgresql:// mysql:// mariadb:// cockroachdb:// sqlite:// duckdb:// clickhouse:// cassandra:// dynamodb:// d1:// redis:// mongodb://\n\nflags:\n")
+		fmt.Fprintf(os.Stderr, "usage: webtuidb [flags] [connection-name | URL]\n       webtuidb --frontend [--listen addr] [--open]\n\n  URL: postgresql:// mysql:// mariadb:// redshift:// greenplum:// vertica:// singlestore:// clickhouse:// cassandra:// dynamodb:// redis:// mongodb://\n\nflags:\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	switch { // these never touch the config, so they work even when it is broken
+	case *version:
+		fmt.Println("webtuidb", versionString())
+		return nil
+	case *man:
+		fmt.Print(manPage)
+		return nil
+	case *mcpConfig != "":
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		snippet, file, err := mcpSnippet(*mcpConfig, exe)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "# put this in", file) // stderr: stdout stays a valid file body
+		fmt.Print(snippet)
+		return nil
+	case *completion != "":
+		s, err := completionScript(*completion, flag.CommandLine)
+		if err != nil {
+			return err
+		}
+		fmt.Print(s)
+		return nil
+	}
+	if *sshLog != "" {
+		f, err := os.OpenFile(*sshLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return fmt.Errorf("--ssh-log: %w", err)
+		}
+		defer f.Close()
+		db.SSHLog = f
+	}
 	if !*frontend {
 		var stray []string
 		flag.Visit(func(f *flag.Flag) {
@@ -79,16 +130,43 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", *cfgPath, err)
 	}
+	if *theme {
+		fmt.Print(ui.ThemeTOML(cfg.Theme))
+		return nil
+	}
 	if *keys {
 		printKeys(cfg.General.Prefix, km)
 		return nil
 	}
 	connPath := config.ConnectionsPath()
-	conns, err := config.LoadConnections(connPath)
+	conns, err := config.LoadAllConnections(connPath, cfg.Sources)
 	if err != nil {
 		return err
 	}
+	if *listConns {
+		for _, c := range conns {
+			fmt.Println(c.Name)
+		}
+		return nil
+	}
 	data := config.DataDir()
+	connNames := make([]string, len(conns))
+	for i, c := range conns {
+		connNames[i] = c.Name
+	}
+	(&store.History{Dir: filepath.Join(data, "history")}).MigrateLegacy(connNames)
+	for _, c := range conns {
+		if c.Unusable != "" {
+			fmt.Fprintf(os.Stderr, "webtuidb: connection %q is unusable: %s\n", c.Name, c.Unusable)
+		}
+	}
+	if *mcpStdio {
+		srv := mcp.New(cfg, conns)
+		srv.Queries = &store.Queries{Root: filepath.Join(data, "queries")}
+		srv.Hist = &store.History{Dir: filepath.Join(data, "history")}
+		srv.Boards = true
+		return srv.ServeStdio(context.Background())
+	}
 	state, err := store.LoadState(filepath.Join(data, "state.json"))
 	if err != nil {
 		return err
@@ -97,7 +175,7 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "webtuidb:", state.Recovered)
 	}
 	d := &ui.Deps{
-		Cfg: cfg, Keys: km, Conns: conns, ConnPath: connPath, State: state,
+		Cfg: cfg, CfgPath: *cfgPath, Keys: km, Conns: conns, ConnPath: connPath, State: state,
 		Hist:    &store.History{Dir: filepath.Join(data, "history")},
 		Queries: &store.Queries{Root: filepath.Join(data, "queries")},
 	}
@@ -121,6 +199,100 @@ func run() error {
 	}
 	_, err = tea.NewProgram(app).Run()
 	return err
+}
+
+// versionString is Version, or for `go install` builds the module version the toolchain recorded.
+func versionString() string {
+	if bi, ok := debug.ReadBuildInfo(); ok && Version == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return Version
+}
+
+// mcpSnippet returns the stdio server entry for an MCP client and the file it belongs in.
+func mcpSnippet(client, exe string) (snippet, file string, err error) {
+	q := fmt.Sprintf("%q", exe)
+	switch client {
+	case "claude-code":
+		return fmt.Sprintf("{\"mcpServers\":{\"webtuidb\":{\"command\":%s,\"args\":[\"--mcp\"]}}}\n", q), ".mcp.json (project) or ~/.claude.json", nil
+	case "cursor":
+		return fmt.Sprintf("{\"mcpServers\":{\"webtuidb\":{\"command\":%s,\"args\":[\"--mcp\"]}}}\n", q), "~/.cursor/mcp.json", nil
+	case "vscode":
+		return fmt.Sprintf("{\"servers\":{\"webtuidb\":{\"type\":\"stdio\",\"command\":%s,\"args\":[\"--mcp\"]}}}\n", q), ".vscode/mcp.json", nil
+	case "codex": // Codex reads TOML, not JSON
+		return fmt.Sprintf("[mcp_servers.webtuidb]\ncommand = %s\nargs = [\"--mcp\"]\n", q), "~/.codex/config.toml", nil
+	}
+	return "", "", fmt.Errorf("unknown MCP client %q (claude-code | codex | cursor | vscode)", client)
+}
+
+// flagChoices and flagFiles say what a flag's value completes to; every other value-taking flag completes to nothing.
+var (
+	flagChoices = map[string]string{"mcp-config": "claude-code codex cursor vscode", "completion": "bash zsh fish"}
+	flagFiles   = map[string]bool{"config": true, "ssh-log": true}
+)
+
+// completionScript completes the flags of fs, and connection names via `webtuidb -list-connections`.
+// shortcut: bash inserts a connection name with a space unquoted, quote it by hand.
+func completionScript(shell string, fs *flag.FlagSet) (string, error) {
+	var b strings.Builder
+	var names []string
+	fs.VisitAll(func(f *flag.Flag) { names = append(names, f.Name) })
+	isBool := func(f *flag.Flag) bool {
+		bf, ok := f.Value.(interface{ IsBoolFlag() bool })
+		return ok && bf.IsBoolFlag()
+	}
+	switch shell {
+	case "bash":
+		fmt.Fprintf(&b, "_webtuidb() {\n  local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}\n  case ${prev#-} in\n")
+		for _, n := range names {
+			switch {
+			case flagChoices[n] != "":
+				fmt.Fprintf(&b, "    %[1]s|-%[1]s) COMPREPLY=($(compgen -W %q -- \"$cur\")); return;;\n", n, flagChoices[n])
+			case flagFiles[n]:
+				fmt.Fprintf(&b, "    %[1]s|-%[1]s) COMPREPLY=($(compgen -f -- \"$cur\")); return;;\n", n)
+			}
+		}
+		var dashed []string
+		for _, n := range names {
+			dashed = append(dashed, "--"+n)
+		}
+		fmt.Fprintf(&b, "  esac\n  if [[ $cur == -* ]]; then COMPREPLY=($(compgen -W %q -- \"$cur\"))\n  else local n; while IFS= read -r n; do [[ $n == \"$cur\"* ]] && COMPREPLY+=(\"$n\"); done < <(webtuidb -list-connections 2>/dev/null); fi\n}\ncomplete -F _webtuidb webtuidb\n", strings.Join(dashed, " "))
+	case "zsh":
+		esc := strings.NewReplacer("'", `'\''`, "[", `\[`, "]", `\]`, ":", `\:`)
+		b.WriteString("#compdef webtuidb\n_webtuidb() {\n  local -a conns\n  _arguments \\\n")
+		fs.VisitAll(func(f *flag.Flag) {
+			val := ""
+			switch {
+			case flagChoices[f.Name] != "":
+				val = ":value:(" + flagChoices[f.Name] + ")"
+			case flagFiles[f.Name]:
+				val = ":file:_files"
+			case !isBool(f):
+				val = ":value:"
+			}
+			fmt.Fprintf(&b, "    '--%s[%s]%s' \\\n", f.Name, esc.Replace(f.Usage), val)
+		})
+		b.WriteString("    '1:connection:->conn'\n  if [[ $state == conn ]]; then\n    conns=(\"${(@f)$(webtuidb -list-connections 2>/dev/null)}\")\n    compadd -a conns\n  fi\n}\n_webtuidb \"$@\"\n")
+	case "fish":
+		esc := strings.NewReplacer("'", `\'`)
+		b.WriteString("complete -c webtuidb -f\n")
+		fs.VisitAll(func(f *flag.Flag) {
+			opt := ""
+			switch {
+			case flagChoices[f.Name] != "":
+				opt = fmt.Sprintf(" -x -a '%s'", flagChoices[f.Name])
+			case flagFiles[f.Name]:
+				opt = " -r -F"
+			case !isBool(f):
+				opt = " -x"
+			}
+			fmt.Fprintf(&b, "complete -c webtuidb -l %s%s -d '%s'\n", f.Name, opt, esc.Replace(f.Usage))
+		})
+		b.WriteString("complete -c webtuidb -n __fish_is_first_arg -a '(webtuidb -list-connections 2>/dev/null)'\n")
+	default:
+		return "", fmt.Errorf("unknown shell %q (bash | zsh | fish)", shell)
+	}
+	return b.String(), nil
 }
 
 func printKeys(prefix string, km *keymap.Map) {
