@@ -282,9 +282,21 @@ function ConnForm({ meta, init, error, onSave, onClose }: { meta: Meta; init: Co
           <label>Password</label>
           <div className="flex items-center gap-3"><input className="flex-1 min-w-0" type="password" autoComplete="new-password" aria-label="Password" disabled={c.Password === 'ask'} value={c.Password === 'ask' ? '' : c.Password ?? ''} onChange={(e) => set('Password', e.target.value)} />
             <label className="flex items-center gap-1.5 whitespace-nowrap !text-left"><input type="checkbox" checked={c.Password === 'ask'} onChange={(e) => set('Password', e.target.checked ? 'ask' : '')} />Ask every time</label></div>
-          {field('Password command', 'PasswordCmd')}{field('Database', 'Database')}
+          <label>Password command</label>
+          <div className="min-w-0">
+            <div className="flex gap-1.5">
+              <input className="flex-1 min-w-0" aria-label="Password command" value={c.PasswordCmd ?? ''} placeholder="a command that prints the password" onChange={(e) => set('PasswordCmd', e.target.value)} />
+              {/* M15.36: the secret stores nobody should have to type a command for; <name> becomes this connection's name */}
+              <Select className="w-[9em]" aria-label="Password command presets" value="" onChange={(v) => { const p = presets.find((x) => x.name === v); if (p) set('PasswordCmd', p.command.split('<name>').join(c.Name || 'name')) }} options={[{ value: '', label: 'Presets…' }, ...presets.map((p) => p.name)]} />
+            </div>
+            {presets.find((p) => c.PasswordCmd && c.PasswordCmd === p.command.split('<name>').join(c.Name || 'name'))?.note && <div className="text-ink-3 text-[11.5px] mt-0.5">{presets.find((p) => c.PasswordCmd === p.command.split('<name>').join(c.Name || 'name'))!.note.split('<name>').join(c.Name || 'name')}</div>}
+          </div>
+          {field('Database', 'Database')}
           <label>SSL mode</label>
           <Select className="w-full" aria-label="SSL mode" value={c.SSLMode ?? ''} onChange={(v) => set('SSLMode', v)} options={[{ value: '', label: 'default' }, ...meta.sslModes]} />
+          {showSSL && <>{field('CA cert', 'SSLCA')}{field('Client cert', 'SSLCert')}{field('Client key', 'SSLKey')}</>}
+          {field('SOCKS5 proxy', 'SocksProxy')}
+          {['postgres', 'mysql', 'mariadb'].includes(c.Driver) && <><label>AWS IAM auth</label><label className="flex items-center gap-2 !text-left"><input type="checkbox" checked={!!c.IAMAuth} onChange={(e) => set('IAMAuth', e.target.checked)} />Use an RDS IAM token instead of the password</label></>}
         </>}
         <label>Encoding</label><input className="w-full" aria-label="Encoding" placeholder="server default" value={c.Encoding ?? ''} onChange={(e) => set('Encoding', e.target.value)} />
         {field('Group', 'Group')}
