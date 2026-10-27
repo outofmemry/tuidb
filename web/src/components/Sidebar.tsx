@@ -321,16 +321,20 @@ function ColumnList({ sid, obj, sort }: { sid: string; obj: ObjRef; sort: boolea
   </div>
 }
 
-// New database: a name, and the encoding and collation where the engine takes them (PostgreSQL, MySQL).
-function NewDatabaseDialog({ noun, options, onCreate, onClose }: { noun: string; options: boolean; onCreate: (name: string, opts?: Record<string, string>) => void; onClose: () => void }) {
-  const [name, setName] = useState(''), [enc, setEnc] = useState(''), [col, setCol] = useState('')
+// New database: a name, and the options the engine takes (the terminal's New database form): encoding and collation on PostgreSQL / MySQL,
+// replication strategy and factor on Cassandra.
+function NewDatabaseDialog({ noun, dialect, onCreate, onClose }: { noun: string; dialect: string; onCreate: (name: string, opts?: Record<string, string>) => void; onClose: () => void }) {
+  const [name, setName] = useState(''), [enc, setEnc] = useState(''), [col, setCol] = useState(''), [strat, setStrat] = useState('SimpleStrategy'), [repl, setRepl] = useState('1')
+  const sqlOpts = dialect === 'postgres' || dialect === 'mysql', cql = dialect === 'cql'
   return (
     <Dialog title={`New ${noun}`} onClose={onClose}>
-      <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) onCreate(name.trim(), options ? { encoding: enc.trim(), collation: col.trim() } : undefined) }}>
+      <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) onCreate(name.trim(), sqlOpts ? { encoding: enc.trim(), collation: col.trim() } : cql ? { strategy: strat.trim(), replication: repl.trim() } : undefined) }}>
         <div className="grid grid-cols-[110px_1fr] gap-x-3 gap-y-2 items-center text-[12.5px] [&_label]:text-ink-2">
           <label>Name</label><input autoFocus aria-label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-          {options && <><label>Encoding</label><input aria-label="Encoding" placeholder="server default, e.g. UTF8" value={enc} onChange={(e) => setEnc(e.target.value)} />
+          {sqlOpts && <><label>Encoding</label><input aria-label="Encoding" placeholder="server default, e.g. UTF8" value={enc} onChange={(e) => setEnc(e.target.value)} />
             <label>Collation</label><input aria-label="Collation" placeholder="server default" value={col} onChange={(e) => setCol(e.target.value)} /></>}
+          {cql && <><label>Replication strategy</label><input aria-label="Replication strategy" value={strat} onChange={(e) => setStrat(e.target.value)} />
+            <label>Replication</label><input aria-label="Replication (factor, or dc1:3,dc2:2)" placeholder="factor, or dc1:3,dc2:2" value={repl} onChange={(e) => setRepl(e.target.value)} /></>}
         </div>
         <div className="flex justify-end gap-2 mt-[18px]"><button type="button" onClick={onClose}>Cancel</button><button className="btn-primary" type="submit" disabled={!name.trim()}>Preview</button></div>
       </form>
