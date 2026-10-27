@@ -494,7 +494,21 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
       case 'close_all_tabs': return closeWhere(() => false)
       case 'rename_tab': return active && rename(active)
       case 'focus_left': case 'focus_right': case 'focus_up': case 'focus_down': return void moveFocus(action.slice(6) as 'left')
-      case 'new_query_tab': case 'new_tab': return newQuery()
+      case 'new_query_tab': return newQuery()
+      case 'new_tab': // [general] new_tab_opens = "empty": the sidebar takes the focus instead of an editor opening
+        if (meta.data.config.general.NewTabOpens === 'empty') { setSide(true); setCollapsed(false); setZen(false); return kick('sidebar_search') }
+        return newQuery()
+      case 'close_pane': return closePane()
+      case 'toggle_panels': setZen((z) => !z); return notify(zen ? 'Panels shown' : `Panels hidden: ${shortcutOf('toggle_panels')} brings them back`)
+      case 'move_tab_left': return active && moveTab(active, -1)
+      case 'move_tab_right': return active && moveTab(active, 1)
+      case 'jobs': return setDrawer((d) => (d === 'jobs' ? '' : 'jobs'))
+      case 'lock': return meta.data.security?.passcode ? void window.dispatchEvent(new Event(LOCK_EVENT)) : notify('No passcode is set: run webtuidb -set-passcode and add the [security] line')
+      case 'assistant_new': case 'assistant_clear': case 'assistant_history': { // the assistant tab answers; open (or show) it first
+        const ex = tabs.find((t) => t.kind === 'assistant')
+        if (!ex || actives[ex.pane] !== ex.id) { openPage('assistant'); return kick(action) }
+        break
+      }
       case 'close_tab': return active && close(active)
       case 'next_tab': return go(idx + 1)
       case 'prev_tab': return go(idx - 1)
