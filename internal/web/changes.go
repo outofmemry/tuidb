@@ -30,13 +30,15 @@ func (v *Val) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("bad special value: %w", err)
 		}
 		if e, ok := m["$expr"]; ok {
-			// raw SQL is inlined by the planner, so only the expressions the TUI offers are accepted
-			switch strings.ToLower(strings.TrimSpace(e)) {
-			case "now()", "current_timestamp", "gen_random_uuid()":
-				v.V = db.Expr(strings.TrimSpace(e))
-				return nil
+			if err := checkExpr(e); err != nil {
+				return err
 			}
-			return fmt.Errorf("expression %q is not allowed (NOW(), CURRENT_TIMESTAMP, gen_random_uuid())", e)
+			// only the dialog's macros run as-is; anything else is advanced mode and must say so
+			if !exprMacro(e) && m["$advanced"] != "true" {
+				return fmt.Errorf(`$expr %q is not one of the built-in macros; send "$advanced":"true" to run an arbitrary expression`, e)
+			}
+			v.V = db.Expr(strings.TrimSpace(e))
+			return nil
 		}
 		switch m["$"] {
 		case "null":
@@ -171,3 +173,16 @@ func buildChanges(c *cached, req editReq) ([]db.Change, error) {
 	}
 	return out, nil
 }
+
+var exprMacros = map[string]bool{
+	"now()": true, "current_timestamp": true, "current_date": true, "current_time": true, "localtimestamp": true,
+	"gen_random_uuid()": true, "uuid_generate_v4()": true, "uuid()": true, "unix_timestamp()": true,
+}
+
+// exprMacro reports whether e is one of the value macros the cell dialog offers.
+func exprMacro(e string) bool {
+	return exprMacros[strings.ToLower(strings.Join(strings.Fields(e), ""))]
+}
+
+// checkExpr is db.CheckExpr (kept for the callers here).
+func checkExpr(e string) error { return db.CheckExpr(e) }
