@@ -91,16 +91,32 @@ export function ExportDialog({ sid, source, onClose, notify }: { sid: string; so
 
 // ---- import ----------------------------------------------------------------------------
 
+const ENCODINGS = [{ value: 'utf-8', label: 'UTF-8' }, { value: 'latin1', label: 'Latin-1' }, { value: 'utf-16le', label: 'UTF-16 LE' }, { value: 'utf-16be', label: 'UTF-16 BE' }, { value: 'windows-1252', label: 'Windows-1252' }]
+
+// autoMap picks a table column for every file column. name = same name ignoring case; order = same position;
+// both = by name, then the file columns left over take the table columns left over, in order.
+export function autoMap(file: string[], table: string[], match: string, create: boolean): Record<string, string> {
+  if (create) return Object.fromEntries(file.map((c) => [c, c]))
+  const out: Record<string, string> = {}, used = new Set<string>()
+  if (match !== 'order') for (const c of file) { const t = table.find((n) => n.toLowerCase() === c.toLowerCase() && !used.has(n)); if (t) { out[c] = t; used.add(t) } }
+  if (match !== 'name') { const free = table.filter((n) => !used.has(n)); file.forEach((c, i) => { if (out[c] === undefined) { const t = match === 'order' ? table[i] : free.shift(); if (t) out[c] = t } }) }
+  return Object.fromEntries(file.map((c) => [c, out[c] ?? '']))
+}
+
 const sourceOf = (file: string) => (/\.json$/i.test(file) ? 'json' : /\.sql$/i.test(file) ? 'sql' : 'csv')
 
-export function ImportDialog({ sid, table: ref, onClose, onDone, notify }: { sid: string; table: ObjRef; onClose: () => void; onDone: () => void; notify: (m: string) => void }) {
+// `file` starts the dialog with a file dropped on the table (the drop zones live in the grid and the sidebar).
+export function ImportDialog({ sid, table: ref, file: dropped, onClose, onDone, notify }: { sid: string; table: ObjRef; file?: File; onClose: () => void; onDone: () => void; notify: (m: string) => void }) {
   const base = `/sessions/${sid}`
-  const [file, setFile] = useState<File | null>(null)
-  const [fileName, setFileName] = useState('')
-  const [source, setSource] = useState('csv')
+  const [file, setFile] = useState<File | null>(dropped ?? null)
+  const [fileName, setFileName] = useState(dropped?.name ?? '')
+  const [source, setSource] = useState(dropped ? sourceOf(dropped.name) : 'csv')
   const [header, setHeader] = useState(true)
   const [delimiter, setDelimiter] = useState('')
+  const [encoding, setEncoding] = useState('utf-8')
+  const [match, setMatch] = useState('both') // how file columns find table columns: both | name | order
   const [create, setCreate] = useState(false)
+  const [nullAs, setNullAs] = useState(''), [emptyNull, setEmptyNull] = useState(false), [keepQuote, setKeepQuote] = useState(false) // cell transform: shared by the preview and the import
   const [prev, setPrev] = useState<{ columns: string[]; rows: string[][] } | null>(null)
   const [mapping, setMapping] = useState<Record<string, string>>({})
   const [err, setErr] = useState('')
