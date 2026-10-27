@@ -2,12 +2,22 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, keyOf, qs, recentKey, type Column, type DbObject, type ItemGroup, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
 import { Dialog, ask, confirm } from './Dialogs'
+import { TabMenu } from './Extras'
 import { MultiExportDialog } from './MultiExport'
 import { Select } from './Select'
 import { ExportDialog, ImportDialog } from './Tools'
+import { StructureEditor } from './StructureEditor'
+import { buildKeyTree, flattenKeys, isFuzzy, matchName } from '../utils/matchname'
+import { copyText } from '../utils/copy'
+import { filterMenu, whyNot, type MenuItem } from '../utils/menus'
+import { createTemplate } from '../utils/templates'
 
-const TITLE = 'flex items-baseline gap-1.5 px-3 pt-3.5 pb-1 text-[12px] text-ink-2'
-const MI = 'text-left border-transparent hover:border-ink-3' // the old menu kept the base hover border
+const TITLE = 'flex items-baseline gap-1.5 px-3 pt-3.5 pb-1 text-[11.5px] text-ink-2 select-none'
+const MI = 'menu-item'
+const colorKey = (conn: string) => `webtuidb-objcolors:${conn}`
+// shortcut: object colours live in this browser's localStorage (per connection); the terminal keeps its own in state.json
+const loadColors = (conn: string): Record<string, string> => { try { return JSON.parse(localStorage.getItem(colorKey(conn)) || '{}') } catch { return {} } }
+const SWATCHES = ['#7aa2f7', '#4fc4a0', '#e0af68', '#ff9a5c', '#f7768e', '#bb9af7']
 
 // shortcut: system schemas are recognised by name; the drivers do not flag them
 const SYSTEM_SCHEMA = /^(information_schema|pg_.*|mysql|performance_schema|sys|system|INFORMATION_SCHEMA)$/
