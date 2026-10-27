@@ -38,18 +38,12 @@ type detailer interface {
 	DetailKey(key string) tea.Cmd
 }
 
-type consoleLine struct {
-	at  time.Time
-	sql string
-	err bool
-	dur time.Duration
-}
-
 type Workspace struct {
 	a       *App
 	id      int
 	conn    config.Connection
 	o       *Opened
+	side    *Opened // the process list's own session, opened on first use
 	sess    db.Session
 	caps    db.Capabilities
 	level   safemode.Level
@@ -63,10 +57,13 @@ type Workspace struct {
 	showSB      bool
 	showDetail  bool
 	showConsole bool
-	console     []consoleLine
+	console     store.Console  // the last 1000 statements; clear_console empties it
+	names       map[int]string // tab id -> name set by rename_tab
 	W, H        int
 	closed      bool
-	applying    bool // statements are being sent: edits and a second commit are refused meanwhile
+	applying    bool               // statements are being sent: edits and a second commit are refused meanwhile
+	jobCancel   context.CancelFunc // the running export / import / search, nil when none
+	vars        map[string]string  // query parameter values, remembered for the session
 	// meta caches column metadata per object, so reopening a table or its structure skips that
 	// round trip. Only touched on the UI loop; cleared by reload, reconnect and schema changes.
 	meta map[db.ObjRef][]db.Column
@@ -74,6 +71,7 @@ type Workspace struct {
 	// gen counts session changes (database switch, reconnect, reload). Messages created under an
 	// older generation are dropped: their rows, columns and errors belong to another database.
 	gen int
+	m3  m3State // milestone 3: split panes, back/forward history, assistant chat
 }
 
 type pingMsg struct{ err error }
@@ -172,9 +170,11 @@ func (w *Workspace) forget(ref *db.ObjRef) {
 func (w *Workspace) close() {
 	if !w.closed {
 		w.closed = true
+		w.saveTabs()
 		for i := len(w.tabs) - 1; i >= 0; i-- {
 			w.closeTab(i) // cancels running statements
 		}
+		w.closeSide()
 		w.o.Close()
 	}
 }
@@ -254,18 +254,19 @@ func (w *Workspace) handle(m wsMsg) tea.Cmd {
 }
 
 func (w *Workspace) log(sql string, dur time.Duration, err error) {
-	w.console = append(w.console, consoleLine{at: time.Now(), sql: sql, err: err != nil, dur: dur})
-	if len(w.console) > 1000 {
-		w.console = w.console[len(w.console)-1000:]
-	}
+	w.console.Add(sql, err != nil, dur)
 }
 
 // record writes an executed statement to the console and, when it changed something or came from
 // the user, to the per-connection history.
 func (w *Workspace) record(sql, source string, dur time.Duration, err error) {
+	w.recordOrig(sql, source, dur, err, "")
+}
+
+func (w *Workspace) recordOrig(sql, source string, dur time.Duration, err error, original string) {
 	w.log(sql, dur, err)
 	if err == nil && strings.TrimSpace(sql) != "" {
-		w.a.d.Hist.Append(w.conn.Name, store.HistoryEntry{Database: w.sess.CurrentDatabase(), SQL: sql, Duration: dur, Source: source})
+		w.a.d.Hist.Append(w.conn.Name, store.HistoryEntry{Database: w.sess.CurrentDatabase(), SQL: sql, Duration: dur, Source: source, Original: original})
 		w.sb.hist = nil // reload lazily
 	}
 }
@@ -319,16 +320,26 @@ func truncLines(l []string, n int) string {
 
 // execute runs stmts through Apply, logging each; used by commit and admin operations.
 func (w *Workspace) execute(stmts []db.Statement, then func(err error) tea.Cmd) tea.Cmd {
+	return w.executeWith("", stmts, then)
+}
+
+// executeWith also stores original (the pre-image of a commit) on the first history entry.
+func (w *Workspace) executeWith(original string, stmts []db.Statement, then func(err error) tea.Cmd) tea.Cmd {
+	return w.executeOn(w.sess, original, stmts, then)
+}
+
+// executeOn is executeWith on an explicit session: a pinned query tab commits on its pin.
+func (w *Workspace) executeOn(sess db.Session, original string, stmts []db.Statement, then func(err error) tea.Cmd) tea.Cmd {
 	if w.applying {
 		return w.a.say("a change is still being sent; wait for it to finish")
 	}
 	return w.gate(stmts, func() tea.Cmd {
 		w.applying = true
-		id, sess, atomic := w.id, w.sess, w.caps.Transactions && !hasDDL(stmts)
+		id, atomic := w.id, w.caps.Transactions && !hasDDL(stmts)
 		return func() tea.Msg { // no deadline: a commit must never be cut off half way
 			start := time.Now()
 			err := sess.Apply(context.Background(), stmts)
-			return wsMsg{ws: id, tab: -2, msg: applyDoneMsg{stmts: stmts, err: err, dur: time.Since(start), then: then, atomic: atomic}}
+			return wsMsg{ws: id, tab: -2, msg: applyDoneMsg{stmts: stmts, err: err, dur: time.Since(start), then: then, atomic: atomic, original: original}}
 		}
 	})
 }
@@ -353,11 +364,12 @@ func hasDDL(stmts []db.Statement) bool {
 }
 
 type applyDoneMsg struct {
-	stmts  []db.Statement
-	err    error
-	dur    time.Duration
-	then   func(err error) tea.Cmd
-	atomic bool // the driver ran the batch in one transaction
+	stmts    []db.Statement
+	err      error
+	dur      time.Duration
+	then     func(err error) tea.Cmd
+	atomic   bool // the driver ran the batch in one transaction
+	original string
 }
 
 // ---- tabs -------------------------------------------------------------------------------
@@ -366,6 +378,7 @@ func (w *Workspace) addTab(t tabber) tea.Cmd {
 	w.tabs = append(w.tabs, t)
 	w.cur = len(w.tabs) - 1
 	w.focusSB = false
+	w.m3.place(t)
 	return t.Init()
 }
 
@@ -383,11 +396,16 @@ func (w *Workspace) closeTab(i int) {
 	if len(w.tabs) == 0 {
 		w.focusSB = true
 	}
+	w.fixSplit()
 }
 
 func (w *Workspace) selectTab(i int) {
 	if len(w.tabs) > 0 {
-		w.cur = (i%len(w.tabs) + len(w.tabs)) % len(w.tabs)
+		i = (i%len(w.tabs) + len(w.tabs)) % len(w.tabs)
+		if w.m3.split && w.pane(w.tabs[i]) != w.m3.pane { // a tab of the other group: that group takes the focus
+			w.m3.otherID, w.m3.pane = w.tabs[w.cur].ID(), 1-w.m3.pane
+		}
+		w.cur = i
 		w.focusSB = false
 	}
 }
@@ -404,8 +422,9 @@ func (w *Workspace) openObject(ref db.ObjRef, newTab bool) tea.Cmd {
 	}
 	key := ref.Schema + "." + ref.Name
 	w.a.d.State.Touch(w.conn.Name, key)
-	for _, t := range w.tabs { // already open: just switch
-		if tt, ok := t.(*tableTab); ok && tt.ref == ref && !newTab {
+	w.m3.visit(ref)
+	for _, t := range w.tabs { // already open in this pane: just switch
+		if tt, ok := t.(*tableTab); ok && tt.ref == ref && !newTab && w.pane(t) == w.m3.pane {
 			w.selectTab(indexOf(w.tabs, t))
 			return nil
 		}
@@ -413,6 +432,7 @@ func (w *Workspace) openObject(ref db.ObjRef, newTab bool) tea.Cmd {
 	nt := newTableTab(w, w.newID(), ref)
 	if c, ok := w.tab().(*tableTab); ok && !newTab && !c.Dirty() {
 		w.tabs[w.cur] = nt
+		w.m3.place(nt)
 		w.focusSB = false
 		return nt.Init()
 	}
@@ -445,6 +465,7 @@ func (w *Workspace) newQueryTab(text string) tea.Cmd {
 	t := newQueryTab(w, w.newID())
 	if text != "" {
 		t.ed.SetText(text)
+		t.ed.SetFolded(w.a.d.State.Folds(t.foldKey()))
 	}
 	return w.addTab(t)
 }
@@ -452,8 +473,9 @@ func (w *Workspace) newQueryTab(text string) tea.Cmd {
 // openSaved opens a saved query in a new tab that auto-saves back to its file.
 func (w *Workspace) openSaved(q store.Query) tea.Cmd {
 	cmd := w.newQueryTab(q.SQL)
-	if t, ok := w.tab().(*queryTab); ok {
+	if t, ok := w.tab().(*queryTab); ok && !q.Shared { // a shared query is read-only: no auto-save back to it
 		t.savedAs, t.lastAuto = q.Path, q.SQL
+		t.ed.SetFolded(w.a.d.State.Folds(t.foldKey()))
 	}
 	return cmd
 }
@@ -461,14 +483,21 @@ func (w *Workspace) openSaved(q store.Query) tea.Cmd {
 // ---- messages without a tab -------------------------------------------------------------
 
 func (w *Workspace) handleGlobal(msg tea.Msg) (tea.Cmd, bool) {
+	if cmd, ok := w.handleM4(msg); ok {
+		return cmd, true
+	}
 	if cmd, ok := w.handleDefinitions(msg); ok {
 		return cmd, true
 	}
 	switch m := msg.(type) {
 	case applyDoneMsg:
 		w.applying = false
-		for _, s := range m.stmts {
-			w.record(s.Shown(), "gui", m.dur/time.Duration(max(1, len(m.stmts))), m.err)
+		for i, s := range m.stmts {
+			orig := ""
+			if i == 0 {
+				orig = m.original
+			}
+			w.recordOrig(s.Shown(), "gui", m.dur/time.Duration(max(1, len(m.stmts))), m.err, orig)
 		}
 		if m.err != nil {
 			title := "Statement failed (nothing was committed)"
@@ -495,12 +524,12 @@ func (w *Workspace) handleGlobal(msg tea.Msg) (tea.Cmd, bool) {
 		if m.err != nil {
 			return w.a.fail(m.err), true
 		}
-		return tea.Batch(tea.SetClipboard(m.text), w.a.say("script copied to the clipboard")), true
+		return tea.Batch(setClip(m.text), w.a.say("script copied to the clipboard")), true
 	case ddlShownMsg:
 		if m.err != nil {
 			return w.a.fail(m.err), true
 		}
-		w.a.push(&textViewDlg{title: m.ref.Name, lines: strings.Split(m.ddl, "\n"), actions: []viewAction{{Key: "c", Label: "c: copy", Do: func() tea.Cmd { return tea.SetClipboard(m.ddl) }}}})
+		w.a.push(&textViewDlg{title: m.ref.Name, lines: strings.Split(m.ddl, "\n"), actions: []viewAction{{Key: "c", Label: "c: copy", Do: func() tea.Cmd { return setClip(m.ddl) }}}})
 		return nil, true
 	}
 	return nil, false
@@ -541,18 +570,25 @@ func (w *Workspace) busy() bool {
 			return true
 		}
 	}
-	return false
+	return w.jobCancel != nil
 }
 
 func (w *Workspace) action(name string) tea.Cmd {
 	if w.applying && mutating[name] {
 		return w.a.say("a change is still being sent; wait for it to finish")
 	}
+	if name == "cancel_queries" {
+		name = "cancel_query"
+	}
 	if name == "process_list" && w.busy() {
 		name = "cancel_query" // the same key: cancel while something runs, process list otherwise
 	}
 	if name == "cancel_query" { // works from any pane: the running tab is found, not the focused one
 		var cmds []tea.Cmd
+		if w.jobCancel != nil {
+			w.jobCancel()
+			cmds = append(cmds, w.a.say("cancelled"))
+		}
 		for _, t := range w.tabs {
 			if c, ok := t.(interface{ CancelWork() tea.Cmd }); ok {
 				cmds = append(cmds, c.CancelWork())
@@ -560,6 +596,9 @@ func (w *Workspace) action(name string) tea.Cmd {
 		}
 		if len(cmds) == 0 {
 			return w.a.say("nothing is running")
+		}
+		if d := w.caps.Dialect; (d == "postgres" || d == "mysql") && w.caps.ProcessList { // see what else is still running on the server
+			cmds = append(cmds, w.processList())
 		}
 		return tea.Batch(cmds...)
 	}
@@ -592,9 +631,9 @@ func (w *Workspace) action(name string) tea.Cmd {
 		}
 		w.closeTab(w.cur)
 	case "next_tab":
-		w.selectTab(w.cur + 1)
+		w.stepTab(1)
 	case "prev_tab":
-		w.selectTab(w.cur - 1)
+		w.stepTab(-1)
 	case "toggle_sidebar":
 		w.showSB = !w.showSB
 		if !w.showSB {
@@ -634,6 +673,10 @@ func (w *Workspace) action(name string) tea.Cmd {
 			return w.triggerMenu(t.ref)
 		}
 		return w.a.say("open a table first: triggers belong to a table")
+	case "item_overview":
+		return w.itemOverview()
+	case "close_other_tabs", "close_tabs_right", "close_all_tabs", "rename_tab", "clear_console":
+		return w.m4Action(name)
 	case "reload":
 		w.forget(nil)
 		return tea.Batch(w.sb.load(), w.reloadTab())
@@ -647,18 +690,27 @@ func (w *Workspace) action(name string) tea.Cmd {
 		return w.openAnything()
 	case "open_database":
 		return w.pickDatabase()
-	case "search_in_database", "process_list", "export", "import":
-		return w.a.say("%s arrives in milestone 2", name)
-	case "users", "diagram", "metrics", "backup", "restore", "split_right", "next_pane", "prev_pane":
-		return w.a.say("%s arrives in milestone 3", name)
+	case "search_in_database":
+		return w.searchInDatabase()
+	case "process_list":
+		return w.processList()
+	case "export":
+		return w.exportAction()
+	case "import":
+		return w.importAction()
+	case "users", "diagram", "metrics", "backup", "restore", "split_right", "next_pane", "prev_pane", "assistant", "plugins", "go_back", "go_forward", "mcp_log":
+		return w.m3Action(name)
 	default:
 		if strings.HasPrefix(name, "tab_") {
 			var n int
 			fmt.Sscanf(name, "tab_%d", &n)
-			if n >= 1 && n <= len(w.tabs) {
-				w.selectTab(n - 1)
+			if idx := w.groupIdx(w.m3.pane); n >= 1 && n <= len(idx) {
+				w.selectTab(idx[n-1])
 			}
 			return nil
+		}
+		if cmd, ok := w.m5Action(name); ok {
+			return cmd
 		}
 		return w.a.say("%q is not available here", name)
 	}
@@ -775,6 +827,9 @@ func (w *Workspace) pickSafeMode() tea.Cmd {
 	}
 	w.a.push(&pickerDlg{title: "Safe mode for " + w.conn.Name, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
 		l := it.Value.(safemode.Level)
+		if l == w.level {
+			return nil
+		}
 		// leaving a password-protected level needs the password, like TablePlus
 		if (w.level == safemode.Safe1 || w.level == safemode.Safe2) && w.o.Password == "" {
 			// nothing to compare against: a blank field must not pass as "the database password"
@@ -856,8 +911,16 @@ func (w *Workspace) openAnything() tea.Cmd {
 	for _, f := range []struct{ label, act string }{
 		{"New SQL editor", "new_query_tab"}, {"Open connection", "open_connection"}, {"New session", "new_session"}, {"Switch session", "switch_session"}, {"Open database", "open_database"},
 		{"Safe mode", "safe_mode"}, {"Key bindings", "help"}, {"Reload", "reload"}, {"Process list", "process_list"}, {"Disconnect", "disconnect"},
+		{"User management", "users"}, {"ER diagram", "diagram"}, {"Metrics board", "metrics"}, {"Backup", "backup"}, {"Restore", "restore"},
+		{"AI assistant", "assistant"}, {"MCP activity", "mcp_log"}, {"Run a plugin", "plugins"},
+		{"Cancel running queries", "cancel_queries"}, {"Close other tabs", "close_other_tabs"}, {"Close tabs to the right", "close_tabs_right"},
+		{"Close all tabs", "close_all_tabs"}, {"Pin connection to this tab", "pin_connection"}, {"Schema diff", "schema_diff"}, {"Data diff", "data_diff"}, {"Fake data", "fake_rows"}, {"Connection details", "connection_details"}, {"Item overview", "item_overview"}, {"Rename tab", "rename_tab"}, {"Clear console", "clear_console"},
+		{"Open a SQL file", "open_file"}, {"Open a recent file", "open_recent"}, {"Settings", "settings"}, {"Close other connections", "close_other_connections"},
 	} {
 		all = append(all, pickItem{Label: f.label, Detail: "feature", Value: target{kind: "action", name: f.act}})
+	}
+	for _, n := range pluginNames() {
+		all = append(all, pickItem{Label: n, Detail: "plugin", Value: target{kind: "plugin", name: n}})
 	}
 	p := &pickerDlg{title: "Open anything  (^name anchors the start, name$ the end)", filter: true, items: all}
 	p.dynamic = func(q string) []pickItem {
@@ -892,6 +955,8 @@ func (w *Workspace) openAnything() tea.Cmd {
 			return w.openSaved(t.q)
 		case "database":
 			return w.openDatabase(t.name)
+		case "plugin":
+			return w.pluginsAction(t.name)
 		}
 		return w.a.run(t.name)
 	}
@@ -949,7 +1014,10 @@ func (w *Workspace) crumbs(th Theme) (left, right []string) {
 	}
 	name := dot + th.StatusKey.Render(c.Name)
 	if c.Tag != "" || c.Color != "" {
-		name += th.StatusBar.Render(" ") + th.TagStyle(c.Tag, c.Color).Render(" "+strings.ToUpper(orDefault(c.Tag, "●"))+" ")
+		name += th.StatusBar.Render(" ") + th.TagStyle(c.Tag, w.a.tagColor(c)).Render(" "+strings.ToUpper(orDefault(c.Tag, "●"))+" ")
+	}
+	if c.ReadOnly {
+		name += th.StatusBar.Render(" ") + th.Warn.Background(bg).Bold(true).Render("READ-ONLY")
 	}
 	left = append(left, name)
 	where := w.sess.CurrentDatabase()
@@ -965,6 +1033,9 @@ func (w *Workspace) crumbs(th Theme) (left, right []string) {
 	} else {
 		right = append(right, th.Warn.Background(bg).Bold(true).Render("⚠ "+w.level.Label()))
 	}
+	if c.Encoding != "" {
+		right = append(right, th.StatusBar.Render("enc "+c.Encoding))
+	}
 	if w.dirty() {
 		right = append(right, th.Warn.Background(bg).Bold(true).Render("● unsaved"))
 	}
@@ -977,19 +1048,19 @@ func (w *Workspace) crumbs(th Theme) (left, right []string) {
 	return left, right
 }
 
-func (w *Workspace) view(th Theme, W, H int) string {
-	sbW, detW, conH := 0, 0, 0
-	if w.showSB {
+// layout is the pane geometry of a W x H body: sidebar, detail and console sizes and the main pane.
+func layoutOf(showSB, showDetail, showConsole bool, W, H int) (sbW, detW, conH, mainW, mainH int) {
+	if showSB {
 		sbW = clamp(W/4, 24, 40)
 	}
-	if w.showDetail {
+	if showDetail {
 		detW = clamp(W/4, 30, 46)
 	}
-	if w.showConsole && H >= 14 { // a console needs room for the main pane too
+	if showConsole && H >= 14 { // a console needs room for the main pane too
 		conH = clamp(H/4, 5, 12)
 	}
-	mainH := H - conH
-	mainW := W - sbW - detW
+	mainH = H - conH
+	mainW = W - sbW - detW
 	if sbW > 0 { // one blank column between panes keeps the borders from doubling up
 		mainW--
 	}
@@ -999,22 +1070,20 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	if mainW < 20 {
 		mainW, sbW, detW = W, 0, 0
 	}
+	return
+}
+
+func (w *Workspace) view(th Theme, W, H int) string {
+	sbW, detW, conH, mainW, mainH := layoutOf(w.showSB, w.showDetail, w.showConsole, W, H)
 	var cols []string
 	if sbW > 0 {
 		cols = append(cols, frame(th, w.sb.title(th), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
 	}
-	mainTitle := w.conn.Name
-	var mainHint string
-	if t := w.tab(); t != nil {
-		mainTitle = w.tabBar(th)
-		if b, ok := t.(interface{ Busy() bool }); ok && b.Busy() {
-			mainTitle += th.Warn.Render(" " + w.a.spinner() + " loading…")
-		}
-		if h, ok := t.(interface{ Hint(Theme) string }); ok {
-			mainHint = h.Hint(th)
-		}
+	if w.m3.split {
+		cols = append(cols, w.splitFrames(th, mainW, mainH))
+	} else {
+		cols = append(cols, w.paneFrame(th, w.tab(), 0, mainW, mainH, !w.focusSB && !w.focusDetail, !w.focusSB))
 	}
-	cols = append(cols, frame(th, mainTitle, mainHint, w.mainView(th, mainW-4, mainH-2), mainW, mainH, !w.focusSB && !w.focusDetail))
 	if detW > 0 {
 		var hint string
 		if w.focusDetail {
@@ -1024,7 +1093,7 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	}
 	out := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 	if conH > 0 {
-		out += "\n" + frame(th, fmt.Sprintf("Console · %d statements", len(w.console)), th.chips(keymap.Display(w.a.d.Keys.Prefix)+" C-c", "hide"), w.consoleView(th, W-4, conH-2), W, conH, false)
+		out += "\n" + frame(th, fmt.Sprintf("Console · %d statements", len(w.console.Lines())), th.chips(keymap.Display(w.a.d.Keys.Prefix)+" C-c", "hide"), w.consoleView(th, W-4, conH-2), W, conH, false)
 	}
 	return out
 }
@@ -1035,22 +1104,27 @@ func borderCol(th Theme, h int) string {
 
 // tabBar renders "1 ▦ customers ●" per tab for the main frame's top edge; the active one is
 // highlighted, dimmed while the sidebar has focus.
-func (w *Workspace) tabBar(th Theme) string {
+func (w *Workspace) tabBar(th Theme, g, active int, focused bool) string {
 	var bar []string
+	n := 0
 	for i, t := range w.tabs {
+		if w.pane(t) != g {
+			continue
+		}
+		n++
 		icon := "▦"
 		if _, ok := t.(*queryTab); ok {
 			icon = "≡"
 		}
-		title := t.Title()
+		title := w.tabTitle(t)
 		if t.Dirty() {
 			title += " ●"
 		}
-		label := fmt.Sprintf(" %d %s %s ", i+1, icon, fit(title, min(width(title), 24)))
+		label := fmt.Sprintf(" %d %s %s ", n, icon, fit(title, min(width(title), 24)))
 		switch {
-		case i == w.cur && !w.focusSB:
+		case i == active && focused:
 			bar = append(bar, th.TabActive.Render(label))
-		case i == w.cur:
+		case i == active:
 			bar = append(bar, th.TabActive.Faint(true).Render(label))
 		default:
 			bar = append(bar, th.TabIdle.Render(label))
@@ -1059,17 +1133,24 @@ func (w *Workspace) tabBar(th Theme) string {
 	return strings.Join(bar, " ")
 }
 
-func (w *Workspace) mainView(th Theme, W, H int) string {
-	var lines []string
-	var body string
-	bodyH := H
-	if t := w.tab(); t != nil {
-		body = t.View(th, W, bodyH)
+// paneFrame is one main frame: the tab bar of group g on its top edge and tab t (or the empty
+// state) inside. focused lights the frame; barLit highlights the active tab in the bar.
+func (w *Workspace) paneFrame(th Theme, t tabber, g, W, H int, focused, barLit bool) string {
+	title, hint := w.conn.Name, ""
+	body := ""
+	if t != nil {
+		title = w.tabBar(th, g, indexOf(w.tabs, t), barLit)
+		if b, ok := t.(interface{ Busy() bool }); ok && b.Busy() {
+			title += th.Warn.Render(" " + w.a.spinner() + " loading…")
+		}
+		if h, ok := t.(interface{ Hint(Theme) string }); ok {
+			hint = h.Hint(th)
+		}
+		body = t.View(th, W-4, H-2)
 	} else {
-		body = w.emptyView(th, W, bodyH)
+		body = w.emptyView(th, W-4, H-2)
 	}
-	lines = append(lines, padLines(strings.Split(body, "\n"), W, bodyH)...)
-	return strings.Join(lines, "\n")
+	return frame(th, title, hint, strings.Join(padLines(strings.Split(body, "\n"), W-4, H-2), "\n"), W, H, focused)
 }
 
 // emptyView is shown in a workspace with no tabs: where you are and what to do next.
@@ -1147,14 +1228,15 @@ func (w *Workspace) detailView(th Theme, W, H int) string {
 
 func (w *Workspace) consoleView(th Theme, W, H int) string {
 	var lines []string
-	start := max(0, len(w.console)-H)
-	for _, c := range w.console[start:] {
+	all := w.console.Lines()
+	for _, c := range all[max(0, len(all)-H):] {
 		mark := th.OK.Render("✓")
-		if c.err {
+		if c.Failed {
 			mark = th.Err.Render("✗")
 		}
-		sql := strings.Join(strings.Fields(c.sql), " ")
-		lines = append(lines, " "+th.Dim.Render(c.at.Format("15:04:05"))+" "+mark+" "+sql+th.Dim.Render("  "+c.dur.Round(time.Millisecond).String()))
+		sql := strings.Join(strings.Fields(c.SQL), " ")
+		sql = highlight(th, sql, lexLines(w.caps.Dialect, []string{sql})[0])
+		lines = append(lines, " "+th.Dim.Render(c.At.Format("15:04:05"))+" "+mark+" "+sql+th.Dim.Render("  "+c.Dur.Round(time.Millisecond).String()))
 	}
 	if len(lines) == 0 {
 		lines = []string{th.Dim.Render("  every statement sent to the server appears here")}
