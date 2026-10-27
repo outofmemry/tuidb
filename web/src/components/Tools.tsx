@@ -132,14 +132,19 @@ export function ImportDialog({ sid, table: ref, file: dropped, onClose, onDone, 
     if (!file) return
     const t = setTimeout(async () => {
       try {
-        const p = await api<{ columns: string[]; rows: string[][] }>('POST', `${base}/import/preview`, upload({ source, header, delimiter }, source === 'csv' ? file.slice(0, 1 << 20) : file))
+        let body: Blob = file
+        if (source === 'csv' && file.size > 1 << 20) { // only the first MB, cut at its last newline (UTF-16 has no single-byte newline, so it is cut as is)
+          const head = file.slice(0, 1 << 20)
+          body = /^utf-?16/i.test(encoding) ? head : head.slice(0, previewLength(new Uint8Array(await head.arrayBuffer())))
+        }
+        const p = await api<{ columns: string[]; rows: string[][] }>('POST', `${base}/import/preview`, upload({ source, header, delimiter, encoding, null_as: nullAs || undefined, empty_is_null: emptyNull, keep_formula_quote: keepQuote }, body))
         setPrev(p); setErr('')
-        setMapping(Object.fromEntries(p.columns.map((c) => [c, create || tcols.includes(c) ? c : ''])))
       } catch (e) { setPrev(null); setErr(msg(e)) }
     }, 250)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, source, header, delimiter, create, cols.data])
+  }, [file, source, header, delimiter, encoding, nullAs, emptyNull, keepQuote, create, cols.data])
+  useEffect(() => { if (prev) setMapping(autoMap(prev.columns, tcols, match, create)) }, [prev, match, create, cols.data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const pick = async (f: File | undefined) => {
     if (!f) return
