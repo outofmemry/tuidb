@@ -1,4 +1,5 @@
-# Serves the web UI: docker run -p 7788:7788 -v ~/.config/webtuidb:/home/nonroot/.config/webtuidb webtuidb
+# Serves the web UI on plain HTTP. It refuses to start without WEBTUIDB_PASSWORD or WEBTUIDB_TOKEN (or an explicit WEBTUIDB_INSECURE=1):
+# docker run -p 127.0.0.1:7788:7788 -e WEBTUIDB_PASSWORD=... --user $(id -u) -v ~/.config/webtuidb:/home/nonroot/.config/webtuidb webtuidb
 FROM node:22-alpine AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./

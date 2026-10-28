@@ -45,6 +45,7 @@ type open struct {
 	sess   db.Session
 	closer func()
 	use    sync.RWMutex // held shared while a tool runs on sess; disconnect takes it exclusively before closing
+	closed bool         // set under use.Lock once disconnected; a call that took RLock afterwards must not use sess
 }
 
 type Server struct {
@@ -290,6 +291,7 @@ func (s *Server) build(tok *config.MCPToken) *sdk.Server {
 				}
 				o.use.Lock() // waits for tools still running on it
 				defer o.use.Unlock()
+				o.closed = true
 				o.sess.Close()
 				o.closer()
 				return "closed", nil
@@ -312,6 +314,9 @@ func (s *Server) build(tok *config.MCPToken) *sdk.Server {
 				}
 				o.use.RLock()
 				defer o.use.RUnlock()
+				if o.closed {
+					return nil, fmt.Errorf("%q is disconnected", in.Connection)
+				}
 				dialect := o.sess.Caps().Dialect
 				stmts := db.Split(dialect, in.SQL)
 				for _, st := range stmts {
@@ -326,6 +331,11 @@ func (s *Server) build(tok *config.MCPToken) *sdk.Server {
 					}
 					if !write && !ro {
 						return nil, fmt.Errorf("not a read-only statement; use execute_query")
+					}
+					if !write {
+						if fn := sideEffectFunc(st.Text); fn != "" {
+							return nil, fmt.Errorf("%s is not allowed in a read-only query; use execute_query", fn)
+						}
 					}
 					if write && !ro && s.cfg.MCP.ApprovalForUnsafe {
 						if s.Approver == nil {
@@ -346,6 +356,11 @@ func (s *Server) build(tok *config.MCPToken) *sdk.Server {
 					defer cancel()
 				}
 				runner := o.sess
+				if !write && !s.connReadOnly(in.Connection) {
+					if readOnlyBegin[dialect] == "" {
+						return nil, fmt.Errorf("execute_read_query cannot be enforced read-only on this %s connection; mark the connection read_only in its settings or use execute_query", dialect)
+					}
+				}
 				if begin := readOnlyBegin[dialect]; !write && begin != "" && !s.connReadOnly(in.Connection) { // a read_only connection is already server-enforced
 					if pn, ok := o.sess.(db.Pinner); ok {
 						p, err := pn.Pin(ctx)
@@ -508,6 +523,9 @@ func (s *Server) addStoreTools(srv *sdk.Server, tok *config.MCPToken, run func(t
 				}
 				o.use.RLock()
 				defer o.use.RUnlock()
+				if o.closed {
+					return nil, fmt.Errorf("%q is disconnected", conn)
+				}
 				out := []map[string]any{}
 				for _, r := range board.Run(ctx, o.sess, bs[i], in.Vars, s.cfg.General.RowLimit) {
 					m := map[string]any{"title": r.Panel.Title, "kind": r.Panel.Kind}
@@ -580,3 +598,9 @@ var strLit = regexp.MustCompile(`'(?:[^']|'')*'`)
 // redact hides string literals (passwords in ALTER ROLE ... PASSWORD 'x') before they reach the log.
 // shortcut: backslash escapes and $tag$ strings are not recognised; upgrade to the db scanner.
 func redact(sql string) string { return strLit.ReplaceAllString(sql, "'…'") }
+
+// sideEffectRe matches functions and verbs that change state even inside a statement the keyword classifier calls read-only.
+var sideEffectRe = regexp.MustCompile(`(?i)\b(pg_terminate_backend|pg_cancel_backend|pg_read_file|pg_read_binary_file|pg_ls_dir|lo_import|lo_export|copy|dblink|setval|nextval)\b`)
+
+// sideEffectFunc returns the first such word in stmt ("" = none). It is a conservative word match (string literals included).
+func sideEffectFunc(stmt string) string { return strings.ToLower(sideEffectRe.FindString(stmt)) }

@@ -20,8 +20,11 @@ data with pending changes, run queries, and drive everything with tmux-style key
 # a release binary (linux, macOS, Windows; amd64, arm64): download it from the Releases page, or
 brew install --HEAD outofmemry/tap/webtuidb
 
-# Docker: the web UI on port 7788 (mount your config so it sees your connections)
-docker build -t webtuidb . && docker run -p 7788:7788 -v ~/.config/webtuidb:/home/nonroot/.config/webtuidb webtuidb
+# Docker: the web UI on port 7788 (mount your config so it sees your connections).
+# The container listens on 0.0.0.0 over plain HTTP, so it refuses to start unless WEBTUIDB_PASSWORD or WEBTUIDB_TOKEN is set
+# (WEBTUIDB_INSECURE=1 accepts an open server explicitly). --user lets the container read and chmod your bind-mounted files;
+# publish on 127.0.0.1 and put TLS in front of anything beyond that.
+docker build -t webtuidb . && docker run -p 127.0.0.1:7788:7788 -e WEBTUIDB_PASSWORD='choose-one' --user $(id -u) -v ~/.config/webtuidb:/home/nonroot/.config/webtuidb webtuidb
 
 # from source (needs Go, and Node 20+ for the web app)
 make web build      # web app + go build -o webtuidb .

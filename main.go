@@ -5,11 +5,13 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 
@@ -68,6 +70,12 @@ func run() error {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if err := checkModes(map[string]bool{
+		"frontend": *frontend, "mcp": *mcpStdio, "keys": *keys, "theme": *theme, "man": *man,
+		"completion": *completion != "", "mcp-config": *mcpConfig != "", "list-connections": *listConns, "version": *version,
+	}, flag.NArg()); err != nil {
+		return err
+	}
 	switch { // these never touch the config, so they work even when it is broken
 	case *version:
 		fmt.Println("webtuidb", versionString())
@@ -80,7 +88,15 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		snippet, file, err := mcpSnippet(*mcpConfig, exe)
+		var extra []string
+		if flag.Lookup("config") != nil && configGiven(flag.CommandLine) {
+			abs, aerr := filepath.Abs(*cfgPath)
+			if aerr != nil {
+				return aerr
+			}
+			extra = []string{"--config", abs}
+		}
+		snippet, file, err := mcpSnippet(*mcpConfig, exe, extra...)
 		if err != nil {
 			return err
 		}
@@ -180,8 +196,14 @@ func run() error {
 		Queries: &store.Queries{Root: filepath.Join(data, "queries")},
 	}
 	if *frontend {
-		if flag.NArg() > 0 {
-			return fmt.Errorf("--frontend takes no connection argument; pick the connection in the browser")
+		if *token == "" {
+			*token = os.Getenv("WEBTUIDB_TOKEN")
+		}
+		if pw := os.Getenv("WEBTUIDB_PASSWORD"); pw != "" {
+			cfg.Web.Password = pw
+		}
+		if *insecure && *token == "" && cfg.Web.Password == "" && os.Getenv("WEBTUIDB_INSECURE") != "1" {
+			return fmt.Errorf("--insecure-listen without authentication: set WEBTUIDB_PASSWORD or WEBTUIDB_TOKEN (or [web] password / --token), or WEBTUIDB_INSECURE=1 to accept an open server")
 		}
 		return web.Run(web.Options{
 			Cfg: cfg, Conns: conns, ConnPath: connPath, State: state, Hist: d.Hist, Queries: d.Queries,
@@ -210,17 +232,20 @@ func versionString() string {
 }
 
 // mcpSnippet returns the stdio server entry for an MCP client and the file it belongs in.
-func mcpSnippet(client, exe string) (snippet, file string, err error) {
+func mcpSnippet(client, exe string, extra ...string) (snippet, file string, err error) {
 	q := fmt.Sprintf("%q", exe)
+	args := append([]string{"--mcp"}, extra...)
+	jb, _ := json.Marshal(args)
+	ja := string(jb)
 	switch client {
 	case "claude-code":
-		return fmt.Sprintf("{\"mcpServers\":{\"webtuidb\":{\"command\":%s,\"args\":[\"--mcp\"]}}}\n", q), ".mcp.json (project) or ~/.claude.json", nil
+		return fmt.Sprintf("{\"mcpServers\":{\"webtuidb\":{\"command\":%s,\"args\":%s}}}\n", q, ja), ".mcp.json (project) or ~/.claude.json", nil
 	case "cursor":
-		return fmt.Sprintf("{\"mcpServers\":{\"webtuidb\":{\"command\":%s,\"args\":[\"--mcp\"]}}}\n", q), "~/.cursor/mcp.json", nil
+		return fmt.Sprintf("{\"mcpServers\":{\"webtuidb\":{\"command\":%s,\"args\":%s}}}\n", q, ja), "~/.cursor/mcp.json", nil
 	case "vscode":
-		return fmt.Sprintf("{\"servers\":{\"webtuidb\":{\"type\":\"stdio\",\"command\":%s,\"args\":[\"--mcp\"]}}}\n", q), ".vscode/mcp.json", nil
+		return fmt.Sprintf("{\"servers\":{\"webtuidb\":{\"type\":\"stdio\",\"command\":%s,\"args\":%s}}}\n", q, ja), ".vscode/mcp.json", nil
 	case "codex": // Codex reads TOML, not JSON
-		return fmt.Sprintf("[mcp_servers.webtuidb]\ncommand = %s\nargs = [\"--mcp\"]\n", q), "~/.codex/config.toml", nil
+		return fmt.Sprintf("[mcp_servers.webtuidb]\ncommand = %s\nargs = %s\n", q, ja), "~/.codex/config.toml", nil
 	}
 	return "", "", fmt.Errorf("unknown MCP client %q (claude-code | codex | cursor | vscode)", client)
 }
@@ -332,13 +357,80 @@ func pick(d *ui.Deps, arg string) (config.Connection, error) {
 		if err != nil {
 			return c, err
 		}
-		for _, o := range d.Conns { // same name as a saved one: use the saved settings
-			if o.Name == c.Name {
-				return o, nil
+		for _, o := range d.Conns { // same name as a saved one: its settings, with every part the URL gave on top
+			if c.Name != "" && o.Name == c.Name {
+				return overlayURL(o, c), nil // not written back: the saved entry stays as it is
 			}
 		}
 		d.Conns = append(d.Conns, c)
 		return c, nil
 	}
 	return config.Connection{}, fmt.Errorf("no saved connection named %q (and it is not a URL)", arg)
+}
+
+// configGiven reports whether --config was passed explicitly.
+func configGiven(fs *flag.FlagSet) bool {
+	given := false
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == "config" })
+	return given
+}
+
+// checkModes allows at most one mode flag, and positional arguments only when none is set (the TUI takes a connection or URL).
+func checkModes(modes map[string]bool, nargs int) error {
+	var set []string
+	for name, on := range modes {
+		if on {
+			set = append(set, "--"+name)
+		}
+	}
+	slices.Sort(set)
+	if len(set) > 1 {
+		return fmt.Errorf("%s cannot be combined; use only one of --frontend, --mcp, --keys, --theme, --man, --completion, --mcp-config, --list-connections, --version", strings.Join(set, " and "))
+	}
+	if len(set) == 1 && nargs > 0 {
+		return fmt.Errorf("%s takes no connection or URL argument", set[0])
+	}
+	return nil
+}
+
+// overlayURL returns the saved connection with every component the URL supplied laid over it.
+func overlayURL(saved, u config.Connection) config.Connection {
+	m := saved
+	set := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	set(&m.Driver, u.Driver)
+	set(&m.Host, u.Host)
+	set(&m.User, u.User)
+	if u.Password != "" {
+		m.Password, m.PasswordCmd = u.Password, ""
+	}
+	set(&m.Database, u.Database)
+	set(&m.SSLMode, u.SSLMode)
+	set(&m.Tag, u.Tag)
+	set(&m.DriverVersion, u.DriverVersion)
+	if u.Port != 0 {
+		m.Port = u.Port
+	}
+	if u.LazyLoad {
+		m.LazyLoad = true
+	}
+	if u.SSH != nil {
+		m.SSH = u.SSH
+	}
+	if u.Open != nil {
+		m.Open = u.Open
+	}
+	if len(u.Options) > 0 {
+		m.Options = map[string]string{}
+		for k, v := range saved.Options {
+			m.Options[k] = v
+		}
+		for k, v := range u.Options {
+			m.Options[k] = v
+		}
+	}
+	return m
 }

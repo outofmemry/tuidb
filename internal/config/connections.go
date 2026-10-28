@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -233,7 +234,10 @@ func loadConnections(path string, fix bool) ([]Connection, error) {
 	// The file holds plaintext passwords: it is only ever read with owner-only permissions.
 	if st, err := os.Stat(path); fix && err == nil && st.Mode().Perm()&0o077 != 0 {
 		if err := os.Chmod(path, 0o600); err != nil {
-			return nil, fmt.Errorf("%s is readable by other users and could not be fixed: %w", path, err)
+			if !chmodTolerable(path, st.Mode().Perm(), err) {
+				return nil, fmt.Errorf("%s is readable by other users and could not be fixed: %w", path, err)
+			}
+			fmt.Fprintf(os.Stderr, "webtuidb: warning: could not chmod %s to 600 (%v); continuing\n", path, err)
 		}
 	}
 	seen := map[string]bool{}
@@ -631,4 +635,22 @@ func Groups(conns []Connection) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// chmodTolerable: a failed chmod (not the owner, read-only mount: typical for a bind mount in a non-root container) is
+// survivable when other users cannot read the file anyway, or when the directory cannot be written so nobody else can swap it.
+func chmodTolerable(path string, perm os.FileMode, err error) bool {
+	if !errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.EROFS) {
+		return false
+	}
+	if perm&0o044 == 0 {
+		return true
+	}
+	f, cerr := os.CreateTemp(filepath.Dir(path), ".wtdb-probe-*")
+	if cerr != nil {
+		return true // directory not writable
+	}
+	f.Close()
+	os.Remove(f.Name())
+	return false
 }

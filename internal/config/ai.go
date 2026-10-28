@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
+	"strings"
 )
 
 // AIFor returns the default assistant settings for name "", else the [ai.providers.<name>] entry
@@ -19,6 +21,18 @@ func AIFor(cfg AI, name string) (AI, error) {
 	}
 	if p.Provider != "" && !validAIProvider(p.Provider) {
 		return AI{}, fmt.Errorf("ai.providers.%s: provider %q is not one of anthropic|openai", name, p.Provider)
+	}
+	if p.BaseURL != "" && p.Provider == "" { // a custom endpoint must not silently inherit the default provider's wire format
+		u, err := url.Parse(p.BaseURL)
+		if err != nil || u.Host == "" {
+			return AI{}, fmt.Errorf("ai.providers.%s: bad base_url", name)
+		}
+		switch {
+		case strings.Contains(u.Path, "/v1") || !strings.HasSuffix(strings.ToLower(u.Hostname()), "anthropic.com"):
+			p.Provider = "openai"
+		default:
+			return AI{}, fmt.Errorf("ai.providers.%s: base_url is set without provider; add provider = \"anthropic\" or \"openai\"", name)
+		}
 	}
 	for _, f := range []struct {
 		dst *string

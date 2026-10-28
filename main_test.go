@@ -5,11 +5,12 @@ import (
 	"flag"
 	"strings"
 	"testing"
+	"webtuidb/internal/config"
 )
 
 func TestMCPSnippet(t *testing.T) {
 	for _, c := range []string{"claude-code", "cursor", "vscode"} {
-		s, file, err := mcpSnippet(c, `/opt/my dir/webtuidb`)
+		s, file, err := mcpSnippet(c, `/opt/my dir/webtuidb`, "--config", "/etc/w.toml")
 		var v map[string]map[string]struct {
 			Command string
 			Args    []string
@@ -18,7 +19,7 @@ func TestMCPSnippet(t *testing.T) {
 			t.Fatalf("%s: %q %v", c, s, err)
 		}
 		for _, srv := range v {
-			if e := srv["webtuidb"]; e.Command != "/opt/my dir/webtuidb" || len(e.Args) != 1 || e.Args[0] != "--mcp" {
+			if e := srv["webtuidb"]; e.Command != "/opt/my dir/webtuidb" || strings.Join(e.Args, " ") != "--mcp --config /etc/w.toml" {
 				t.Fatalf("%s: %+v", c, e)
 			}
 		}
@@ -50,5 +51,44 @@ func TestCompletionScript(t *testing.T) {
 func TestVersionAndMan(t *testing.T) {
 	if versionString() == "" || !strings.HasPrefix(manPage, ".TH WEBTUIDB") {
 		t.Fatalf("version %q, man %.20q", versionString(), manPage)
+	}
+}
+
+func TestMCPSnippetDefaultArgs(t *testing.T) {
+	if s, _, _ := mcpSnippet("codex", "/x"); !strings.Contains(s, `args = ["--mcp"]`) {
+		t.Fatalf("%q", s)
+	}
+}
+
+func TestCheckModes(t *testing.T) {
+	if err := checkModes(map[string]bool{"mcp": true, "frontend": true}, 0); err == nil || !strings.Contains(err.Error(), "--frontend and --mcp") {
+		t.Fatalf("%v", err)
+	}
+	if err := checkModes(map[string]bool{"keys": true, "frontend": true}, 0); err == nil {
+		t.Fatal("keys+frontend accepted")
+	}
+	if err := checkModes(map[string]bool{"mcp": true}, 1); err == nil {
+		t.Fatal("--mcp extra accepted")
+	}
+	if err := checkModes(map[string]bool{"mcp": false}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkModes(map[string]bool{"version": true}, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOverlayURL(t *testing.T) {
+	saved := config.Connection{Name: "Prod", Driver: "postgres", Host: "prod.db", Port: 5432, User: "app", Password: "pw", Database: "main", Tag: "prod", SafeMode: "strict"}
+	u, err := config.ParseURL("postgresql://bob:sec@sandbox.db:6000/sbx?name=Prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := overlayURL(saved, u)
+	if m.Host != "sandbox.db" || m.Port != 6000 || m.User != "bob" || m.Password != "sec" || m.Database != "sbx" || m.Tag != "prod" || m.SafeMode != "strict" || m.Name != "Prod" {
+		t.Fatalf("%+v", m)
+	}
+	if saved.Host != "prod.db" {
+		t.Fatal("saved mutated")
 	}
 }

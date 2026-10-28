@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,11 +18,17 @@ import (
 type fakeSess struct {
 	db.Session // nil: only the methods below are used
 	ran        []string
+	dialect    string // "" = postgres
 }
 
-func (f *fakeSess) Caps() db.Capabilities { return db.Capabilities{Dialect: "postgres"} }
-func (f *fakeSess) ServerInfo() string    { return "fake" }
-func (f *fakeSess) Close() error          { return nil }
+func (f *fakeSess) Caps() db.Capabilities {
+	if f.dialect != "" {
+		return db.Capabilities{Dialect: f.dialect}
+	}
+	return db.Capabilities{Dialect: "postgres"}
+}
+func (f *fakeSess) ServerInfo() string { return "fake" }
+func (f *fakeSess) Close() error       { return nil }
 func (f *fakeSess) Exec(_ context.Context, stmt string, _ int) (*db.Result, error) {
 	f.ran = append(f.ran, stmt)
 	return &db.Result{Columns: []db.ResultColumn{{Name: "a"}}, Rows: [][]any{{1}}, HasRows: true}, nil
@@ -205,4 +212,65 @@ func TestStoreTools(t *testing.T) {
 	if out, bad := call(t, s, ro, "run_board", map[string]any{"name": "x"}); !bad || !strings.Contains(out, "no board") {
 		t.Errorf("run: %s", out)
 	}
+}
+
+func TestReadQueryGuards(t *testing.T) {
+	full := &config.MCPToken{Name: "f", Scope: "full"}
+	mk := func(dialect string, roConn bool) (*Server, *fakeSess) {
+		fs := &fakeSess{dialect: dialect}
+		s := New(config.Config{General: config.General{RowLimit: 10}}, []config.Connection{{Name: "c", Driver: "fake", ReadOnly: roConn}})
+		s.connect = func(context.Context, config.Connection) (db.Session, func(), error) { return fs, func() {}, nil }
+		call(t, s, full, "open_connection", map[string]any{"connection": "c"})
+		return s, fs
+	}
+	s, fs := mk("postgres", false)
+	for _, q := range []string{"SELECT pg_terminate_backend(1)", "select PG_READ_FILE('/etc/passwd')", "SELECT nextval('s')", "SELECT lo_export(1,'/x')", "SELECT setval('s',1)", "SELECT * FROM dblink('a','b') AS t(x int)"} {
+		if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": q}); !bad || !strings.Contains(out, "not allowed in a read-only query") {
+			t.Errorf("%s: %s", q, out)
+		}
+	}
+	if len(fs.ran) != 0 {
+		t.Errorf("ran %v", fs.ran)
+	}
+	s, _ = mk("cql", false)
+	if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); !bad || !strings.Contains(out, "read_only") {
+		t.Errorf("no begin-read-only dialect: %s", out)
+	}
+	s, _ = mk("cql", true)
+	if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); bad {
+		t.Errorf("read_only connection refused: %s", out)
+	}
+}
+
+func TestDisconnectedUnderLock(t *testing.T) {
+	fs := &fakeSess{}
+	s := New(config.Config{General: config.General{RowLimit: 10}}, []config.Connection{{Name: "c", Driver: "fake"}})
+	s.connect = func(context.Context, config.Connection) (db.Session, func(), error) { return fs, func() {}, nil }
+	full := &config.MCPToken{Name: "f", Scope: "full"}
+	call(t, s, full, "open_connection", map[string]any{"connection": "c"})
+	s.mu.Lock()
+	o := s.open["c"]
+	s.mu.Unlock()
+	o.use.Lock()
+	o.closed = true // what disconnect does, while a call has already fetched o
+	o.use.Unlock()
+	if out, bad := call(t, s, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"}); !bad {
+		t.Fatalf("ran on a closed session: %s", out)
+	}
+	var wg sync.WaitGroup
+	s2 := New(config.Config{General: config.General{RowLimit: 10}}, []config.Connection{{Name: "c", Driver: "fake"}})
+	s2.connect = s.connect
+	call(t, s2, full, "open_connection", map[string]any{"connection": "c"})
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if i == 4 {
+				call(t, s2, full, "disconnect", map[string]any{"connection": "c"})
+				return
+			}
+			call(t, s2, full, "execute_read_query", map[string]any{"connection": "c", "sql": "SELECT 1"})
+		}(i)
+	}
+	wg.Wait()
 }
