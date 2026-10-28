@@ -8,7 +8,7 @@ build:
 test:
 	go vet ./... && go test ./...
 up:
-	docker compose up -d --wait postgres mysql clickhouse redis mongo mariadb cockroach cassandra dynamodb && docker compose run --rm redis-seed
+	docker compose up -d --wait postgres mysql clickhouse redis mongo mariadb cassandra dynamodb && docker compose run --rm redis-seed
 down:
 	docker compose down -v
 # Driver and end-to-end UI tests against the compose databases (needs `make up`).

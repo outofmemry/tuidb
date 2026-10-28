@@ -43,6 +43,7 @@ func TestPostgresRoundTrip(t *testing.T) {
 		b, _ := json.Marshal(body)
 		req, _ := http.NewRequest(method, srv.URL+path, bytes.NewReader(b))
 		req.Header.Set("Authorization", "Bearer t")
+		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatal(err)
