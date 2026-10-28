@@ -41,12 +41,39 @@ func (s *Server) deleteHistory(r *http.Request) (any, error) {
 	return nil, s.o.Hist.Clear(q.Get("conn"))
 }
 
+// queryItem is a list entry: the query plus the ETag a PUT's If-Match expects.
+type queryItem struct {
+	store.Query
+	Etag string `json:"etag"`
+}
+
 func (s *Server) listQueries(r *http.Request) (any, error) {
 	l, err := s.o.Queries.List()
-	if l == nil {
-		l = []store.Query{}
+	out := make([]queryItem, 0, len(l))
+	for _, q := range l {
+		out = append(out, queryItem{q, queryETag(q)})
 	}
-	return l, err
+	return out, err
+}
+
+// getQuery returns one saved query with its ETag header (the value updateQuery checks If-Match against).
+func (s *Server) getQuery(r *http.Request) (any, error) {
+	p, err := queryPath(r)
+	if err != nil {
+		return nil, err
+	}
+	q, err := s.o.Queries.Read(p)
+	if err != nil {
+		return nil, err
+	}
+	if w := rw(r); w != nil {
+		w.Header().Set("ETag", queryETag(q))
+	}
+	kw := q.Keywords
+	if kw == nil {
+		kw = []string{}
+	}
+	return map[string]any{"name": q.Name, "keywords": kw, "sql": q.SQL, "shared": q.Shared}, nil
 }
 
 func (s *Server) saveQuery(r *http.Request) (any, error) {

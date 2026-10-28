@@ -9,10 +9,24 @@ import (
 
 var shiftLetter = regexp.MustCompile(`^(alt\+)?shift\+([a-z])$`)
 
+// shiftPunct is the US-layout shifted form of a punctuation or digit key. Under the kitty protocol a
+// terminal reports alt+shift+' where the layout produces alt+".
+var shiftPunct = map[string]string{
+	"'": `"`, ",": "<", ".": ">", "/": "?", ";": ":", "[": "{", "]": "}", `\`: "|", "-": "_", "=": "+", "`": "~",
+	"1": "!", "2": "@", "3": "#", "4": "$", "5": "%", "6": "^", "7": "&", "8": "*", "9": "(", "0": ")",
+}
+
+var shiftPunctRe = regexp.MustCompile(`^((?:ctrl\+)?(?:alt\+)?)shift\+(.)$`)
+
 // Canonical normalizes a Bubble Tea keystroke ("shift+a") to the form Parse produces ("A").
 func Canonical(keystroke string) string {
 	if m := shiftLetter.FindStringSubmatch(keystroke); m != nil {
 		return m[1] + strings.ToUpper(m[2]) // "shift+a" -> "A", "alt+shift+k" -> "alt+K"
+	}
+	if m := shiftPunctRe.FindStringSubmatch(keystroke); m != nil {
+		if r, ok := shiftPunct[m[2]]; ok && m[1] != "" { // plain shift+X arrives as text and never gets here
+			return m[1] + r
+		}
 	}
 	return keystroke
 }

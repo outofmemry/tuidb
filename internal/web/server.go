@@ -458,6 +458,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/queries/export", s.api(s.exportQueries))
 	m.HandleFunc("POST /api/queries/import-file", s.api(s.importQueryFile))
 	m.HandleFunc("GET /api/queries", s.api(s.listQueries))
+	m.HandleFunc("GET /api/queries/{path...}", s.api(s.getQuery))
 	m.HandleFunc("POST /api/queries", s.api(s.saveQuery))
 	m.HandleFunc("PUT /api/queries/{path...}", s.api(s.updateQuery))
 	m.HandleFunc("DELETE /api/queries/{path...}", s.api(s.deleteQuery))

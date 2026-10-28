@@ -45,6 +45,8 @@ type session struct {
 	planSrc  map[string]string // plan id -> result id it was planned from
 	planOrig map[string]string // plan id -> CSV pre-image (log_original_values)
 	jobs     map[string]*job   // background imports and searches
+	spooled  int64             // bytes reserved by import spools in flight (guarded by mu)
+	jobDisk  int64             // per-session temp-file budget in bytes; 0 = defaultJobDisk
 	results  map[string]*cached
 	order    []string
 	plans    map[string][]db.Statement

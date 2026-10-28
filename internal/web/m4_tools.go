@@ -99,8 +99,10 @@ func (ss *session) tableDef(ctx context.Context, ref db.ObjRef, schema string) (
 			d.PrimaryKey = append(d.PrimaryKey, c.Name)
 		}
 	}
-	if d.Indexes, err = sess.Indexes(ctx, ref); err != nil { // missing indexes would plan DROP INDEX
-		return d, fmt.Errorf("%s indexes: %w", ref.Name, err)
+	if sess.Caps().Indexes { // an engine without index metadata has none to diff
+		if d.Indexes, err = sess.Indexes(ctx, ref); err != nil { // missing indexes would plan DROP INDEX
+			return d, fmt.Errorf("%s indexes: %w", ref.Name, err)
+		}
 	}
 	if sess.Caps().ForeignKeys {
 		if d.ForeignKeys, err = sess.ForeignKeys(ctx, ref); err != nil {

@@ -128,7 +128,9 @@ export function ImportDialog({ sid, table: ref, onClose, onDone, notify }: { sid
     setErr(''); askNotify()
     try {
       const r = await api<{ job: string }>('POST', `${base}/import`, upload({ source, header, delimiter, createTable: create, ref, mapping: source === 'sql' ? undefined : mapping, confirmed, password }, file!))
-      setGate(null); follow(r.job)
+      setGate(null)
+      setJob({ done: false, error: '', rows: 0, batches: 0, total: 0, checked: 0, hits: [], lines: [] }) // the job record exists from here, so `running` stays true past the POST
+      follow(r.job)
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.body.gate) { setGate(e.body.gate); if (confirmed) setErr(e.message) } else setErr(msg(e))
     } finally { startingRef.current = false; setStarting(false) }

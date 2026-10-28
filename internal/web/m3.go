@@ -335,6 +335,9 @@ func (s *Server) boardSave(r *http.Request) (any, error) {
 			*f.to = f.v
 		}
 	}
+	if req.Y != "" { // an explicit y replaces the comment's series; FromChart prefers Ys
+		spec.Ys = []string{req.Y}
+	}
 	nb := board.FromChart(req.Name, req.Query, spec)
 	if old, err := findBoard(req.Name); err == nil {
 		old.Panels = append(old.Panels, nb.Panels...)

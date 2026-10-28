@@ -197,3 +197,18 @@ func TestCloseAllTabsNotBrowserReserved(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalShiftPunct(t *testing.T) {
+	for in, want := range map[string]string{
+		"alt+shift+'":      `alt+"`,
+		"alt+shift+,":      "alt+<",
+		"ctrl+shift+1":     "ctrl+!",
+		"ctrl+alt+shift+/": "ctrl+alt+?",
+		"alt+shift+k":      "alt+K",
+		"alt+shift+x1":     "alt+shift+x1",
+	} {
+		if got := Canonical(in); got != want {
+			t.Errorf("Canonical(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -146,6 +146,9 @@ func (s *Server) exportJob(ss *session, req exportReq, o export.Options) (any, e
 	if err := ss.jobSlot(); err != nil {
 		return nil, err
 	}
+	if err := ss.reserve(0); err != nil { // an export's size is unknown until it ends: refuse when already full
+		return nil, err
+	}
 	f, err := os.CreateTemp("", "webtuidb-export-*")
 	if err != nil {
 		return nil, err
@@ -189,8 +192,9 @@ type job struct {
 	rows, batches  int64
 	total, checked int
 	hits           []hitJSON
-	lines          []string // backup / restore output
-	file, fileName string   // export job: the finished temp file and the name to download it as
+	lines          []string  // backup / restore output
+	file, fileName string    // export job: the finished temp file and the name to download it as
+	created        time.Time // when the job started; kept exports are evicted oldest first
 }
 
 func (j *job) removeFile() {
@@ -214,36 +218,99 @@ const (
 	maxKeptExports = 3 // finished, not yet downloaded export files
 )
 
+// defaultJobDisk is the per-session byte budget for import spools and kept exports.
+const defaultJobDisk int64 = 1 << 30
+
+func (ss *session) diskBudget() int64 {
+	if ss.jobDisk > 0 {
+		return ss.jobDisk
+	}
+	return defaultJobDisk
+}
+
+// diskUsed is the bytes held by import spools in flight plus finished, not yet downloaded export files
+// (caller holds ss.mu).
+func (ss *session) diskUsed() int64 {
+	used := ss.spooled
+	for _, j := range ss.jobs {
+		j.mu.Lock()
+		if j.file != "" {
+			if fi, err := os.Stat(j.file); err == nil {
+				used += fi.Size()
+			}
+		}
+		j.mu.Unlock()
+	}
+	return used
+}
+
+// evictOldest removes the oldest finished export file; false when there is none (caller holds ss.mu).
+func (ss *session) evictOldest() bool {
+	oldest := ""
+	for id, j := range ss.jobs {
+		j.mu.Lock()
+		ok := j.done && j.file != ""
+		t := j.created
+		j.mu.Unlock()
+		if ok && (oldest == "" || t.Before(ss.jobs[oldest].created)) {
+			oldest = id
+		}
+	}
+	if oldest == "" {
+		return false
+	}
+	j := ss.jobs[oldest]
+	j.mu.Lock()
+	j.removeFile()
+	j.mu.Unlock()
+	delete(ss.jobs, oldest)
+	return true
+}
+
+// reserve claims n bytes of the session's disk budget for an import spool (n = 0 only checks there is
+// room). Kept exports are evicted oldest-first to make room; still over budget is a 507. The caller
+// releases the n bytes with release.
+func (ss *session) reserve(n int64) error {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	budget := ss.diskBudget()
+	for ss.diskUsed()+n > budget || (n == 0 && ss.diskUsed() >= budget) {
+		if !ss.evictOldest() {
+			return &apiErr{Code: http.StatusInsufficientStorage, Msg: fmt.Sprintf("this session's temporary files are over their %d MB budget; download or delete finished exports and retry", budget>>20)}
+		}
+	}
+	ss.spooled += n
+	return nil
+}
+
+func (ss *session) release(n int64) {
+	ss.mu.Lock()
+	ss.spooled -= n
+	ss.mu.Unlock()
+}
+
 // jobSlot refuses a new background job while the session already runs maxRunningJobs, and deletes the
 // oldest un-downloaded export files so they cannot fill the temp disk.
 func (ss *session) jobSlot() error {
 	ss.mu.Lock()
-	defer ss.mu.Unlock()
 	running, kept := 0, 0
-	var finished []string
-	for id, j := range ss.jobs {
+	for _, j := range ss.jobs {
 		j.mu.Lock()
 		switch {
 		case !j.done:
 			running++
 		case j.file != "":
 			kept++
-			finished = append(finished, id)
 		}
 		j.mu.Unlock()
 	}
 	if running >= maxRunningJobs {
+		ss.mu.Unlock()
 		return &apiErr{Code: http.StatusTooManyRequests, Msg: fmt.Sprintf("%d background jobs are already running on this session; wait or stop one", maxRunningJobs)}
 	}
-	for ; kept >= maxKeptExports && len(finished) > 0; kept-- {
-		id := finished[0]
-		finished = finished[1:]
-		j := ss.jobs[id]
-		j.mu.Lock()
-		j.removeFile()
-		j.mu.Unlock()
-		delete(ss.jobs, id)
+	for ; kept >= maxKeptExports && ss.evictOldest(); kept-- {
 	}
+	ss.mu.Unlock()
 	return nil
 }
 
@@ -252,6 +319,7 @@ func (ss *session) startJob(j *job, fn func(ctx context.Context) error) string {
 	id := randID(6)
 	ctx, cancel := context.WithCancel(context.Background())
 	j.cancel = cancel
+	j.created = time.Now()
 	ss.mu.Lock()
 	for k, o := range ss.jobs { // finished jobs have been polled to the end by now
 		o.mu.Lock()
@@ -302,7 +370,7 @@ func (s *Server) jobStop(ss *session, r *http.Request) (any, error) {
 	return nil, nil
 }
 
-const maxUpload = 512 << 20 // a bigger spool fills the temp disk
+const maxUpload int64 = 512 << 20 // a bigger spool fills the temp disk
 
 // ---- import -----------------------------------------------------------------------------
 
@@ -323,7 +391,7 @@ type importReq struct {
 // must come first, because the file is consumed as it arrives. With spool the file goes to a
 // temp file (the import runs after the request ends); without it the reader is the part itself.
 // pre (may be nil) vets the options before any of the file is read, so a refused import stores nothing.
-func importInput(r *http.Request, spool bool, pre func(importReq) error) (req importReq, in io.Reader, cleanup func(), err error) {
+func importInput(r *http.Request, spool bool, charge func(n int64) (release func(), err error), pre func(importReq) error) (req importReq, in io.Reader, cleanup func(), err error) {
 	cleanup = func() {}
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "multipart/form-data" {
 		if err = decode(r, &req); err != nil {
@@ -363,11 +431,22 @@ func importInput(r *http.Request, spool bool, pre func(importReq) error) (req im
 			if !spool {
 				return req, p, cleanup, nil
 			}
+			release := func() {}
+			if charge != nil {
+				n := maxUpload
+				if r.ContentLength > 0 && r.ContentLength < n {
+					n = r.ContentLength
+				}
+				if release, err = charge(n); err != nil {
+					return req, nil, cleanup, err
+				}
+			}
 			f, err := os.CreateTemp("", "webtuidb-import-*")
 			if err != nil {
+				release()
 				return req, nil, cleanup, err
 			}
-			cleanup = func() { f.Close(); os.Remove(f.Name()) }
+			cleanup = func() { f.Close(); os.Remove(f.Name()); release() }
 			if _, err := io.Copy(f, p); err != nil {
 				cleanup()
 				return req, nil, func() {}, bad("upload failed: %v", err)
@@ -392,7 +471,7 @@ func (s *Server) importOpts(req importReq) (importer.Options, error) {
 }
 
 func (s *Server) importPreview(ss *session, r *http.Request) (any, error) {
-	req, in, cleanup, err := importInput(r, false, nil)
+	req, in, cleanup, err := importInput(r, false, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +495,12 @@ func (s *Server) importPreview(ss *session, r *http.Request) (any, error) {
 
 func (s *Server) importStart(ss *session, r *http.Request) (any, error) {
 	var o importer.Options
-	req, in, cleanup, err := importInput(r, true, func(req importReq) (err error) {
+	req, in, cleanup, err := importInput(r, true, func(n int64) (func(), error) {
+		if err := ss.reserve(n); err != nil {
+			return nil, err
+		}
+		return func() { ss.release(n) }, nil
+	}, func(req importReq) (err error) {
 		if o, err = s.importOpts(req); err != nil {
 			return err
 		}
