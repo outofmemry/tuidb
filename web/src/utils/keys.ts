@@ -9,6 +9,13 @@ const NAMED: Record<string, string> = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end', PageUp: 'pgup', PageDown: 'pgdown',
 }
 
+// US-layout characters for punctuation keys, [plain, shifted]. With Ctrl or Alt held (Option on a Mac) e.key is a
+// composed character ("Æ" for Option+Shift+'), so the physical key is what matches the TUI's "alt+\"".
+const PUNCT: Record<string, [string, string]> = {
+  Quote: ["'", '"'], Period: ['.', '>'], Comma: [',', '<'], Semicolon: [';', ':'], Slash: ['/', '?'], Backslash: ['\\', '|'],
+  BracketLeft: ['[', '{'], BracketRight: [']', '}'], Minus: ['-', '_'], Equal: ['=', '+'], Backquote: ['`', '~'],
+}
+
 // canon turns a browser key event into the canonical string the Go side uses ("ctrl+d", "alt+enter", "P").
 // Cmd on a Mac is left alone so the browser's own shortcuts keep working; null means "not a key we name".
 export function canon(e: KeyboardEvent): string | null {
@@ -19,6 +26,11 @@ export function canon(e: KeyboardEvent): string | null {
   if (!base && (e.ctrlKey || e.altKey) && /^(Key|Digit)/.test(e.code)) {
     // with Ctrl or Alt held, e.key may be a dead or composed character; the physical key is what the TUI sees
     base = e.code.slice(e.code.startsWith('Key') ? 3 : 5).toLowerCase()
+    // the TUI reports Option+Shift+k as a capital letter: "alt+K", not "alt+shift+k"
+    if (e.altKey && !e.ctrlKey && shift && e.code.startsWith('Key')) { base = base.toUpperCase(); shift = false }
+  } else if (!base && (e.ctrlKey || e.altKey) && PUNCT[e.code]) {
+    base = PUNCT[e.code][shift ? 1 : 0]
+    shift = false // the character already carries the shift
   } else if (!base && [...e.key].length === 1) {
     base = e.key
     shift = false // the character already carries the shift ("P", "{", "?")
@@ -41,7 +53,8 @@ export type Fed = { action?: string; pending?: boolean; passthrough?: boolean; u
 
 export class Machine {
   pending = false
-  constructor(public map: Keymap) {}
+  map: Keymap
+  constructor(map: Keymap) { this.map = map }
   lookup(ctx: string, key: string, noPrefix: boolean): string | undefined {
     for (const c of ctx === 'global' ? ['global'] : [ctx, 'global']) {
       const b = this.map.bindings.find((b) => b.NoPrefix === noPrefix && b.Context === c && b.Key === key)
@@ -84,4 +97,26 @@ export function contextOf(): string {
     if (c && document.contains(el!)) return c
   }
   return 'global'
+}
+
+// moveFocus moves keyboard focus to the nearest visible data-ctx region in a direction (sidebar, editor, results, grid, row detail, console).
+export function moveFocus(dir: 'left' | 'right' | 'up' | 'down'): boolean {
+  const regions = [...document.querySelectorAll<HTMLElement>('[data-ctx]')].filter((el) => el.getClientRects().length > 0)
+  const here = [document.activeElement, lastClick].map((el) => el?.closest?.('[data-ctx]') as HTMLElement | null | undefined).find((el) => el && regions.includes(el))
+  const c = (el: HTMLElement) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] }
+  const [fx, fy] = here ? c(here) : [0, 0]
+  const horiz = dir === 'left' || dir === 'right', sign = dir === 'left' || dir === 'up' ? -1 : 1
+  let best: HTMLElement | null = null, score = Infinity
+  for (const el of regions) {
+    if (el === here || (here && (el.contains(here) || here.contains(el)))) continue
+    const [x, y] = c(el), along = ((horiz ? x - fx : y - fy)) * sign, across = Math.abs(horiz ? y - fy : x - fx)
+    if (along <= 1) continue
+    const sc = along + 2 * across
+    if (sc < score) { score = sc; best = el }
+  }
+  if (!best) return false
+  const target = best.matches('[tabindex]') ? best : best.querySelector<HTMLElement>('.cm-content, input, textarea, [tabindex="0"], button')
+  if (!target) return false
+  target.focus(); lastClick = target
+  return true
 }
