@@ -270,18 +270,17 @@ func (s *sidebar) importFile() tea.Cmd {
 			// off the UI loop (each Append locks and rewrites a file); a failure says how far it got
 			w, done := s.w, 0
 			return w.job("import history", func(ctx context.Context, _ db.Session, report func(func() tea.Cmd)) error {
-				for i, e := range es {
+				for lo := 0; lo < len(es); lo += 500 {
 					if err := ctx.Err(); err != nil {
 						return fmt.Errorf("stopped after %d of %d entries: %w", done, len(es), err)
 					}
-					if err := w.a.d.Hist.Append(w.conn.Name, e); err != nil {
+					hi := min(lo+500, len(es))
+					if err := w.a.d.Hist.AppendAll(w.conn.Name, es[lo:hi]); err != nil {
 						return fmt.Errorf("imported %d of %d entries, then: %w", done, len(es), err)
 					}
-					done = i + 1
-					if done%500 == 0 {
-						n := done
-						report(func() tea.Cmd { return w.a.say("importing history… %d of %d", n, len(es)) })
-					}
+					done = hi
+					n := done
+					report(func() tea.Cmd { return w.a.say("importing history… %d of %d", n, len(es)) })
 				}
 				return nil
 			}, func() (string, tea.Cmd) {

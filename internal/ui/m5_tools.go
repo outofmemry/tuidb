@@ -69,8 +69,10 @@ func tableDefs(ctx context.Context, sess db.Session, schema string, progress fun
 				d.PrimaryKey = append(d.PrimaryKey, c.Name)
 			}
 		}
-		if d.Indexes, err = sess.Indexes(ctx, o.ObjRef); err != nil {
-			return nil, fmt.Errorf("%s indexes: %w", o.Name, err)
+		if sess.Caps().Indexes {
+			if d.Indexes, err = sess.Indexes(ctx, o.ObjRef); err != nil {
+				return nil, fmt.Errorf("%s indexes: %w", o.Name, err)
+			}
 		}
 		if sess.Caps().ForeignKeys {
 			if d.ForeignKeys, err = sess.ForeignKeys(ctx, o.ObjRef); err != nil {
@@ -492,7 +494,7 @@ func (w *Workspace) fakeRows() tea.Cmd {
 						return nil
 					}
 					w.forget(&ref)
-					return tea.Batch(w.a.say("inserted %s into %s", plural(n, "row"), ref.Name), w.reloadTab())
+					return tea.Batch(w.a.say("inserted %s into %s", plural(n, "row"), ref.Name), w.reloadTab(), w.sb.load())
 				})
 			}
 		})

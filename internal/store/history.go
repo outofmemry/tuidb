@@ -4,6 +4,8 @@ package store
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,6 +127,81 @@ func (h *History) Append(conn string, e HistoryEntry) error {
 	if werr != nil {
 		return werr
 	}
+	return h.trimLocked(conn, n)
+}
+
+// AppendAll writes entries in one lock/open/write. IDs are derived from conn, SQL and timestamp, so
+// importing the same file twice (or retrying after a failure) skips entries already present.
+func (h *History) AppendAll(conn string, entries []HistoryEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if err := os.MkdirAll(h.Dir, 0o700); err != nil {
+		return err
+	}
+	unlock, err := config.LockFile(h.path(conn))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	have := map[string]bool{}
+	existing, err := h.readAll(conn)
+	if err != nil {
+		return err
+	}
+	for _, e := range existing {
+		have[e.ID] = true
+	}
+	var buf bytes.Buffer
+	for _, e := range entries {
+		if e.Time.IsZero() {
+			e.Time = time.Now()
+		}
+		if len(e.SQL) > maxSQLBytes {
+			e.SQL = strings.ToValidUTF8(e.SQL[:maxSQLBytes], "") + "\n-- (truncated)"
+		}
+		if len(e.Original) > maxSQLBytes {
+			e.Original = strings.ToValidUTF8(e.Original[:maxSQLBytes], "")
+		}
+		sum := sha256.Sum256([]byte(conn + "\x00" + e.SQL + "\x00" + e.Time.UTC().Format(time.RFC3339Nano)))
+		e.ID = hex.EncodeToString(sum[:12])
+		if have[e.ID] {
+			continue
+		}
+		have[e.ID] = true
+		line, err := json.Marshal(e)
+		if err != nil {
+			return err
+		}
+		buf.Write(line)
+		buf.WriteByte('\n')
+	}
+	if buf.Len() == 0 {
+		return nil
+	}
+	f, err := os.OpenFile(h.path(conn), os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	out := buf.Bytes()
+	if st, err := f.Stat(); err == nil && st.Size() > 0 {
+		var last [1]byte
+		if _, err := f.ReadAt(last[:], st.Size()-1); err == nil && last[0] != '\n' {
+			out = append([]byte{'\n'}, out...)
+		}
+	}
+	_, werr := f.Write(out)
+	f.Close()
+	if werr != nil {
+		return werr
+	}
+	return h.trimLocked(conn, buf.Len()/len(entries)+1)
+}
+
+// trimLocked keeps the file to the newest maxEntries; n is the size of one just-written line.
+func (h *History) trimLocked(conn string, n int) error {
 	// The file only ever grows, so trim it now and then: keep the newest maxEntries.
 	if st, err := os.Stat(h.path(conn)); err == nil && (st.Size() > maxFileSize || st.Size() > int64(n)*maxEntries*2 && st.Size() > 1<<20) {
 		all, err := h.readAll(conn)

@@ -536,7 +536,7 @@ func csvLine(cells []string) string {
 	d, lb := orDefault(copyCSV.Delimiter, ","), orDefault(copyCSV.LineBreak, "\n")
 	out := make([]string, len(cells))
 	for i, c := range cells {
-		out[i] = export.CSVField(copyCSV, c) // [csv] quote_mode applies to copied CSV as it does to exported CSV
+		out[i] = export.CSVField(copyCSV, export.Neutralize(c)) // [csv] quote_mode applies to copied CSV as it does to exported CSV
 	}
 	return strings.Join(out, d) + lb
 }

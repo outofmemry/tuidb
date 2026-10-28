@@ -112,6 +112,7 @@ func newTableTab(ws *Workspace, id int, ref db.ObjRef) *tableTab {
 	case "hide":
 		t.showFilters = false
 	}
+	t.markApplied() // applied() never falls back to typed-but-unapplied filters
 	return t
 }
 

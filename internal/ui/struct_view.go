@@ -157,7 +157,15 @@ func (t *tableTab) buildStructure(m structureLoadedMsg) {
 		rows = append(rows, []any{int64(i + 1), c.Name, c.Type, yesNo(c.Nullable), def, yesNo(c.PK), c.Extra, fk})
 	}
 	sg := &Grid{Editable: !t.readOnlyKind()}
-	sg.SetData([]gridCol{{Name: "#"}, {Name: "column_name"}, {Name: "data_type"}, {Name: "is_nullable"}, {Name: "column_default"}, {Name: "primary_key"}, {Name: "extra"}, {Name: "foreign_key"}}, rows)
+	scols := []gridCol{{Name: "#"}, {Name: "column_name"}, {Name: "data_type"}, {Name: "is_nullable"}, {Name: "column_default"}, {Name: "primary_key"}, {Name: "extra"}}
+	if t.ws.caps.ForeignKeys { // scFK is the last column; engines without foreign keys do not show it
+		scols = append(scols, gridCol{Name: "foreign_key"})
+	} else {
+		for i := range rows {
+			rows[i] = rows[i][:scFK]
+		}
+	}
+	sg.SetData(scols, rows)
 	for i, c := range m.cols {
 		sg.Rows[i].Meta = colMeta{orig: c.Name}
 	}
@@ -693,6 +701,9 @@ func fkKey(r *gridRow, name string) string {
 
 // fkForm edits the foreign key of the column under the cursor (create, change or delete).
 func (t *tableTab) fkForm(g *Grid) tea.Cmd {
+	if !t.ws.caps.ForeignKeys {
+		return t.ws.a.say("this engine has no foreign keys")
+	}
 	r := g.cur()
 	if r == nil {
 		return nil

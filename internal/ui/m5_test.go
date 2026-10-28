@@ -131,6 +131,7 @@ func TestM5BulkUpdateThroughTheGate(t *testing.T) {
 	h.run("bulk_update")
 	h.want("filter the rows first")
 	h.a.ws().tab().(*tableTab).filters = db.FilterSet{Filters: []db.Filter{{Column: "name", Op: "=", Value: "Bob", Enabled: true}}}
+	h.a.ws().tab().(*tableTab).markApplied()
 	h.run("bulk_update")
 	setField(t, h, "set", "email=x@y.z ;; name=NULL")
 	h.press("enter")

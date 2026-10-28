@@ -159,6 +159,9 @@ func TestExportUsesAppliedFiltersOnly(t *testing.T) {
 	h.openCustomers()
 	tt := h.a.ws().tab().(*tableTab)
 	tt.filters = db.FilterSet{Filters: []db.Filter{{Column: "name", Op: "=", Value: "Ann", Enabled: true}}}
+	if n := len(tt.applied().Active()); n != 0 {
+		t.Fatalf("typed filter leaked into applied(): %d active", n)
+	}
 	tt.markApplied()
 	tt.filters.Filters[0].Value = "Ann typed but not applied"
 	if got := tt.applied().Filters[0].Value; got != "Ann" {

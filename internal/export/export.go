@@ -214,6 +214,9 @@ type csvEnc struct {
 	safe bool // prefix formula-looking text with '
 }
 
+// Neutralize defuses a spreadsheet formula for callers outside this package (the clipboard CSV).
+func Neutralize(s string) string { return neutralize(s) }
+
 // neutralize defuses a spreadsheet formula: Excel/LibreOffice evaluate a cell starting with = + - @ tab or CR.
 func neutralize(v string) string {
 	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
