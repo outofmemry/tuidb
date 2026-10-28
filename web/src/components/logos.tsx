@@ -1,13 +1,12 @@
-import { siApachecassandra, siClickhouse, siCloudflare, siCockroachlabs, siDuckdb, siMariadb, siMongodb, siMysql, siPostgresql, siRedis, siSqlite, type SimpleIcon } from 'simple-icons'
+import { siApachecassandra, siClickhouse, siMariadb, siMongodb, siMysql, siPostgresql, siRedis, type SimpleIcon } from 'simple-icons'
 
-// Driver names are the Go config.Drivers values. DynamoDB has no icon in simple-icons, so it gets the lettered fallback.
+// Driver names are the Go config.Drivers values. Engines without an icon in simple-icons (DynamoDB, the PostgreSQL and MySQL profiles) get the lettered fallback.
 const ICONS: Record<string, SimpleIcon> = {
-  postgres: siPostgresql, mysql: siMysql, mariadb: siMariadb, cockroachdb: siCockroachlabs, sqlite: siSqlite, duckdb: siDuckdb,
-  clickhouse: siClickhouse, cassandra: siApachecassandra, d1: siCloudflare, redis: siRedis, mongodb: siMongodb,
+  postgres: siPostgresql, mysql: siMysql, mariadb: siMariadb, clickhouse: siClickhouse, cassandra: siApachecassandra, redis: siRedis, mongodb: siMongodb,
 }
 export const LABELS: Record<string, string> = {
-  postgres: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', cockroachdb: 'CockroachDB', sqlite: 'SQLite', duckdb: 'DuckDB',
-  clickhouse: 'ClickHouse', cassandra: 'Cassandra', dynamodb: 'DynamoDB', d1: 'Cloudflare D1', redis: 'Redis', mongodb: 'MongoDB',
+  postgres: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', redshift: 'Redshift', greenplum: 'Greenplum', vertica: 'Vertica', singlestore: 'SingleStore',
+  clickhouse: 'ClickHouse', cassandra: 'Cassandra', dynamodb: 'DynamoDB', redis: 'Redis', mongodb: 'MongoDB',
 }
 
 // Logo renders the engine's mark in ink-2; `className` replaces that colour (e.g. text-current), `brand` uses the engine's own colour.
