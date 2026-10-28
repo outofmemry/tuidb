@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { api, type Connection, type Meta } from '../utils/api'
-import { Dialog, confirm } from '../components/Dialogs'
+import { ApiError, api, download, etags, saveBlob, type Connection, type Meta } from '../utils/api'
+import { Dialog, ask, askSecret, confirm, openSession } from '../components/Dialogs'
+import { RecentDialog, SettingsDialog } from '../components/Extras'
+import { addViewerFile } from '../components/SqlViewer'
+import { openRecentFile, openSqlFile } from '../utils/files'
+import { useKeymap } from '../utils/useKeymap'
 import { Select } from '../components/Select'
 import { LABELS, Logo } from '../components/logos'
 
 const blank = (driver = 'postgres'): Connection => ({ Name: '', Driver: driver, Host: '127.0.0.1', Database: '', SafeMode: '' })
-const FILE_BASED = ['sqlite', 'duckdb']
 
 export function Connections() {
   const qc = useQueryClient()
@@ -17,18 +20,49 @@ export function Connections() {
   const [edit, setEdit] = useState<{ c: Connection; idx: number } | null>(null)
   const [msg, setMsg] = useState('')
   const [url, setUrl] = useState('')
+  const [io, setIo] = useState<'' | 'export' | 'import'>('')
+  const [dlg, setDlg] = useState<'' | 'recent' | 'settings'>('')
+  const sortQ = useQuery({ queryKey: ['conn-sort'], queryFn: () => api<{ sort: string; default: string }>('GET', '/state/connection-sort'), gcTime: 0 })
+  const sortBy = sortQ.data?.sort || sortQ.data?.default || meta.data?.config.general.ConnectionSort || 'name'
+  const fileBased = meta.data?.fileBased ?? []
 
+  // the list's version travels back as If-Match: a stale tab gets a 409, reloads, and asks the user to redo the edit
   const save = useMutation({
-    mutationFn: (list: Connection[]) => api('PUT', '/connections', list),
+    mutationFn: (list: Connection[]) => api('PUT', '/connections', list, undefined, etags['/connections'] ? { 'If-Match': etags['/connections'] } : undefined),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['conns'] }); setEdit(null) },
+    onError: (e) => { if (e instanceof ApiError && e.status === 409) { qc.invalidateQueries({ queryKey: ['conns'] }); setEdit(null); setMsg('The connection list changed elsewhere. It was reloaded: make your change again.') } },
   })
   const connect = useMutation({
-    mutationFn: (name: string) => api<{ id: string }>('POST', '/sessions', { Name: name }),
+    mutationFn: (name: string) => openSession(name),
     onSuccess: (r) => nav({ to: '/s/$sessionId', params: { sessionId: r.id } }),
     onError: (e) => setMsg(e.message),
   })
 
   const list = conns.data ?? []
+  const viewFile = (f: { name: string; text: string } | null) => { if (f) { addViewerFile(f); nav({ to: '/sql' }) } }
+  useKeymap(meta.data?.keymap, ['open_file', 'open_recent', 'settings'], (a) => { if (a === 'open_file') openSqlFile().then(viewFile); else if (a === 'open_recent') setDlg('recent'); else setDlg('settings') })
+  // Sort By: the order inside each group; `idx` stays the connection's place in the saved list, which Edit and Delete use
+  // tag order is the tag list's, untagged last, like the terminal UI
+  const tagRank = (c: Connection) => { const i = (meta.data?.tags ?? []).findIndex((t) => t.name === c.Tag); return String(c.Tag && i >= 0 ? i : 99).padStart(2, '0') }
+  const key = (c: Connection) => (sortBy === 'tag' ? tagRank(c) : sortBy === 'driver' ? c.Driver : '')
+  const shown = list.map((c, idx) => ({ c, idx })).sort((a, b) => key(a.c).localeCompare(key(b.c)) || a.c.Name.localeCompare(b.c.Name, undefined, { sensitivity: 'base' }))
+  const setSort = (v: string) => api('PUT', '/state/connection-sort', { Sort: v }).then(() => sortQ.refetch(), (e) => setMsg(e.message))
+  const inGroup = (c: Connection, g: string) => (c.Group ?? '') === g || (c.Group ?? '').startsWith(g + '/')
+  const renameGroup = async (g: string) => {
+    const n = (await ask('Rename group', g))?.trim()
+    if (!n || n === g) return
+    if (list.some((c) => c.Source && inGroup(c, g))) return setMsg('Some connections in this group come from a connection source file. Edit that file to move them.')
+    save.mutate(list.map((c) => (inGroup(c, g) ? { ...c, Group: n + (c.Group ?? '').slice(g.length) } : c)))
+  }
+  const deleteGroup = async (g: string) => {
+    const gone = list.filter((c) => inGroup(c, g))
+    if (gone.some((c) => c.Source)) return setMsg('Some connections in this group come from a connection source file. Edit that file to remove them.')
+    const t = await ask(`Type ${g} to delete this group and its ${gone.length} connection${gone.length === 1 ? '' : 's'}`)
+    if (t === null) return
+    if (t !== g) return setMsg('The name did not match; nothing deleted.')
+    save.mutate(list.filter((c) => !inGroup(c, g)))
+  }
+  const tagColor = (c: Connection) => meta.data?.tags?.find((t) => t.name === c.Tag)?.color
   const groups = [...new Set(list.map((c) => c.Group ?? ''))].sort()
   const upsert = (c: Connection, idx: number) => save.mutate(idx < 0 ? [...list, c] : list.map((x, i) => (i === idx ? c : x)))
   // Paste a URL on the start page: the server parses it and the form opens filled in.
@@ -40,7 +74,7 @@ export function Connections() {
   if (conns.error) return <div className="min-h-full bg-[radial-gradient(var(--rule)_1px,transparent_1px)] bg-[size:22px_22px]"><div className="max-w-[920px] mx-auto pt-10 px-7 pb-20 max-[760px]:pt-7 max-[760px]:px-4 max-[760px]:pb-12"><header className="flex items-baseline gap-4"><h1 className="m-0 text-[36px] leading-none tracking-[-.03em] font-medium font-mono max-[760px]:text-[32px] after:content-[''] after:inline-block after:w-[.5em] after:h-[.85em] after:ml-[.12em] after:align-[-.08em] after:bg-accent after:animate-blink motion-reduce:after:animate-none">webtuidb</h1></header><p className="mt-[10px] mb-0 max-w-[56ch] text-[15px] text-del">{conns.error.message}</p><footer className="mt-16 text-ink-3 text-[12px]">Open the URL printed by <code>webtuidb --frontend</code>. It carries the access token.</footer></div></div>
   return (
     <div className="min-h-full bg-[radial-gradient(var(--rule)_1px,transparent_1px)] bg-[size:22px_22px]"><div className="max-w-[920px] mx-auto pt-10 px-7 pb-20 max-[760px]:pt-7 max-[760px]:px-4 max-[760px]:pb-12">
-      <header className="flex items-baseline gap-4"><h1 className="flex-1 min-w-0 m-0 text-[36px] leading-none tracking-[-.03em] font-medium font-mono max-[760px]:text-[32px] after:content-[''] after:inline-block after:w-[.5em] after:h-[.85em] after:ml-[.12em] after:align-[-.08em] after:bg-accent after:animate-blink motion-reduce:after:animate-none">Connections</h1><button className="btn-primary" onClick={() => setEdit({ c: blank(), idx: -1 })}>Add connection</button></header>
+      <header className="flex flex-wrap items-baseline gap-2.5"><h1 className="flex-1 min-w-0 m-0 text-[36px] leading-none tracking-[-.03em] font-medium font-mono max-[760px]:text-[32px] after:content-[''] after:inline-block after:w-[.5em] after:h-[.85em] after:ml-[.12em] after:align-[-.08em] after:bg-accent after:animate-blink motion-reduce:after:animate-none">Connections</h1><button onClick={() => openSqlFile().then(viewFile)} title="Read a .sql file without connecting">Open file…</button><button onClick={() => setDlg('settings')}>Settings</button><button onClick={() => setIo('import')}>Import…</button><button onClick={() => setIo('export')} disabled={!list.length}>Export…</button><button className="btn-primary" onClick={() => setEdit({ c: blank(), idx: -1 })}>Add connection</button></header>
       <p className="mt-[10px] mb-0 max-w-[56ch] text-[15px] text-ink-2">Pick a database to browse and edit. Each connection's safe mode decides what needs a confirmation or a password before it is sent.</p>
       <form className="flex items-center gap-[10px] mt-6 pb-2 border-b border-accent before:content-['>'] before:text-accent before:[font:500_16px_var(--font-mono)]" onSubmit={(e) => { e.preventDefault(); fromUrl() }}>
         <input className="flex-1 min-w-0 bg-transparent border-0 px-0 py-1.5 text-[16px] leading-[1.3] focus-visible:outline-0" aria-label="Connection URL" placeholder="Paste a connection URL" value={url} onChange={(e) => setUrl(e.target.value)} autoComplete="off" spellCheck={false} />
@@ -52,19 +86,25 @@ export function Connections() {
       </div>
       {conns.isLoading && <p className="mt-7 mb-0 p-0 text-ink-2 text-[15px] max-w-[48ch]">Loading connections…</p>}
       {list.length === 0 && !conns.isLoading && <p className="mt-7 mb-0 p-0 text-ink-2 text-[15px] max-w-[48ch]">No connections yet. Paste a URL above, or pick an engine.</p>}
+      {list.length > 1 && <label className="flex items-center gap-2 mt-6 text-[12px] text-ink-2 font-mono">Sort by<Select className="bg-raised border-transparent" aria-label="Sort by" value={sortBy} onChange={setSort} options={[{ value: 'name', label: 'Name' }, { value: 'tag', label: 'Tag' }, { value: 'driver', label: 'Driver' }]} /></label>}
       <div className="mt-7">
         {groups.map((g) => (
           <div key={g}>
-            {g && <div className="mt-7 pb-1.5 text-[12px] text-ink-2 border-b border-rule font-mono">{g}</div>}
-            {list.map((c, idx) => (c.Group ?? '') === g && (
-              <div className="group grid grid-cols-[8px_28px_1fr_auto] gap-x-4 items-center p-3 -mx-3 border-b border-rule first:border-t hover:bg-panel max-[760px]:grid-cols-[8px_28px_1fr] max-[760px]:px-2 max-[760px]:-mx-2" key={c.Name} style={{ '--c': c.Color || undefined } as CSSProperties}>
+            {g && <div className="group/g flex items-center gap-2 mt-7 pb-1.5 text-[12px] text-ink-2 border-b border-rule font-mono"><span className="flex-1 min-w-0 truncate">{g}</span>
+              <button className="btn-ghost" onClick={() => renameGroup(g)}>Edit</button><button className="btn-ghost btn-danger" onClick={() => deleteGroup(g)}>Delete</button></div>}
+            {shown.map(({ c, idx }) => (c.Group ?? '') === g && (
+              <div className="group grid grid-cols-[8px_28px_1fr_auto] gap-x-4 items-center p-3 -mx-3 border-b border-rule first:border-t hover:bg-panel max-[760px]:grid-cols-[8px_28px_1fr] max-[760px]:px-2 max-[760px]:-mx-2" key={c.Name} style={{ '--c': c.Color || tagColor(c) || undefined } as CSSProperties}>
                 <div className="w-2 h-10 rounded-[1px] bg-[var(--c,var(--raised))] max-[760px]:h-full" aria-hidden />
                 <Logo driver={c.Driver} size={28} className="text-ink-2 group-hover:text-ink" />
-                <div className="flex-1 min-w-0"><span className="text-[20px] leading-[1.15] font-medium tracking-[-.015em]">{c.Name}</span>{c.Tag && <span className="ml-[10px] align-[3px] px-1.5 rounded-[2px] border border-rule-2 text-[11.5px] font-medium text-ink-2 font-mono">{c.Tag}</span>}
-                  <div className="mt-0.5 font-mono text-[12px] leading-normal text-ink-2 [overflow-wrap:anywhere]"><b className="font-normal text-ink mr-3">{LABELS[c.Driver] ?? c.Driver}</b>{FILE_BASED.includes(c.Driver) ? c.Database : `${c.Host}${c.Port ? ':' + c.Port : ''}${c.Database ? '/' + c.Database : ''}`}</div></div>
+                <div className="flex-1 min-w-0"><span className="text-[20px] leading-[1.15] font-medium tracking-[-.015em]">{c.Name}</span>{c.Tag && <span className="ml-[10px] align-[3px] px-1.5 rounded-[2px] border border-rule-2 text-[11.5px] font-medium text-ink-2 font-mono" style={tagColor(c) ? { borderColor: tagColor(c), color: tagColor(c) } : undefined}>{c.Tag}</span>}
+                  {c.ReadOnly && <span className="ml-2 align-[3px] px-1.5 rounded-[2px] border border-rule-2 text-[11.5px] text-ink-2 font-mono" title="Every statement that changes data is refused">read only</span>}
+                  {c.Source && <span className="ml-2 align-[3px] px-1.5 rounded-[2px] border border-rule-2 text-[11.5px] text-ink-3 font-mono" title={`From the connection source ${c.Source}. Edit that file to change it.`}>source</span>}
+                  <div className="mt-0.5 font-mono text-[12px] leading-normal text-ink-2 [overflow-wrap:anywhere]"><b className="font-normal text-ink mr-3">{LABELS[c.Driver] ?? c.Driver}</b>{fileBased.includes(c.Driver) ? c.Database : `${c.Host}${c.Port ? ':' + c.Port : ''}${c.Database ? '/' + c.Database : ''}`}</div></div>
                 <div className="flex gap-1.5 max-[760px]:col-[2/-1] max-[760px]:mt-[10px]">
-                  <button className="btn-ghost opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-[760px]:opacity-100" onClick={() => setEdit({ c: structuredClone(c), idx })}>Edit</button>
-                  <button className="btn-ghost btn-danger opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-[760px]:opacity-100" onClick={async () => (await confirm(`Delete ${c.Name}?`)) && save.mutate(list.filter((_, i) => i !== idx))}>Delete</button>
+                  {!c.Source && <>
+                    <button className="btn-ghost opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-[760px]:opacity-100" onClick={() => setEdit({ c: structuredClone(c), idx })}>Edit</button>
+                    <button className="btn-ghost btn-danger opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 max-[760px]:opacity-100" onClick={async () => (await confirm(`Delete ${c.Name}?`)) && save.mutate(list.filter((_, i) => i !== idx))}>Delete</button>
+                  </>}
                   <button className="btn-primary" disabled={connect.isPending} onClick={() => { setMsg(''); connect.mutate(c.Name) }}>Connect</button>
                 </div>
               </div>
@@ -72,6 +112,10 @@ export function Connections() {
           </div>
         ))}
       </div>
+      {dlg === 'settings' && <SettingsDialog onClose={() => setDlg('')} notify={setMsg} />}
+      {dlg === 'recent' && <RecentDialog onClose={() => setDlg('')} onPick={(e) => openRecentFile(e).then(viewFile)} />}
+      {io === 'export' && <ExportConnsDialog groups={groups.filter(Boolean)} onClose={() => setIo('')} />}
+      {io === 'import' && <ImportConnsDialog onClose={() => setIo('')} onDone={() => qc.invalidateQueries({ queryKey: ['conns'] })} />}
       {edit && meta.data && <ConnForm meta={meta.data} init={edit.c} error={save.error?.message} onClose={() => { save.reset(); setEdit(null) }} onSave={(c) => upsert(c, edit.idx)} />}
     </div></div>
   )
@@ -100,14 +144,14 @@ function ConnForm({ meta, init, error, onSave, onClose }: { meta: Meta; init: Co
       const p = await api<Connection>('POST', '/connections/parse', { url })
       dirty.current = false
       setUrlErr('')
-      const merge = (x: Connection): Connection => ({ ...x, Driver: p.Driver, Host: p.Host, Port: p.Port, User: p.User, Password: p.Password, Database: p.Database, SSLMode: p.SSLMode, Options: p.Options,
+      const merge = (x: Connection): Connection => ({ ...x, Driver: p.Driver, Host: p.Host, Port: p.Port, User: p.User, Password: p.Password, Database: p.Database, SSLMode: p.SSLMode, Options: p.Options, SSH: p.SSH ?? x.SSH,
         Name: x.Name || p.Name, Tag: p.Tag || x.Tag, Color: p.Color || x.Color })
       setC(merge)
       return merge(c)
     } catch (e) { setUrlErr(`That URL isn't valid: ${e instanceof Error ? e.message : e}`) }
   }
   const set = <K extends keyof Connection>(k: K, v: Connection[K]) => setC((x) => ({ ...x, [k]: v }))
-  const file = FILE_BASED.includes(c.Driver)
+  const file = (meta.fileBased ?? []).includes(c.Driver)
   const clean = (x = c): Connection => ({ ...x, Port: x.Port ? Number(x.Port) : undefined, SSH: x.SSH?.Host ? x.SSH : null })
   const field = (label: string, k: keyof Connection, type = 'text') => (
     <>
@@ -129,30 +173,104 @@ function ConnForm({ meta, init, error, onSave, onClose }: { meta: Meta; init: Co
         <label>Driver</label>
         <Select className="w-full" aria-label="Driver" value={c.Driver} onChange={(v) => set('Driver', v)} options={meta.drivers.map((d) => ({ value: d, label: LABELS[d] ?? d }))} />
         {file ? field('File path', 'Database') : <>
-          {field('Host', 'Host')}{field('Port', 'Port', 'number')}{field('User', 'User')}{field('Password', 'Password', 'password')}
+          {field('Host', 'Host')}{field('Port', 'Port', 'number')}{field('User', 'User')}
+          <label>Password</label>
+          <div className="flex items-center gap-3"><input className="flex-1 min-w-0" type="password" autoComplete="new-password" aria-label="Password" disabled={c.Password === 'ask'} value={c.Password === 'ask' ? '' : c.Password ?? ''} onChange={(e) => set('Password', e.target.value)} />
+            <label className="flex items-center gap-1.5 whitespace-nowrap !text-left"><input type="checkbox" checked={c.Password === 'ask'} onChange={(e) => set('Password', e.target.checked ? 'ask' : '')} />Ask every time</label></div>
           {field('Password command', 'PasswordCmd')}{field('Database', 'Database')}
           <label>SSL mode</label>
           <Select className="w-full" aria-label="SSL mode" value={c.SSLMode ?? ''} onChange={(v) => set('SSLMode', v)} options={[{ value: '', label: 'default' }, ...meta.sslModes]} />
         </>}
-        {field('Group', 'Group')}{field('Tag', 'Tag')}{field('Color', 'Color')}
+        <label>Encoding</label><input className="w-full" aria-label="Encoding" placeholder="server default" value={c.Encoding ?? ''} onChange={(e) => set('Encoding', e.target.value)} />
+        {field('Group', 'Group')}
+        <label>Tag</label>
+        <Select className="w-full" aria-label="Tag" value={c.Tag ?? ''} onChange={(v) => set('Tag', v)} options={[{ value: '', label: 'none' }, ...(meta.tags ?? []).map((t) => t.name), ...(c.Tag && !meta.tags?.some((t) => t.name === c.Tag) ? [c.Tag] : [])]} />
+        {field('Color', 'Color')}
+        <label>Read only</label>
+        <label className="flex items-center gap-2 !text-left"><input type="checkbox" checked={!!c.ReadOnly} onChange={(e) => set('ReadOnly', e.target.checked)} />Refuse every statement that changes data</label>
         <label>Safe mode</label>
         <Select className="w-full" aria-label="Safe mode" value={c.SafeMode ?? ''} onChange={(v) => set('SafeMode', v)} options={[{ value: '', label: 'default' }, ...meta.safeModes]} />
         {!file && <>
           <label>SSH tunnel host</label>
-          <input value={c.SSH?.Host ?? ''} onChange={(e) => set('SSH', { Host: e.target.value, Port: c.SSH?.Port ?? 22, User: c.SSH?.User ?? '', Key: c.SSH?.Key ?? '', Password: c.SSH?.Password ?? '' })} />
+          <input value={c.SSH?.Host ?? ''} onChange={(e) => set('SSH', { Port: 22, User: '', Key: '', Password: '', ...c.SSH, Host: e.target.value })} />
           {c.SSH?.Host && <>
             <label>SSH user</label><input value={c.SSH.User} onChange={(e) => set('SSH', { ...c.SSH!, User: e.target.value })} />
-            <label>SSH key file</label><input value={c.SSH.Key} onChange={(e) => set('SSH', { ...c.SSH!, Key: e.target.value })} />
+            <label>SSH port</label><input type="number" value={c.SSH.Port || ''} placeholder="22" onChange={(e) => set('SSH', { ...c.SSH!, Port: Number(e.target.value) })} />
+            <label>SSH key file</label><input value={c.SSH.Key} placeholder="empty = password or agent" onChange={(e) => set('SSH', { ...c.SSH!, Key: e.target.value })} />
           </>}
         </>}
       </div>
       {error && <p className="my-[1em] text-del" role="alert">{error}</p>}
       <div className="flex justify-end gap-2 mt-[18px]">
         {test && <span className={`flex-1 min-w-0 text-left ${test.startsWith('Connected') || test.startsWith('Testing') ? 'text-ink-2' : 'text-del'}`}>{test}</span>}
-        <button onClick={async () => { setTest('Testing…'); try { const r = await api<{ serverInfo: string }>('POST', '/connections/test', clean()); setTest('Connected: ' + r.serverInfo) } catch (e) { setTest(String(e instanceof Error ? e.message : e)) } }}>Test</button>
+        <button onClick={async () => {
+          setTest('Testing…')
+          const go = (askedPassword?: string) => api<{ serverInfo: string }>('POST', '/connections/test', { ...clean(), askedPassword })
+          try {
+            let r
+            try { r = await go() } catch (e) {
+              if (!(e instanceof ApiError && e.status === 422 && e.body.passwordRequired)) throw e
+              const pw = await askSecret(`Password for ${c.Name || 'this connection'}`)
+              if (pw === null) return setTest('')
+              r = await go(pw)
+            }
+            setTest('Connected: ' + r.serverInfo)
+          } catch (e) { setTest(String(e instanceof Error ? e.message : e)) }
+        }}>Test</button>
         <button onClick={onClose}>Cancel</button>
         <button className="btn-primary" disabled={!c.Name} onClick={async () => { const m = await parseUrl(); if (m) onSave(clean(m)) }}>Save</button>
       </div>
+    </Dialog>
+  )
+}
+
+// ---- export / import of the connection list ------------------------------------------------------------
+
+const b64 = (b: Uint8Array) => { let t = ''; for (let i = 0; i < b.length; i += 0x8000) t += String.fromCharCode(...b.subarray(i, i + 0x8000)); return btoa(t) }
+
+function ExportConnsDialog({ groups, onClose }: { groups: string[]; onClose: () => void }) {
+  const [pass, setPass] = useState(''), [withPw, setWithPw] = useState(false), [group, setGroup] = useState(''), [err, setErr] = useState('')
+  const go = async () => {
+    try { const f = await download('/connections/export', { Passphrase: pass, Passwords: withPw, Group: group }); saveBlob(f.blob, f.name); onClose() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+  }
+  return (
+    <Dialog title="Export connections" onClose={onClose}>
+      <div className="grid grid-cols-[150px_1fr] gap-x-[14px] gap-y-2 items-center [&_label]:text-ink-2 max-[760px]:grid-cols-1">
+        <label>Which</label><Select className="w-full" aria-label="Group" value={group} onChange={setGroup} options={[{ value: '', label: 'All connections' }, ...groups.map((g) => ({ value: g, label: `Group ${g}` }))]} />
+        <label>Passphrase</label><input type="password" autoComplete="new-password" aria-label="Passphrase" placeholder="empty = a plain, unencrypted file" value={pass} onChange={(e) => { setPass(e.target.value); if (!e.target.value) setWithPw(false) }} />
+        <span /><label className="flex items-center gap-2 !text-left"><input type="checkbox" checked={withPw} disabled={!pass} onChange={(e) => setWithPw(e.target.checked)} />Include passwords (needs a passphrase)</label>
+      </div>
+      <p className="text-ink-2 text-[12px]">Connections from a connection source are not exported: they live in their own files.</p>
+      {err && <p className="text-del" role="alert">{err}</p>}
+      <div className="flex justify-end gap-2 mt-[18px]"><button onClick={onClose}>Cancel</button><button className="btn-primary" onClick={go}>Export</button></div>
+    </Dialog>
+  )
+}
+
+function ImportConnsDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [file, setFile] = useState<File | null>(null), [pass, setPass] = useState(''), [err, setErr] = useState('')
+  const [res, setRes] = useState<{ added: string[]; skipped: string[]; dropped: string[] } | null>(null)
+  const go = async () => {
+    if (!file) return
+    try { setRes(await api('POST', '/connections/import', { ContentBase64: b64(new Uint8Array(await file.arrayBuffer())), Passphrase: pass })); onDone() } catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+  }
+  const list = (t: string, l: string[]) => l.length > 0 && <p className="my-1.5"><b className="font-medium">{t}</b> <span className="text-ink-2">{l.join(', ')}</span></p>
+  return (
+    <Dialog title="Import connections" onClose={onClose}>
+      {res ? <>
+        {list(`Added ${res.added.length}:`, res.added)}{list('Skipped, the name exists already:', res.skipped)}
+        {list('Dropped from the file, they could run programs or read keys on this machine:', res.dropped)}
+        {!res.added.length && !res.skipped.length && <p className="text-ink-2">The file had no connections.</p>}
+        <div className="flex justify-end mt-[18px]"><button className="btn-primary" autoFocus onClick={onClose}>Close</button></div>
+      </> : <>
+        <div className="grid grid-cols-[150px_1fr] gap-x-[14px] gap-y-2 items-center [&_label]:text-ink-2 max-[760px]:grid-cols-1">
+          <label>File</label><input type="file" aria-label="Connections file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          <label>Passphrase</label><input type="password" autoComplete="off" aria-label="Passphrase" placeholder="if the file is encrypted" value={pass} onChange={(e) => setPass(e.target.value)} />
+        </div>
+        <p className="text-ink-2 text-[12px]">Password commands, bootstrap statements and SSH keys in the file are always dropped: a file from someone else must not be able to run a program here. A connection whose name exists is skipped.</p>
+        {err && <p className="text-del" role="alert">{err}</p>}
+        <div className="flex justify-end gap-2 mt-[18px]"><button onClick={onClose}>Cancel</button><button className="btn-primary" disabled={!file} onClick={go}>Import</button></div>
+      </>}
     </Dialog>
   )
 }
