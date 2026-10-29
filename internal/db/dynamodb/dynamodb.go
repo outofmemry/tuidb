@@ -49,6 +49,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -144,6 +145,10 @@ func endpointOf(c config.Connection) (string, error) {
 		if c.Host == "" {
 			return "", nil
 		}
+		hostScheme, host, hostPort, err := config.SplitEndpointHost(c.Host)
+		if err != nil {
+			return "", fmt.Errorf("host: %w", err)
+		}
 		scheme := c.Options["scheme"]
 		if scheme == "" {
 			scheme = "http"
@@ -151,9 +156,26 @@ func endpointOf(c config.Connection) (string, error) {
 				scheme = "https"
 			}
 		}
-		raw = scheme + "://" + c.Host
-		if c.Port != 0 {
-			raw = scheme + "://" + net.JoinHostPort(c.Host, fmt.Sprint(c.Port))
+		if hostScheme != "" { // a scheme typed into the host field is what was meant
+			scheme = hostScheme
+		}
+		port := c.Port
+		if hostPort != "" {
+			n, err := strconv.Atoi(hostPort)
+			if err != nil || n < 1 || n > 65535 {
+				return "", fmt.Errorf("host: port %q must be 1-65535", hostPort)
+			}
+			if port != 0 && port != n {
+				return "", fmt.Errorf("host has port %d but the port field says %d", n, port)
+			}
+			port = n
+		}
+		raw = scheme + "://" + net.JoinHostPort(host, fmt.Sprint(port))
+		if port == 0 {
+			raw = scheme + "://" + host
+			if strings.Contains(host, ":") { // bare IPv6
+				raw = scheme + "://[" + host + "]"
+			}
 		}
 	}
 	u, err := url.Parse(raw)
@@ -273,7 +295,7 @@ func (s *session) client() *dynamodb.Client {
 
 func (s *session) Caps() db.Capabilities {
 	return db.Capabilities{Indexes: true, Transactions: true, Document: true, Editor: "sql", Dialect: "partiql",
-		DatabaseNoun: "region", Types: []string{"S", "N", "B"}}
+		DatabaseNoun: "region", NoSubquery: true, Types: []string{"S", "N", "B"}}
 }
 
 func (s *session) ServerInfo() string { return s.info }

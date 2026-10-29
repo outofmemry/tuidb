@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -136,7 +137,48 @@ func (c Connection) Validate() error {
 	if c.SSH != nil && c.SSH.Host != "" && (c.SSH.Port < 0 || c.SSH.Port > 65535) {
 		return fmt.Errorf("connection %q: ssh port must be 1-65535", c.Name)
 	}
+	if c.Driver == DynamoDB {
+		if _, _, _, err := SplitEndpointHost(c.Host); err != nil {
+			return fmt.Errorf("connection %q: host: %w", c.Name, err)
+		}
+	}
 	return nil
+}
+
+// SplitEndpointHost reads the host field of an engine that talks HTTP (DynamoDB): a bare host
+// ("localhost", "localhost:8000", "[::1]:8000") or one with a scheme ("http://localhost:8000",
+// optionally ending in "/"). The scheme is returned when present ("" otherwise) and then wins over the
+// scheme options; the port is "" unless the host carried one. Anything else (another scheme, a path,
+// credentials) is an error, so "http://http://..." never reaches the network as a DNS failure.
+func SplitEndpointHost(host string) (scheme, hostname, port string, err error) {
+	h := strings.TrimSpace(host)
+	if h == "" {
+		return "", "", "", nil
+	}
+	if i := strings.Index(h, "://"); i >= 0 {
+		scheme = strings.ToLower(h[:i])
+		if scheme != "http" && scheme != "https" {
+			return "", "", "", fmt.Errorf("scheme %q is not supported: use http:// or https://, or just the host name", h[:i])
+		}
+		h = h[i+3:]
+	}
+	if strings.Contains(h, "://") {
+		return "", "", "", fmt.Errorf("%q has two schemes: use one http:// or https://, or just the host name", host)
+	}
+	if strings.Count(h, ":") > 1 && !strings.HasPrefix(h, "[") && net.ParseIP(h) != nil { // a bare IPv6 address
+		return scheme, h, "", nil
+	}
+	u, perr := url.Parse("//" + h)
+	if perr != nil || u.Hostname() == "" {
+		return "", "", "", fmt.Errorf("%q is not a host name (want host, host:port, or http(s)://host[:port])", host)
+	}
+	if u.User != nil {
+		return "", "", "", errors.New("must not contain credentials: use the user and password fields")
+	}
+	if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(u.Hostname(), "://") {
+		return "", "", "", fmt.Errorf("%q must be a host name only, without a path", host)
+	}
+	return scheme, u.Hostname(), u.Port(), nil
 }
 
 func (c Connection) EffectivePort() int {

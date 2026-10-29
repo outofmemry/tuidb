@@ -81,3 +81,37 @@ func TestCSVAndExportFilenameValidation(t *testing.T) {
 		t.Errorf("empty filename: %v %q", err, c.Export.Filename)
 	}
 }
+
+// DynamoDB's host may be a bare host or carry one http(s):// scheme; anything else is refused when the
+// connection is validated, not later as "Post http://http://...: no such host".
+func TestDynamoDBHostIsValidatedAndSplit(t *testing.T) {
+	for _, c := range []struct{ host, scheme, name, port string }{
+		{"localhost", "", "localhost", ""},
+		{"localhost:8000", "", "localhost", "8000"},
+		{"http://localhost:8000", "http", "localhost", "8000"},
+		{"HTTPS://db.example.com/", "https", "db.example.com", ""},
+		{"::1", "", "::1", ""},
+		{"http://[::1]:8000", "http", "::1", "8000"},
+		{"", "", "", ""},
+	} {
+		s, h, p, err := SplitEndpointHost(c.host)
+		if err != nil || s != c.scheme || h != c.name || p != c.port {
+			t.Errorf("%q = %q %q %q %v, want %q %q %q", c.host, s, h, p, err, c.scheme, c.name, c.port)
+		}
+		if err := (Connection{Name: "d", Driver: DynamoDB, Host: c.host}).Validate(); err != nil {
+			t.Errorf("%q refused: %v", c.host, err)
+		}
+	}
+	for _, bad := range []string{"http://http://localhost:8000", "ftp://x", "http://x/tables", "http://u:p@x", "http://", "a b"} {
+		if _, _, _, err := SplitEndpointHost(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+		if err := (Connection{Name: "d", Driver: DynamoDB, Host: bad}).Validate(); err == nil || !strings.Contains(err.Error(), "host") {
+			t.Errorf("Validate accepted %q: %v", bad, err)
+		}
+	}
+	// other engines keep their own host rules
+	if err := (Connection{Name: "p", Driver: Postgres, Host: "http://x"}).Validate(); err != nil {
+		t.Errorf("postgres host: %v", err)
+	}
+}

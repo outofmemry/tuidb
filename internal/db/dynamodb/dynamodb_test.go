@@ -551,9 +551,18 @@ func TestEndpointAndOpenValidation(t *testing.T) {
 		{config.Connection{Host: "h", Options: map[string]string{"scheme": "https"}}, "https://h"},
 		{config.Connection{Host: "ignored", Options: map[string]string{"endpoint": "https://vpce.example:8443/"}}, "https://vpce.example:8443"},
 		{config.Connection{Host: "::1", Port: 8000}, "http://[::1]:8000"},
+		{config.Connection{Host: "http://localhost:8000"}, "http://localhost:8000"}, // a scheme in the host is accepted
+		{config.Connection{Host: "https://db.example.com/", Port: 443}, "https://db.example.com:443"},
+		{config.Connection{Host: "https://h", SSLMode: "disable"}, "https://h"}, // and wins over the scheme settings
+		{config.Connection{Host: "localhost:8000", Port: 8000}, "http://localhost:8000"},
 	} {
 		if got, err := endpointOf(c.conn); err != nil || got != c.want {
 			t.Errorf("endpointOf(%+v) = %q %v, want %q", c.conn, got, err, c.want)
+		}
+	}
+	for _, bad := range []config.Connection{{Host: "http://http://localhost:8000"}, {Host: "ftp://x"}, {Host: "http://x/path"}, {Host: "localhost:9000", Port: 8000}} {
+		if got, err := endpointOf(bad); err == nil {
+			t.Errorf("host %q port %d accepted as %q", bad.Host, bad.Port, got)
 		}
 	}
 	for _, bad := range []string{"ftp://x", "localhost:8000", "http://", "://x"} {
