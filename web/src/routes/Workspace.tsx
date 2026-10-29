@@ -1,9 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { api, ApiError, cancelInflight, clip, download, inflightCount, openWindow, postQuery, qs, recentKey, sameRef, saveBlob, switchSchema, type Connection, type FilterSet, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
+import { api, ApiError, cancelInflight, clip, download, inflightCount, openWindow, signOut, postQuery, qs, recentKey, sameRef, saveBlob, switchSchema, type Connection, type FilterSet, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
 import { DataTab } from '../components/grid/DataTab'
-import { Dialog, PlanDialog, ask, confirm, openSession } from '../components/shell/Dialogs'
+import { Dialog, PlanDialog, ask, askMatch, confirm, openSession } from '../components/shell/Dialogs'
 import { DataDiffDialog } from '../components/tools/DataDiffDialog'
 import { FakeDataDialog } from '../components/tools/FakeDataDialog'
 import { SchemaDiffDialog } from '../components/tools/SchemaDiffDialog'
@@ -310,6 +310,8 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     if (/\.sql$/i.test(f.name)) return void f.text().then(newQuery)
     notify(t.kind === 'table' ? 'Drop a CSV, JSON or SQL file to import it into this table' : 'Drop a .sql file to open it')
   }
+  // Log out: asks about unsent changes like closing every tab, closes this browser tab's sessions, forgets the token and the login cookie
+  const logOut = async () => { if (await okToDrop(tabs)) signOut() }
   // Close other connections: every other open workspace of this browser tab is disconnected; this one stays
   const closeOtherConns = async () => {
     const others = Object.entries(openSessions()).filter(([, id]) => id !== sid)
@@ -449,7 +451,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
       case 'copy_name': return void copyText(db).then(() => notify('Copied the name'), (e) => notify(String(e)))
       case 'new_database': return kick('new_database')
       case 'rename': { const n = await ask(`Rename ${db} to`, db); if (n && n !== db) dbAdmin('rename_database', db, { new_name: n }); return }
-      case 'drop': { const t = await ask(`Type ${db} to drop it`); if (t === null) return; if (t !== db) return notify('The names did not match; nothing dropped.'); return dbAdmin('drop_database', db) }
+      case 'drop': { const t = await askMatch(`Type ${db} to drop it`, db); if (t === null) return; if (t !== db) return notify('The names did not match; nothing dropped.'); return dbAdmin('drop_database', db) }
     }
   }
   const onPlugin = () => {
@@ -607,6 +609,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
               <button role="menuitem" className={SW_ITEM} onClick={() => { setSwitcher(false); closeOtherConns() }}>Close other connections</button>
               <button role="menuitem" className={SW_ITEM} onClick={() => { setSwitcher(false); setTool('mcp') }}>MCP activity</button>
               <button role="menuitem" className={SW_ITEM} onClick={() => nav({ to: '/' })}>All connections</button>
+              <button role="menuitem" className={SW_ITEM} onClick={() => { setSwitcher(false); logOut() }}>Log out</button>
             </div>
           </Layer>
         )}
@@ -713,7 +716,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
         <div className="popover fixed right-3 bottom-3 z-[45] w-[min(760px,calc(100vw-24px))] grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-[18px] gap-y-[3px] px-3.5 py-2.5 max-h-[60vh] overflow-auto text-[12px] font-mono" role="status" aria-label="Keys after the prefix">
           <div className={`${WK_ROW} col-span-full mb-1 text-ink-2`}>{display(km!.prefix)} then</div>
           {[...machine.current.bindings(pending)].sort((a, b) => Number(supported(b.Action)) - Number(supported(a.Action))).map((b) => (
-            <div key={b.Context + b.Key} className={`${WK_ROW} ${supported(b.Action) ? '' : 'text-ink-3'}`}><kbd className={supported(b.Action) ? '' : 'text-ink-3'}>{display(b.Key)}</kbd>{b.Desc}</div>
+            <div key={b.Context + b.Key} className={`${WK_ROW} min-w-0 ${supported(b.Action) ? '' : 'text-ink-3'}`} title={b.Desc}><kbd className={`shrink-0 ${supported(b.Action) ? '' : 'text-ink-3'}`}>{display(b.Key)}</kbd><span className="truncate">{b.Desc}</span></div>
           ))}
         </div>
       )}
@@ -763,7 +766,7 @@ const SWITCHER = `${MENU} w-max min-w-[240px] max-w-[min(480px,calc(100vw-24px))
 // the top bar's buttons that stay on narrower windows (the rest move into the ⋯ menu below 980px; everything does below 760px)
 const KEEP = new Set(['new_query_tab', 'open_anything', 'help'])
 const SW_ITEM = 'menu-item'
-const WK_ROW = 'flex gap-2 items-center whitespace-nowrap'
+const WK_ROW = 'flex gap-2 items-center whitespace-nowrap min-w-0' // min-w-0 lets a long description truncate instead of overflowing the column
 const TOAST_GHOST = 'btn-ghost text-inherit! opacity-80 flex-none hover:opacity-100 hover:bg-[rgb(128_128_128/0.25)]!'
 const ACTIONS = 'flex justify-end gap-2 mt-[18px]'
 const HIST = 'group/h px-3 py-2.5 border-b border-rule cursor-pointer hover:bg-panel'
@@ -815,8 +818,8 @@ export function Help({ km, onClose }: { km: Meta['keymap']; onClose: () => void 
             <section key={c}>
               <h3 className="mt-3 mb-1 text-[12.5px] text-ink-2">{c[0].toUpperCase() + c.slice(1)}</h3>
               {list.map((b) => (
-                <div key={b.Action + b.Key} className={`flex items-center gap-2.5 py-0.5 text-[12.5px] ${supported(b.Action) ? '' : 'text-ink-3'}`} title={supported(b.Action) ? undefined : 'Not in the web UI'}>
-                  <kbd className="min-w-[7em] text-center">{b.NoPrefix ? '' : display(km.prefix) + ' '}{display(b.Key)}</kbd><span>{b.Desc}</span>
+                <div key={b.Action + b.Key} className={`flex items-center gap-2.5 py-0.5 text-[12.5px] min-w-0 ${supported(b.Action) ? '' : 'text-ink-3'}`} title={supported(b.Action) ? b.Desc : 'Not in the web UI'}>
+                  <kbd className="min-w-[7em] shrink-0 text-center">{b.NoPrefix ? '' : display(km.prefix) + ' '}{display(b.Key)}</kbd><span className="truncate">{b.Desc}</span>
                 </div>
               ))}
             </section>

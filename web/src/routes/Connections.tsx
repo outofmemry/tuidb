@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { ApiError, api, download, etags, saveBlob, type Connection, type Meta } from '../utils/api'
-import { Dialog, ask, askSecret, confirm, openSession } from '../components/shell/Dialogs'
+import { ApiError, api, download, etags, saveBlob, signOut, type Connection, type Meta } from '../utils/api'
+import { Dialog, ask, askMatch, askSecret, confirm, openSession } from '../components/shell/Dialogs'
 import { RecentDialog } from '../components/shell/RecentDialog'
 import { TabMenu } from '../components/shell/TabMenu'
 import { SettingsDialog } from '../components/admin/SettingsDialog'
@@ -14,6 +14,7 @@ import { LABELS, Logo } from '../components/shell/Logo'
 import { lastWorkspaces, markReopened, openSessions, remember, reopenDue } from '../utils/workspaces'
 import { ago, recentRank } from '../utils/ago'
 import { whyNot } from '../utils/menus'
+import { hint } from '../utils/hint'
 import { Help } from './Workspace'
 
 // shortcut: the same four presets as config.PasswordCmdPresets, used until GET /api/meta carries passwordCmdPresets
@@ -110,7 +111,7 @@ export function Connections() {
   const deleteGroup = async (g: string) => {
     const gone = list.filter((c) => inGroup(c, g))
     if (gone.some((c) => c.Source)) return setMsg('Some connections in this group come from a connection source file. Edit that file to remove them.')
-    const t = await ask(`Type ${g} to delete this group and its ${gone.length} connection${gone.length === 1 ? '' : 's'}`)
+    const t = await askMatch(`Type ${g} to delete this group and its ${gone.length} connection${gone.length === 1 ? '' : 's'}`, g)
     if (t === null) return
     if (t !== g) return setMsg('The name did not match; nothing deleted.')
     save.mutate(list.filter((c) => !inGroup(c, g)))
@@ -182,7 +183,7 @@ export function Connections() {
   if (conns.error) return <div className="min-h-full bg-[radial-gradient(var(--rule)_1px,transparent_1px)] bg-[size:22px_22px]"><div className="max-w-[920px] mx-auto pt-10 px-7 pb-20 max-[760px]:pt-7 max-[760px]:px-4 max-[760px]:pb-12"><header className="flex items-baseline gap-4"><h1 className="m-0 text-[36px] leading-none tracking-[-.03em] font-medium font-mono max-[760px]:text-[32px] after:content-[''] after:inline-block after:w-[.5em] after:h-[.85em] after:ml-[.12em] after:align-[-.08em] after:bg-accent after:animate-blink motion-reduce:after:animate-none">webtuidb</h1></header><p className="mt-[10px] mb-0 max-w-[56ch] text-[15px] text-del">{conns.error.message}</p><footer className="mt-16 text-ink-3 text-[12px]">Open the URL printed by <code>webtuidb --frontend</code>. It carries the access token.</footer></div></div>
   return (
     <div className="min-h-full bg-[radial-gradient(var(--rule)_1px,transparent_1px)] bg-[size:22px_22px]"><div className="max-w-[920px] mx-auto pt-10 px-7 pb-20 max-[760px]:pt-7 max-[760px]:px-4 max-[760px]:pb-12">
-      <header className="flex flex-wrap items-baseline gap-2.5"><h1 className="flex-1 min-w-0 m-0 text-[36px] leading-none tracking-[-.03em] font-medium font-mono max-[760px]:text-[32px] after:content-[''] after:inline-block after:w-[.5em] after:h-[.85em] after:ml-[.12em] after:align-[-.08em] after:bg-accent after:animate-blink motion-reduce:after:animate-none">Connections</h1><div className="flex flex-wrap items-center gap-1.5"><button className="btn-ghost" onClick={() => openSqlFile().then(viewFile)} title="Read a .sql file without connecting">Open file…</button><button className="btn-ghost" onClick={() => setDlg('settings')}>Settings</button><button className="btn-ghost" onClick={() => setIo('import')}>Import…</button><button className="btn-ghost" onClick={() => setIo('export')} disabled={!list.length}>Export…</button><button className="btn-primary ml-1" onClick={() => setEdit({ c: blank(), idx: -1 })}>Add connection</button></div></header>
+      <header className="flex flex-wrap items-baseline gap-2.5"><h1 className="flex-1 min-w-0 m-0 text-[36px] leading-none tracking-[-.03em] font-medium font-mono max-[760px]:text-[32px] after:content-[''] after:inline-block after:w-[.5em] after:h-[.85em] after:ml-[.12em] after:align-[-.08em] after:bg-accent after:animate-blink motion-reduce:after:animate-none">Connections</h1><div className="flex flex-wrap items-center gap-1.5"><button className="btn-ghost" onClick={() => openSqlFile().then(viewFile)} title="Read a .sql file without connecting">Open file…</button><button className="btn-ghost" onClick={() => setDlg('settings')}>Settings</button><button className="btn-ghost" onClick={() => signOut()} title="Forget the access token in this browser tab">Log out</button><button className="btn-ghost" onClick={() => setIo('import')}>Import…</button><button className="btn-ghost" onClick={() => setIo('export')} disabled={!list.length}>Export…</button><button className="btn-primary ml-1" onClick={() => setEdit({ c: blank(), idx: -1 })}>Add connection</button></div></header>
       <p className="mt-[10px] mb-0 max-w-[56ch] text-[15px] text-ink-2">Pick a database to browse and edit. Each connection's safe mode decides what needs a confirmation or a password before it is sent.</p>
       <form className="flex items-center gap-[10px] mt-6 pb-2 border-b border-accent before:content-['>'] before:text-accent before:[font:500_16px_var(--font-mono)]" onSubmit={(e) => { e.preventDefault(); fromUrl() }}>
         <input ref={urlBox} className="flex-1 min-w-0 bg-transparent border-0 px-0 py-1.5 text-[16px] leading-[1.3] focus-visible:outline-0" aria-label="Connection URL" placeholder="Paste a connection URL" value={url} onChange={(e) => setUrl(e.target.value)} autoComplete="off" spellCheck={false} />
@@ -436,15 +437,3 @@ function ImportConnsDialog({ onClose, onDone }: { onClose: () => void; onDone: (
   )
 }
 
-// hint turns a driver's error into one plain sentence about what to check; the full text stays behind "Technical details".
-function hint(detail: string): string {
-  const t = detail.toLowerCase()
-  if (/connection refused|econnrefused|actively refused/.test(t)) return 'Nothing answered at that address. Check that the database server is running, and that the host and port are right.'
-  if (/no such host|name resolution|getaddrinfo|lookup .*: no such|server misbehaving/.test(t)) return 'That host name could not be found. Check the spelling of the host.'
-  if (/password authentication failed|access denied|authentication failed|auth failed|wrong password|invalid password|not authorized|unauthorized|requires authentication|noauth|sasl|28p01|28000|1045/.test(t)) return 'The user name or password was not accepted. Check them, or ask whoever runs the database.'
-  if (/does not exist|unknown database|no such database|database .* not found|3d000/.test(t)) return 'That database does not exist on the server. Check the database name.'
-  if (/timeout|timed out|deadline exceeded/.test(t)) return 'The server did not answer in time. Check the host and port, and that the network or VPN is up.'
-  if (/ssl|tls|certificate|x509/.test(t)) return 'The secure connection could not be set up. Check the SSL settings of this connection.'
-  if (/permission denied|not permitted|insufficient privilege/.test(t)) return 'This user is not allowed to do that on the server.'
-  return 'Check the connection details and try again.'
-}

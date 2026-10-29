@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, keyOf, qs, recentKey, switchSchema, type Column, type DbObject, type ItemGroup, type Meta, type ObjRef, type Plan, type SessionInfo } from '../../utils/api'
-import { Dialog, PlanDialog, ask, confirm } from '../shell/Dialogs'
+import { Dialog, PlanDialog, ask, askMatch, confirm } from '../shell/Dialogs'
 import { TabMenu } from '../shell/TabMenu'
 import { MultiExportDialog } from '../tools/MultiExportDialog'
 import { Select } from '../shell/Select'
@@ -93,7 +93,7 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   // Delete / Truncate of one object asks what the terminal's form asks: its name typed, Cascade, and Restart identity on PostgreSQL
   const dropOrTruncate = async (op: 'drop' | 'truncate', o: DbObject) => {
     const verb = op === 'drop' ? 'Delete' : 'Truncate'
-    const typed = await ask(`${verb} ${o.Name}? This cannot be undone. Type its name to confirm`)
+    const typed = await askMatch(`${verb} ${o.Name}? This cannot be undone. Type its name to confirm`, o.Name)
     if (typed === null) return
     if (typed !== o.Name) return notify(`Type "${o.Name}" to confirm; nothing changed.`)
     const opts: Record<string, string> = {}
@@ -104,9 +104,13 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   }
   const marks = [...marked.values()]
   // delete / truncate act on every marked item (a truncate only on the tables among them), else on the item last clicked
-  const bulk = (op: 'drop' | 'truncate') => {
+  // like the terminal's form, the number of tables is typed first: a stale mark cannot be confirmed by habit
+  const bulk = async (op: 'drop' | 'truncate') => {
     const list = op === 'truncate' ? marks.filter((o) => o.Kind === 'table') : marks
     if (!list.length) return notify('Mark some tables first (space)')
+    const n = String(list.length)
+    const typed = await askMatch(`${op === 'drop' ? 'Delete' : 'Truncate'} ${list.length} table${list.length === 1 ? '' : 's'}? This cannot be undone. Type ${n} (the number of tables) to confirm`, n, list.map((o) => o.Name).join(', '))
+    if (typed === null) return
     admin(op, list[0], undefined, list)
   }
   const toggleMark = (o: DbObject) => setMarked((m) => { const n = new Map(m); const k = keyOf(o); n.has(k) ? n.delete(k) : n.set(k, o); return n })
