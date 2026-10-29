@@ -194,8 +194,8 @@ var defaults = []def{
 	{"show_index", "alt+i", Global, "show indexes"},
 	{"show_ddl", "alt+d", Global, "show DDL"},
 	{"triggers", "alt+t", Global, "edit this table's triggers"},
-	{"show_json", "J", Global, "show Json view (MongoDB, Redis)"},
-	{"show_tree", "T", Global, "show Tree view (MongoDB, Redis)"},
+	{"show_json", "J", Global, "show Json view (MongoDB, Redis, DynamoDB)"},
+	{"show_tree", "T", Global, "show Tree view (MongoDB, Redis, DynamoDB)"},
 
 	{"sidebar_search", "F", Sidebar, "search sidebar"},
 	{"truncate", "alt+delete", Sidebar, "truncate table"},

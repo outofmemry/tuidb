@@ -1,4 +1,4 @@
-// Tree view of document values (MongoDB, Redis).
+// Tree view of document values (MongoDB, Redis, DynamoDB).
 
 
 export function Tree({ docs }: { docs: string[] }) {

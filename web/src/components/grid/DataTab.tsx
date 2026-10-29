@@ -462,7 +462,7 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     hide_column: () => { const c = res?.columns[cc()]?.name ?? ''; if (c) colAct('hide_column', c) },
     show_all_columns: () => change<string[]>(setHidden)([]),
     show_ddl: () => setView('ddl'), show_index: () => { setView('structure'); setSection('indexes') }, triggers: () => { setView('structure'); setSection('triggers') },
-    show_tree: () => (info.caps.Document ? setView('tree') : notify('The Tree view is for document databases (MongoDB, Redis)')),
+    show_tree: () => (info.caps.Document ? setView('tree') : notify('The Tree view is for document databases (MongoDB, Redis, DynamoDB)')),
     next_page: () => { if (res && res.cells.length >= page) change<number>(setOffset)(offset + page) },
     prev_page: () => { if (offset > 0) change<number>(setOffset)(Math.max(0, offset - page)) },
     find: () => { if (view === 'data') openFind() }, find_next: () => stepFind(1), find_prev: () => stepFind(-1),

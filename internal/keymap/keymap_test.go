@@ -423,3 +423,22 @@ func TestBuildCheckedTwoOverriddenPlugins(t *testing.T) {
 		t.Fatalf("bound %v", got)
 	}
 }
+
+// The Json and Tree views exist for every document engine; both help screens render this text.
+func TestDocumentViewHelpNamesEveryDocumentEngine(t *testing.T) {
+	seen := 0
+	for _, b := range defaults {
+		if b.action != "show_json" && b.action != "show_tree" {
+			continue
+		}
+		seen++
+		for _, eng := range []string{"MongoDB", "Redis", "DynamoDB"} {
+			if !strings.Contains(b.desc, eng) {
+				t.Errorf("%s: %q does not name %s", b.action, b.desc, eng)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("found %d of show_json / show_tree", seen)
+	}
+}
