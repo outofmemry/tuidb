@@ -26,9 +26,9 @@ brew install --HEAD outofmemry/tap/webtuidb
 # publish on 127.0.0.1 and put TLS in front of anything beyond that.
 docker build -t webtuidb . && docker run -p 127.0.0.1:7788:7788 -e WEBTUIDB_PASSWORD='choose-one' --user $(id -u) -v ~/.config/webtuidb:/home/nonroot/.config/webtuidb webtuidb
 
-# from source (needs Go, and Node 20+ for the web app)
+# from source (needs Go, and Node 22.18+ for the web app)
 make web build      # web app + go build -o webtuidb .
-go install webtuidb@latest   # terminal UI and API only: the web app is built by `make web`, not by go install
+go install .        # from a clone (webtuidb is not a published module path); terminal UI and API only: the web app is built by `make web`, not by go install
 ```
 
 `make release` builds all the archives into `dist/` with goreleaser (`--snapshot`, nothing is published).
@@ -156,7 +156,7 @@ Things the desktop help menu would do are flags here: `webtuidb -changelog` open
 ## Web UI
 
 ```sh
-make web build        # builds web/ into the binary (needs Node 20+; plain `make build` works without it, API only)
+make web build        # builds web/ into the binary (needs Node 22.18+; plain `make build` works without it, API only)
 webtuidb --frontend --open
 ```
 
