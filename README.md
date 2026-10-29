@@ -189,4 +189,4 @@ make down
 make parity    # both UIs expose the same menus, actions and config keys (also runs in CI)
 ```
 
-The plan and what is built so far: [PLAN.md](PLAN.md).
+The plan and what is built so far: [docs/PLAN.md](docs/PLAN.md).

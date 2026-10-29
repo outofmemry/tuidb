@@ -1,4 +1,4 @@
-// M15.7: the CREATE templates the sidebar "+" menu opens in a query tab. shortcut: one template per dialect family; the user finishes the body.
+// the CREATE templates the sidebar "+" menu opens in a query tab. shortcut: one template per dialect family; the user finishes the body.
 export type CreateKind = 'view' | 'matview' | 'function'
 
 const q = (dialect: string, id: string) => (dialect === 'mysql' || dialect === 'mariadb' || dialect === 'clickhouse' ? '`' + id + '`' : '"' + id + '"')

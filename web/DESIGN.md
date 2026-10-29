@@ -2,7 +2,7 @@
 
 Styling is Tailwind v4 utility classes in the components. `web/src/styles.css` is the entry point:
 it holds the palette tokens (surface, ink, marks, accent and the `--syn-*` syntax colours the SQL
-editor reads through `components/cmtheme.ts`), element defaults, the CodeMirror hooks and a handful of
+editor reads through `components/query/cmtheme.ts`), element defaults, the CodeMirror hooks and a handful of
 shared utilities (`btn-primary`, `btn-ghost`, `btn-danger`, `btn-on`, `btn-icon`, `popover`,
 `menu-item`, `chip`, `toolbar`). Don't add new semantic classes there; put utilities on the element.
 
@@ -28,7 +28,7 @@ Concept: the connection's colour runs the room.
   start at the width of their name and first rows (a saved width wins), numbers sit flush right,
   NULL is dim italic.
 - **Menus:** one popover style everywhere (`popover` + `menu-item`): the connection switcher, Select,
-  the tab, row and ⋯ menus. Every floating menu renders through `Layer` (`components/Layer.tsx`): a
+  the tab, row and ⋯ menus. Every floating menu renders through `Layer` (`components/shell/Layer.tsx`): a
   portal to `<body>` above dialogs and sticky headers, a backdrop that swallows the outside click (so
   nothing underneath is pressed by accident), and the same close rules everywhere: outside click,
   right-click outside, Escape, window blur or resize. Never hand-roll a `fixed inset-0` backdrop in a

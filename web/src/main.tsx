@@ -4,15 +4,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Outlet, RouterProvider, createRootRoute, createRoute, createRouter } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import './styles.css'
 import { api, ApiError, initToken, type Meta } from './utils/api'
 import { applyTheme, notifyCfg } from './utils/theme'
 import { Connections } from './routes/Connections'
 import { Workspace } from './routes/Workspace'
-import { Lock } from './components/Lock'
+import { Lock } from './components/shell/Lock'
 import { parseFilter } from './utils/links'
-import { SqlViewer } from './components/SqlViewer'
-import { Prompts } from './components/Dialogs'
-import './styles.css'
+import { SqlViewer } from './components/query/SqlViewer'
+import { Prompts } from './components/shell/Dialogs'
 
 initToken() // must run before the router reads the URL, so the token never stays in the address bar
 
@@ -50,7 +50,7 @@ const session = createRoute({
   getParentRoute: () => root, path: '/s/$sessionId',
   component: function SessionPage() { return <Workspace sid={session.useParams().sessionId} key={session.useParams().sessionId} /> },
 })
-// deep links (M15.19): /s/<sid>/t/<schema>/<table>?filter=<json FilterSet> opens a table, /s/<sid>/q/<saved query path> opens a saved query
+// deep links: /s/<sid>/t/<schema>/<table>?filter=<json FilterSet> opens a table, /s/<sid>/q/<saved query path> opens a saved query
 const tableLinkRoute = createRoute({
   getParentRoute: () => root, path: '/s/$sessionId/t/$schema/$table', validateSearch: (s: Record<string, unknown>) => ({ filter: s.filter as unknown }),
   component: function TablePage() {

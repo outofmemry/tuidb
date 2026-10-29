@@ -1,4 +1,4 @@
-// Find / replace over grid cells (M9.1): a column (or any), an operator, match case. Pure so it can be tested without a browser.
+// Find / replace over grid cells: a column (or any), an operator, match case. Pure so it can be tested without a browser.
 
 export const FIND_OPS = ['Contains', 'Not contains', 'Has prefix', 'Has suffix'] as const
 export type FindOp = (typeof FIND_OPS)[number]

@@ -47,7 +47,7 @@ func (a *App) showHelp() {
 		title := strings.ToUpper(c[:1]) + c[1:]
 		h.rows = append(h.rows, helpRow{header: title})
 		// every binding of the context in keymap table order, no-prefix ones included: the web help and `webtuidb -keys`
-		// list the same rows in the same order (M14 check 2), so nothing here re-sorts or filters
+		// list the same rows in the same order (the menus and the help screen agree), so nothing here re-sorts or filters
 		for _, b := range a.d.Keys.All() {
 			if b.Context == c {
 				h.rows = append(h.rows, helpRow{action: b.Action, key: keymap.Display(b.Key), desc: b.Desc, ctx: b.Context, noPref: b.NoPrefix})

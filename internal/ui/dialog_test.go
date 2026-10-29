@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+	"webtuidb/internal/db"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -135,5 +137,78 @@ func TestTextViewAndComposite(t *testing.T) {
 		if width(l) != 30 {
 			t.Errorf("width %d: %q", width(l), l)
 		}
+	}
+}
+
+func TestChecklistRemembersTickOrder(t *testing.T) {
+	c := &checklistDlg{items: []checkItem{{Label: "a"}, {Label: "b"}, {Label: "c"}}}
+	c.sel = 2
+	c.Update(keyMsg("space"))
+	c.sel = 0
+	c.Update(keyMsg("space"))
+	if c.items[2].Seq >= c.items[0].Seq || c.items[2].Seq == 0 {
+		t.Fatalf("tick order lost: %+v", c.items)
+	}
+}
+
+func TestM13ChecklistUncheckAll(t *testing.T) {
+	c := &checklistDlg{items: []checkItem{{Label: "a", Checked: true}, {Label: "b"}}}
+	c.Update(keyMsg("A"))
+	if c.items[0].Checked || c.items[1].Checked {
+		t.Fatal("A unchecks all")
+	}
+	c.Update(keyMsg("a"))
+	if !c.items[0].Checked || !c.items[1].Checked {
+		t.Fatal("a checks all")
+	}
+}
+
+func TestConfirmIgnoresKeysWhileArming(t *testing.T) {
+	ran := 0
+	d := &confirmDlg{armed: time.Now().Add(time.Hour), onYes: func() tea.Cmd { ran++; return nil }}
+	if o, _ := feed(d, tea.KeyPressMsg{Code: 'y', Text: "y"}); o == nil || ran != 0 {
+		t.Fatal("y inside the arming window must not approve")
+	}
+	d.armed = time.Now().Add(-time.Second)
+	if o, _ := feed(d, tea.KeyPressMsg{Code: 'y', Text: "y"}); o != nil || ran != 1 {
+		t.Fatal("y after the window approves")
+	}
+}
+
+// T-P3-04: a validation error keeps the dialog open with what was typed.
+func TestFlowDialogsKeepInputOnError(t *testing.T) {
+	h := newHarness(t, nil)
+	h.press("x") // export connections
+	setField(t, h, "pass", "")
+	setChoice(t, h, "pw", "true")
+	h.press("enter")
+	h.want("include passwords needs a passphrase")
+	if _, ok := h.a.overlays[len(h.a.overlays)-1].(*formDlg); !ok {
+		t.Fatal("the export form closed on the error")
+	}
+	h.press("esc")
+	h.connect()
+	h.openCustomers()
+	h.prefix("L")
+	h.press("ctrl+u")
+	h.typeText("0")
+	h.press("enter")
+	h.want("limit must be 1 or more")
+	if f, ok := h.a.overlays[len(h.a.overlays)-1].(*formDlg); !ok || f.values()["limit"] != "0" {
+		t.Fatal("the page settings form closed on the error")
+	}
+	h.press("esc")
+	h.pump(h.a.ws().importWizard(db.ObjRef{Name: "customers", Kind: db.KindTable}, false))
+	setField(t, h, "path", "/nonexistent/x.csv")
+	setField(t, h, "nullas", "NA")
+	h.press("enter")
+	h.want("cannot read that file")
+	h.press("esc")
+	h.pump(h.a.ws().importWizard(db.ObjRef{Name: "customers", Kind: db.KindTable}, false))
+	if v := h.a.overlays[len(h.a.overlays)-1].(*formDlg).values(); v["path"] != "/nonexistent/x.csv" || v["nullas"] != "NA" {
+		t.Fatalf("the import dialog forgot its answers: %v", v)
+	}
+	if savedQueryName(map[string]string{"name": "reports/ "}) == nil || savedQueryName(map[string]string{"name": "q"}) != nil {
+		t.Fatal("savedQueryName")
 	}
 }

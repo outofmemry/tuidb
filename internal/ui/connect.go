@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"webtuidb/internal/config"
 	"webtuidb/internal/db"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // Opened is a live connection plus whatever must be closed with it.
@@ -61,4 +64,40 @@ func DefaultConnect(ctx context.Context, c config.Connection) (*Opened, error) {
 		return nil, fmt.Errorf("connect %s: %w", c.Name, err)
 	}
 	return o, nil
+}
+
+// boot runs the connection's bootstrap statements, then next(). A failing statement is shown, not fatal.
+func (w *Workspace) boot(next func() tea.Cmd) tea.Cmd {
+	stmts, sess := w.conn.Bootstrap, w.sess
+	if len(stmts) == 0 {
+		return next()
+	}
+	return liveCmd(func() func() tea.Cmd {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		type done struct {
+			sql string
+			dur time.Duration
+			err error
+		}
+		var out []done
+		for _, s := range stmts {
+			start := time.Now()
+			_, err := sess.Exec(ctx, s, 1)
+			out = append(out, done{s, time.Since(start), err})
+		}
+		return func() tea.Cmd {
+			var bad []string
+			for _, d := range out {
+				w.log(d.sql, d.dur, d.err)
+				if d.err != nil {
+					bad = append(bad, d.sql+"\n  "+d.err.Error())
+				}
+			}
+			if len(bad) > 0 {
+				w.a.errorDialog("Bootstrap command failed (the connection is still open)", fmt.Errorf("%s", strings.Join(bad, "\n")))
+			}
+			return next()
+		}
+	})
 }

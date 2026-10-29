@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"path"
 	"strings"
-
 	"webtuidb/internal/db"
 	"webtuidb/internal/store"
 )
@@ -246,4 +245,42 @@ func (s *Server) touch(r *http.Request) (any, error) {
 		return nil, err
 	}
 	return nil, s.o.State.Touch(req.Conn, req.Item)
+}
+
+// renameQuery moves a saved query to a new path. store.Queries has no Rename, so (like the TUI) it saves the
+// new file and deletes the old one; an existing target is a 409.
+// shortcut: not atomic, a crash between the two steps leaves both files; add Queries.Rename.
+func (s *Server) renameQuery(r *http.Request) (any, error) {
+	var req struct{ From, To string }
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	if !strings.HasSuffix(req.From, ".sql") || !strings.HasSuffix(req.To, ".sql") {
+		return nil, bad("from and to must be saved query files (.sql)")
+	}
+	s.queryMu.Lock()
+	defer s.queryMu.Unlock()
+	q, err := s.o.Queries.Read(req.From)
+	if err != nil {
+		return nil, bad("%q is not a saved query file", req.From)
+	}
+	if q.Shared {
+		return nil, bad("shared queries are read-only")
+	}
+	to := strings.TrimPrefix(strings.ReplaceAll(req.To, "\\", "/"), "/")
+	folder, base := "", to
+	if i := strings.LastIndex(to, "/"); i >= 0 {
+		folder, base = to[:i], to[i+1:]
+	}
+	nq, err := s.saveNew(folder, strings.TrimSuffix(base, ".sql"), q.Keywords, q.SQL, false)
+	if err != nil {
+		return nil, err
+	}
+	if saved, ok := nq.(store.Query); ok && saved.Path == req.From {
+		return nq, nil // same file name after sanitizing: nothing to delete
+	}
+	if err := s.o.Queries.Delete(req.From); err != nil {
+		return nil, err
+	}
+	return nq, nil
 }

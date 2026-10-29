@@ -2,30 +2,43 @@ import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { api, ApiError, cancelInflight, clip, download, inflightCount, openWindow, postQuery, qs, recentKey, sameRef, saveBlob, switchSchema, type Connection, type FilterSet, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
-import { DataTab } from '../components/DataTab'
-import { Dialog, PlanDialog, ask, confirm, openSession } from '../components/Dialogs'
-import { DataDiffDialog, FakeDataDialog, SchemaDiffDialog } from '../components/Wave'
-import { ConsolePane, DetailsDialog, Palette, RecentDialog, SafeModeDialog, TabMenu, type PaletteItem } from '../components/Extras'
-import { SettingsDialog } from '../components/Settings'
-import { JobsDrawer, useJobs } from '../components/Jobs'
-import { LOCK_EVENT } from '../components/Lock'
-import { ImportDialog } from '../components/Tools'
+import { DataTab } from '../components/grid/DataTab'
+import { Dialog, PlanDialog, ask, confirm, openSession } from '../components/shell/Dialogs'
+import { DataDiffDialog } from '../components/tools/DataDiffDialog'
+import { FakeDataDialog } from '../components/tools/FakeDataDialog'
+import { SchemaDiffDialog } from '../components/tools/SchemaDiffDialog'
+import { ConsolePane } from '../components/shell/ConsolePane'
+import { DetailsDialog } from '../components/shell/DetailsDialog'
+import { Palette, type PaletteItem } from '../components/shell/Palette'
+import { RecentDialog } from '../components/shell/RecentDialog'
+import { SafeModeDialog } from '../components/shell/SafeModeDialog'
+import { TabMenu } from '../components/shell/TabMenu'
+import { SettingsDialog } from '../components/admin/SettingsDialog'
+import { JobsDrawer, useJobs } from '../components/admin/JobsDrawer'
+import { LOCK_EVENT } from '../components/shell/Lock'
+import { ImportDialog } from '../components/tools/ImportDialog'
 import { filterMenu, whyNot } from '../utils/menus'
 import { openRecentFile, openSqlFile, revealPath } from '../utils/files'
-import { QueryTab } from '../components/QueryTab'
-import { Sidebar } from '../components/Sidebar'
-import { BackupDialog, McpDialog, PluginsDialog, UsersDialog, type PluginCtx } from '../components/Admin'
-import { ProcessDialog, SearchDialog } from '../components/Tools'
-import { AssistantTab, DiagramTab, MetricsTab } from '../components/Views'
-import { Logo } from '../components/logos'
-import { Select } from '../components/Select'
-import { Layer, MENU, at as place } from '../components/Layer'
+import { QueryTab } from '../components/query/QueryTab'
+import { Sidebar } from '../components/sidebar/Sidebar'
+import { BackupDialog } from '../components/admin/BackupDialog'
+import { McpDialog } from '../components/admin/McpDialog'
+import { PluginsDialog, type PluginCtx } from '../components/admin/PluginsDialog'
+import { UsersDialog } from '../components/admin/UsersDialog'
+import { ProcessDialog } from '../components/tools/ProcessDialog'
+import { SearchDialog } from '../components/tools/SearchDialog'
+import { AssistantTab } from '../components/assistant/AssistantTab'
+import { DiagramTab } from '../components/diagram/DiagramTab'
+import { MetricsTab } from '../components/boards/MetricsTab'
+import { Logo } from '../components/shell/Logo'
+import { Select } from '../components/shell/Select'
+import { Layer, MENU, at as place } from '../components/shell/Layer'
 import { copyText } from '../utils/copy'
 import { queryLink, tableLink } from '../utils/links'
 import { Machine, canon, contextOf, display, inTextField, keysLocked, moveFocus } from '../utils/keys'
 import { dropWorkspace, forget, loadTabs, markReopened, noteWorkspace, openSessions, remember, saveTabs } from '../utils/workspaces'
 
-// a deep link (M15.19): /s/<sid>/t/<schema>/<table>?filter=… opens that table, /s/<sid>/q/<saved query> opens that query
+// a deep link: /s/<sid>/t/<schema>/<table>?filter=… opens that table, /s/<sid>/q/<saved query> opens that query
 export type Target = { kind: 't'; schema: string; table: string; filter?: FilterSet } | { kind: 'q'; path: string }
 
 // Actions the web UI answers (its own plus the ones tabs and the sidebar handle via the webtuidb:action event).
@@ -66,7 +79,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const trail = useRef<{ list: ObjRef[]; i: number }>({ list: [], i: -1 }) // go back / forward over opened tables
   const [plan, setPlan] = useState<Plan | null>(null)
   const [drawer, setDrawer] = useState<'' | 'history' | 'queries' | 'jobs'>('')
-  const [zen, setZen] = useState(false) // M15.24: sidebar, console, row detail and status bar hidden
+  const [zen, setZen] = useState(false) // sidebar, console, row detail and status bar hidden
   const jobs = useJobs(sid, drawer === 'jobs')
   const [dragTab, setDragTab] = useState<number | null>(null)
   const [dbMenuAt, setDbMenuAt] = useState<{ x: number; y: number; db: string } | null>(null)
@@ -121,7 +134,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const saveReady = useRef(false), saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined), saveNow = useRef<() => void>(() => {})
   const autoSave: string = meta.data?.config.editor.AutoSaveTabs || 'none'
   const schedule = () => { if (!saveReady.current || autoSave === 'none') return; clearTimeout(saveTimer.current); saveTimer.current = setTimeout(() => saveNow.current(), 800) }
-  // M12.5: a reload comes back to the tabs this browser tab had open (per session, editor text included); only a fresh session reads auto_save_tabs
+  // a reload comes back to the tabs this browser tab had open (per session, editor text included); only a fresh session reads auto_save_tabs
   const restored = useRef(false)
   useEffect(() => {
     if (!info.data || !meta.data || restored.current) return
@@ -236,7 +249,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     active: [Math.max(0, tabs.findIndex((t) => t.id === actives[0])), Math.max(0, tabs.findIndex((t) => t.id === actives[1]))], split,
   })
   remember(i.name, sid); noteWorkspace(i.name, i.database); markReopened()
-  // the connection's colour is the accent; without one the tag's colour is (M15.46), and a production / staging tag also gets a thin bar across the top
+  // the connection's colour is the accent; without one the tag's colour is, and a production / staging tag also gets a thin bar across the top
   const tagColor = meta.data.tags?.find((t) => t.name === i.tag)?.color
   const accentColor = i.color || tagColor
   const accent = accentColor ? ({ '--accent': accentColor, '--on-accent': onAccent(accentColor) } as CSSProperties) : undefined
@@ -252,7 +265,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     return id
   }
   const kick = (action: string) => setTimeout(() => window.dispatchEvent(new CustomEvent('webtuidb:action', { detail: { action }, cancelable: true })), 50)
-  // M12.3: the same object already open in this pane is shown; otherwise the current table tab is replaced when it has no pending changes.
+  // the same object already open in this pane is shown; otherwise the current table tab is replaced when it has no pending changes.
   // Tabs with changes, editors and other pages are kept, and newTab (sidebar "Open in new tab") always adds.
   const openObj = (o: ObjRef, record = true, view?: 'structure', newTab = false) => {
     if (!['table', 'view', 'matview'].includes(o.Kind)) { // functions, procedures, sequences and types open their definition in an editor, as Show DDL does
@@ -772,7 +785,7 @@ function PaletteHost({ sid, info, dbs, bindings, onTable, onSql, onDb, onAction,
     ...(objs.data ?? []).map((o) => ({ group: o.Kind, label: o.Name, detail: o.Schema, run: (nt?: boolean) => onTable(o, nt) })),
     ...(saved.data ?? []).map((q) => ({ group: 'query', label: q.Name, detail: q.Folder, run: () => onSql(q.SQL) })),
     ...dbs.filter((d) => d !== info.database).map((d) => ({ group: info.caps.DatabaseNoun || 'database', label: d, run: () => onDb(d) })),
-    // M15.33: Help-menu equivalents. shortcut: the docs link is the project README; the SSH log needs --ssh-log on the server, which a page cannot switch on
+    // Help-menu equivalents. shortcut: the docs link is the project README; the SSH log needs --ssh-log on the server, which a page cannot switch on
     { group: 'feature', label: 'Open docs', detail: 'README on GitHub', run: () => { window.open('https://github.com/outofmemory/webtuidb#readme', '_blank', 'noopener') } },
     { group: 'feature', label: 'Enable SSH log', detail: 'web only: needs --ssh-log', run: () => onNotify('The SSH log is switched on with --ssh-log when the server starts (web only: the page cannot enable it).') },
     ...FEATURES.map(([label, action]) => ({ group: 'feature', label, detail: action, run: () => onAction(action) })),

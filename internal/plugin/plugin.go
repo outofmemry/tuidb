@@ -91,7 +91,7 @@ func List() ([]Plugin, error) {
 }
 
 // Run runs the plugin. A command plugin execs without a shell (JSON context on stdin, stdout is Output.Text);
-// a .js plugin runs in-process with the API described in m13_script.go.
+// a .js plugin runs in-process with the API described in script.go.
 func (p Plugin) Run(ctx context.Context, in Context, host Host) (Output, error) {
 	if p.JS {
 		return p.runJS(ctx, in, host)

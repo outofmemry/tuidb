@@ -623,7 +623,7 @@ func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit 
 
 // execOne runs one statement; a failure is the item's Error, not a request error.
 func (ss *session) execOne(r *http.Request, sess db.Session, st db.Stmt, limit int) execItem {
-	ctx, cancel := ss.ctxNoTimeout(r) // the client's keep-waiting/cancel prompt replaces the hard timeout (M12.6)
+	ctx, cancel := ss.ctxNoTimeout(r) // the client's keep-waiting/cancel prompt replaces the hard timeout
 	start := time.Now()
 	res, err := sess.Exec(ctx, st.Text, limit)
 	cancel()

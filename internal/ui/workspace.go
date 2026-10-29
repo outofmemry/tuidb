@@ -63,7 +63,7 @@ type Workspace struct {
 	closed       bool
 	applying     bool               // statements are being sent: edits and a second commit are refused meanwhile
 	jobCancel    context.CancelFunc // the running export / import / search, nil when none
-	jobs         []*jobEntry        // the jobs centre: running and finished jobs until dismissed (m15_jobs.go)
+	jobs         []*jobEntry        // the jobs centre: running and finished jobs until dismissed (jobs.go)
 	jobFile      string             // the file the next job writes, for "Open folder"
 	lastImport   map[string]string  // the import dialog's last answers: reopening after a failure keeps them
 	nextJob      int
@@ -77,9 +77,9 @@ type Workspace struct {
 	lost bool // the last keep-alive ping failed
 	// gen counts session changes (database switch, reconnect, reload). Messages created under an
 	// older generation are dropped: their rows, columns and errors belong to another database.
-	gen int
-	m3  m3State      // milestone 3: split panes, back/forward history, assistant chat
-	con consoleState // the console pane: cursor, find, errors only (m15_console.go)
+	gen   int
+	panes paneState    // split panes and back/forward history (panes.go)
+	con   consoleState // the console pane: cursor, find, errors only (console.go)
 }
 
 type pingMsg struct{ err error }
@@ -396,7 +396,7 @@ func (w *Workspace) addTab(t tabber) tea.Cmd {
 	w.tabs = append(w.tabs, t)
 	w.cur = len(w.tabs) - 1
 	w.focusSB = false
-	w.m3.place(t)
+	w.panes.place(t)
 	return t.Init()
 }
 
@@ -420,8 +420,8 @@ func (w *Workspace) closeTab(i int) {
 func (w *Workspace) selectTab(i int) {
 	if len(w.tabs) > 0 {
 		i = (i%len(w.tabs) + len(w.tabs)) % len(w.tabs)
-		if w.m3.split && w.pane(w.tabs[i]) != w.m3.pane { // a tab of the other group: that group takes the focus
-			w.m3.otherID, w.m3.pane = w.tabs[w.cur].ID(), 1-w.m3.pane
+		if w.panes.split && w.pane(w.tabs[i]) != w.panes.pane { // a tab of the other group: that group takes the focus
+			w.panes.otherID, w.panes.pane = w.tabs[w.cur].ID(), 1-w.panes.pane
 		}
 		w.cur = i
 		w.focusSB = false
@@ -440,9 +440,9 @@ func (w *Workspace) openObject(ref db.ObjRef, newTab bool) tea.Cmd {
 	}
 	key := ref.Schema + "." + ref.Name
 	w.a.d.State.Touch(w.conn.Name, key)
-	w.m3.visit(ref)
+	w.panes.visit(ref)
 	for _, t := range w.tabs { // already open in this pane: just switch
-		if tt, ok := t.(*tableTab); ok && tt.ref == ref && !newTab && w.pane(t) == w.m3.pane {
+		if tt, ok := t.(*tableTab); ok && tt.ref == ref && !newTab && w.pane(t) == w.panes.pane {
 			w.selectTab(indexOf(w.tabs, t))
 			return nil
 		}
@@ -450,7 +450,7 @@ func (w *Workspace) openObject(ref db.ObjRef, newTab bool) tea.Cmd {
 	nt := newTableTab(w, w.newID(), ref)
 	if c, ok := w.tab().(*tableTab); ok && !newTab && !c.Dirty() {
 		w.tabs[w.cur] = nt
-		w.m3.place(nt)
+		w.panes.place(nt)
 		w.focusSB = false
 		return nt.Init()
 	}
@@ -501,7 +501,7 @@ func (w *Workspace) openSaved(q store.Query) tea.Cmd {
 // ---- messages without a tab -------------------------------------------------------------
 
 func (w *Workspace) handleGlobal(msg tea.Msg) (tea.Cmd, bool) {
-	if cmd, ok := w.handleM4(msg); ok {
+	if cmd, ok := w.handleOverviewMsg(msg); ok {
 		return cmd, true
 	}
 	if cmd, ok := w.handleDefinitions(msg); ok {
@@ -721,7 +721,7 @@ func (w *Workspace) action(name string) tea.Cmd {
 	case "item_overview":
 		return w.itemOverview()
 	case "close_other_tabs", "close_tabs_right", "close_all_tabs", "rename_tab", "clear_console":
-		return w.m4Action(name)
+		return w.tabAction(name)
 	case "reload":
 		w.forget(nil)
 		return tea.Batch(w.sb.load(), w.reloadTab())
@@ -745,7 +745,7 @@ func (w *Workspace) action(name string) tea.Cmd {
 		return w.importAction()
 	case "users", "diagram", "metrics", "backup", "restore", "split_right", "next_pane", "prev_pane", "assistant", "plugins", "go_back", "go_forward", "mcp_log",
 		"close_pane", "assistant_new", "assistant_clear", "assistant_history":
-		return w.m3Action(name)
+		return w.toolsAction(name)
 	default:
 		if n, ok := strings.CutPrefix(name, "plugin:"); ok { // a plugin's own shortcut
 			return w.pluginsAction(n)
@@ -753,12 +753,12 @@ func (w *Workspace) action(name string) tea.Cmd {
 		if strings.HasPrefix(name, "tab_") {
 			var n int
 			fmt.Sscanf(name, "tab_%d", &n)
-			if idx := w.groupIdx(w.m3.pane); n >= 1 && n <= len(idx) {
+			if idx := w.groupIdx(w.panes.pane); n >= 1 && n <= len(idx) {
 				w.selectTab(idx[n-1])
 			}
 			return nil
 		}
-		if cmd, ok := w.m5Action(name); ok {
+		if cmd, ok := w.paletteAction(name); ok {
 			return cmd
 		}
 		return w.a.say("%q is not available here", name)
@@ -1155,7 +1155,7 @@ func (w *Workspace) view(th Theme, W, H int) string {
 	if sbW > 0 {
 		cols = append(cols, w.frame(th, w.sb.title(th), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
 	}
-	if w.m3.split {
+	if w.panes.split {
 		cols = append(cols, w.splitFrames(th, mainW, mainH))
 	} else {
 		cols = append(cols, w.paneFrame(th, w.tab(), 0, mainW, mainH, !w.focusSB && !w.focusDetail, !w.focusSB))

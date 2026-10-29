@@ -1,4 +1,4 @@
-// "3 hours ago" for the last-connected time on the connection list (M15.29); an empty or unparsable time gives "".
+// "3 hours ago" for the last-connected time on the connection list; an empty or unparsable time gives "".
 export function ago(iso: string | undefined, now = Date.now()): string {
   const t = iso ? Date.parse(iso) : NaN
   if (Number.isNaN(t)) return ''

@@ -202,7 +202,7 @@ func (s *sidebar) handle(msg tea.Msg) tea.Cmd {
 			}
 		}
 		s.w.tabs, s.w.cur, s.w.focusSB = nil, 0, true
-		s.w.m3.reset()
+		s.w.panes.reset()
 		s.sel, s.top = 0, 0
 		s.w.forget(nil)
 		return tea.Batch(s.load(), s.w.a.say("now using %s", m.name))

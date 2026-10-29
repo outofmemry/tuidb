@@ -127,14 +127,14 @@
 /* a row of controls with a hairline under it */
 @utility toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--rule); font-family: var(--font-mono); font-stretch: 80%; }
 
-/* M15.27 theme surfaces. The grid keys apply only when the theme sets them (theme.ts adds the attribute).
+/* theme surfaces. The grid keys apply only when the theme sets them (theme.ts adds the attribute).
    shortcut: the selected-cell tint is found by its class text, because Grid.tsx builds it with a Tailwind arbitrary value; a data attribute on the cell is the upgrade. */
 html[data-grid-line] [role='grid'] { --rule: var(--grid-line); }
 html[data-cell-selection] [role='grid'] [role='gridcell'][class*='accent)_12%'] { background-color: var(--cell-selection) !important; }
-/* M15.28 [web] auto_hide_scrollbars: thin bars show only while the pointer is over the scroller */
+/* [web] auto_hide_scrollbars: thin bars show only while the pointer is over the scroller */
 html.scrollbars-auto * { scrollbar-color: transparent transparent; }
 html.scrollbars-auto *:hover { scrollbar-color: var(--rule-2) transparent; }
 html.scrollbars-auto ::-webkit-scrollbar-thumb { background-color: transparent; }
 html.scrollbars-auto *:hover::-webkit-scrollbar-thumb { background-color: var(--rule-2); }
-/* M15.44 reduced motion: the loading bars keep their meaning without sliding */
+/* reduced motion: the loading bars keep their meaning without sliding */
 @media (prefers-reduced-motion: reduce) { *, ::before, ::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }

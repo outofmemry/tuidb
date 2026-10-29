@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -549,5 +550,54 @@ func TestThemeSurfaceKeys(t *testing.T) {
 	}
 	if !strings.Contains(ThemeTOML(config.Theme{Name: "dark"}), `"editor_bg"`) {
 		t.Error("theme export lists the new keys")
+	}
+}
+
+// T-P3-19: JSON copy keeps the column order (and stays valid JSON).
+func TestM18JSONCopyKeepsColumnOrder(t *testing.T) {
+	g := &Grid{W: 60, H: 8}
+	g.SetData([]gridCol{{Name: "name"}, {Name: "city"}}, [][]any{{"Ann", "Paris"}, {"Bob", nil}})
+	g.Move(1, 0, true)
+	got := g.CopyRows(FmtJSON, "t")
+	if strings.Index(got, `"name"`) > strings.Index(got, `"city"`) {
+		t.Errorf("keys reordered:\n%s", got)
+	}
+	var docs []map[string]any
+	if err := json.Unmarshal([]byte(got), &docs); err != nil || len(docs) != 2 || docs[1]["city"] != nil {
+		t.Errorf("invalid JSON %v:\n%s", err, got)
+	}
+}
+
+func TestM9MultiRowEditStagesOnePerRow(t *testing.T) {
+	g := testGrid()
+	g.GoCol(1, false)
+	g.GoRow(0, false)
+	g.GoRow(2, true) // rows 1..3 selected
+	g.MoveField(1)   // the detail pane walks fields without losing the rows
+	g.MoveField(-1)
+	if n := g.SetColumn("Z"); n != 3 {
+		t.Fatalf("set column touched %d rows", n)
+	}
+	if len(g.Changes(db.ObjRef{Name: "t"})) != 3 {
+		t.Error("one pending update per selected row")
+	}
+	g.Undo()
+	if g.HasPending() {
+		t.Error("one undo step clears all three")
+	}
+}
+
+func TestM11PrettyMinify(t *testing.T) {
+	g := &Grid{Editable: true, W: 40, H: 5}
+	g.SetData([]gridCol{{Name: "id"}, {Name: "doc"}}, [][]any{{int64(1), `{"a":1,"b":[1,2]}`}, {int64(2), "plain"}})
+	g.GoCol(1, false)
+	g.GoRow(0, false)
+	g.GoRow(1, true)
+	if n := g.MapColumn(func(v any) (any, bool) { return reformatJSON(v, true) }); n != 1 || !strings.Contains(g.Rows[0].Cur[1].(string), "\n") {
+		t.Fatalf("pretty: %d %v", n, g.Rows[0].Cur[1])
+	}
+	g.MapColumn(func(v any) (any, bool) { return reformatJSON(v, false) })
+	if g.Rows[0].Cur[1] != `{"a":1,"b":[1,2]}` || g.Rows[1].Cur[1] != "plain" {
+		t.Errorf("minify: %v", g.Rows[0].Cur[1])
 	}
 }

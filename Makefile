@@ -1,4 +1,4 @@
-.PHONY: build test up down smoke web release docker parity
+.PHONY: build test web-test up down smoke web release docker parity
 # Build the web app into internal/web/dist, which the Go binary embeds (`make web build`).
 web:
 	cd web && npm ci && npm run build
@@ -7,6 +7,9 @@ build:
 	go build -o webtuidb .
 test:
 	go vet ./... && go test ./...
+# Web unit tests (pure TypeScript modules under web/tests, run by node --test).
+web-test:
+	cd web && npx tsc --noEmit -p . && node --test tests/
 up:
 	docker compose up -d --wait postgres mysql clickhouse redis mongo mariadb cassandra dynamodb && docker compose run --rm redis-seed
 down:

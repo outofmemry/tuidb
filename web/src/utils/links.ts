@@ -1,4 +1,4 @@
-// Pure helpers for in-app links (M15.19 / M15.20): the token fragment and the deep-link paths. No browser globals, so node can test them.
+// Pure helpers for in-app links: the token fragment and the deep-link paths. No browser globals, so node can test them.
 
 // linkWithToken adds `#token=<token>` to a link so a second browser tab signs in; a link that has the token already is kept as it is.
 export function linkWithToken(url: string, token: string): string {

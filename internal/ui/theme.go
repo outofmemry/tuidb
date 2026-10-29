@@ -32,7 +32,7 @@ type Theme struct {
 	Key                              lipgloss.Style // a key name in a hint line
 	Hint                             lipgloss.Style // hint label text
 	Section                          lipgloss.Style // sidebar / list section headers
-	// M15.27 surfaces: each has its own palette key (editor_bg, sidebar_bg, notification_bg, grid_line, ...)
+	// Surfaces: each has its own palette key (editor_bg, sidebar_bg, notification_bg, grid_line, ...)
 	EditorBG, SidebarBG lipgloss.Style
 	Notice              lipgloss.Style // status-line notices (toasts)
 	GridLine            lipgloss.Style // the lines inside grids

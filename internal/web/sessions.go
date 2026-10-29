@@ -55,7 +55,7 @@ type session struct {
 	notices  map[string]string // notice id -> the result's message
 	noticeQ  []string
 	sideMu   sync.Mutex
-	sideO    *ui.Opened // second connection for the process list, so it answers while the workspace is busy (M7)
+	sideO    *ui.Opened // second connection for the process list, so it answers while the workspace is busy
 	pinMu    sync.Mutex
 	pins     map[string]db.Session // query tab id -> its dedicated connection (db.Pinner)
 	pinUsed  map[string]time.Time  // query tab id -> last statement (guarded by pinMu)

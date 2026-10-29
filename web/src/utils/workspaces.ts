@@ -1,5 +1,5 @@
 // What the browser tab remembers about workspaces: the open sessions (sessionStorage, so a reload comes back to them), each session's open
-// tabs (M12.5), and the workspaces to reopen on the next start ([general] reopen_workspaces; localStorage, like the terminal's last session).
+// tabs, and the workspaces to reopen on the next start ([general] reopen_workspaces; localStorage, like the terminal's last session).
 // shortcut: the "last workspaces" list lives in this browser's localStorage, so a different port or browser starts empty; a server-side state key is the upgrade.
 
 const OPEN = 'webtuidb-open'

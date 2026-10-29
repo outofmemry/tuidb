@@ -1,5 +1,6 @@
 import { handoffPut, handoffTake, linkWithToken } from './links'
 import { confirm } from './prompts'
+
 // Types use the Go field names of the db/config structs (the API serializes them as-is).
 const KEY = 'webtuidb-token'
 

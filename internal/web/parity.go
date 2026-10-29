@@ -13,7 +13,7 @@ var (
 
 // SupportedActions parses the SUPPORTED set out of the source of web/src/routes/Workspace.tsx: the quoted
 // action names, plus the generated ones (`...Array.from({ length: 9 }, (_, i) => `tab_${i + 1}`)` gives
-// tab_1..tab_9). The M14 parity checks compare it with the keymap, so the list lives in one place.
+// tab_1..tab_9). The parity checks compare it with the keymap, so the list lives in one place.
 func SupportedActions(workspaceTSX []byte) []string {
 	m := supportedRe.FindSubmatch(workspaceTSX)
 	if m == nil {

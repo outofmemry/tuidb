@@ -483,7 +483,7 @@ func (t *tableTab) fill(res *db.Result) {
 	first := len(t.grid.Cols) == 0
 	t.grid.SetData(cols, res.Rows)
 	if first {
-		t.restoreWidths() // widths dragged with the mouse in an earlier session (M15.43)
+		t.restoreWidths() // widths dragged with the mouse in an earlier session
 	}
 	t.resCols = res.Columns
 	// Rows are identified by their primary key: with a key column hidden (or, for a table

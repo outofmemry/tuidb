@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"webtuidb/internal/config"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -563,5 +564,28 @@ func TestVimCountProductRefused(t *testing.T) {
 	}
 	if _, note := e.takeEx(); !strings.Contains(note, "count too large") {
 		t.Fatalf("no refusal note: %q", note)
+	}
+}
+
+func TestM4EditorWrapsLongLines(t *testing.T) {
+	e := NewEditor("postgres", EditorOpts{Wrap: true})
+	e.W, e.H = 20, 6
+	text := strings.Repeat("abcdefghij", 5) // 50 runes, 14 per row
+	e.SetText(text)
+	e.move(0, 50, false)
+	var rows []string
+	for _, l := range strings.Split(stripANSI(e.View(NewTheme(config.Theme{}), true)), "\n") {
+		rows = append(rows, strings.TrimSpace(strings.SplitN(l, "│", 2)[1]))
+	}
+	if !strings.Contains(strings.Join(rows[:4], ""), text) {
+		t.Fatalf("wrapped rows %q", rows)
+	}
+	if e.curY < 0 {
+		t.Fatal("the cursor row must be known")
+	}
+	e.Opts.Wrap = false
+	e.left = 0
+	if v := stripANSI(e.View(NewTheme(config.Theme{}), true)); strings.Contains(v, text) {
+		t.Fatal("unwrapped, the line is cut at the pane width")
 	}
 }

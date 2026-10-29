@@ -2,14 +2,15 @@ import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { ApiError, api, download, etags, saveBlob, type Connection, type Meta } from '../utils/api'
-import { Dialog, ask, askSecret, confirm, openSession } from '../components/Dialogs'
-import { RecentDialog, TabMenu } from '../components/Extras'
-import { SettingsDialog } from '../components/Settings'
-import { addViewerFile } from '../components/SqlViewer'
+import { Dialog, ask, askSecret, confirm, openSession } from '../components/shell/Dialogs'
+import { RecentDialog } from '../components/shell/RecentDialog'
+import { TabMenu } from '../components/shell/TabMenu'
+import { SettingsDialog } from '../components/admin/SettingsDialog'
+import { addViewerFile } from '../components/query/SqlViewer'
 import { openRecentFile, openSqlFile } from '../utils/files'
-import { useKeymap } from '../utils/useKeymap'
-import { Select } from '../components/Select'
-import { LABELS, Logo } from '../components/logos'
+import { useKeymap } from '../hooks/useKeymap'
+import { Select } from '../components/shell/Select'
+import { LABELS, Logo } from '../components/shell/Logo'
 import { lastWorkspaces, markReopened, openSessions, remember, reopenDue } from '../utils/workspaces'
 import { ago, recentRank } from '../utils/ago'
 import { whyNot } from '../utils/menus'
@@ -325,7 +326,7 @@ function ConnForm({ meta, init, isNew, error, onSave, onClose }: { meta: Meta; i
           <div className="min-w-0">
             <div className="flex gap-1.5">
               <input id={uid + 'pwcmd'} className="flex-1 min-w-0" aria-label="Password command" value={c.PasswordCmd ?? ''} placeholder="a command that prints the password" onChange={(e) => set('PasswordCmd', e.target.value)} />
-              {/* M15.36: the secret stores nobody should have to type a command for; <name> becomes this connection's name */}
+              {/* the secret stores nobody should have to type a command for; <name> becomes this connection's name */}
               <Select className="w-[9em]" aria-label="Password command presets" value="" onChange={(v) => { const p = presets.find((x) => x.name === v); if (p) set('PasswordCmd', p.command.split('<name>').join(c.Name || 'name')) }} options={[{ value: '', label: 'Presets…' }, ...presets.map((p) => p.name)]} />
             </div>
             {presets.find((p) => c.PasswordCmd && c.PasswordCmd === p.command.split('<name>').join(c.Name || 'name'))?.note && <div className="text-ink-3 text-[11.5px] mt-0.5">{presets.find((p) => c.PasswordCmd === p.command.split('<name>').join(c.Name || 'name'))!.note.split('<name>').join(c.Name || 'name')}</div>}

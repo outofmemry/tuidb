@@ -59,7 +59,7 @@ type App struct {
 	mcpErr    error                         // the listener could not start
 	pending   map[string]context.CancelFunc // connections being opened (by name): one attempt each, cancellable
 	mcpUI     chan func() tea.Cmd           // MCP goroutine -> UI loop (drained by pump from Init)
-	m15       appM15                        // focus, idle time and mouse state (m15_app.go)
+	term      termState                     // focus, idle time and mouse state (layout.go)
 }
 
 func NewApp(d *Deps) *App {
@@ -68,7 +68,7 @@ func NewApp(d *Deps) *App {
 	}
 	copyCSV, autoPrettyJSON = d.Cfg.CSV, d.Cfg.Table.AutoPrettyJSON
 	var pluginConflicts []string
-	if pb := pluginBindings(); len(pb) > 0 { // M13.6: plugin shortcuts are Global bindings "plugin:<name>"
+	if pb := pluginBindings(); len(pb) > 0 { // plugin shortcuts are Global bindings "plugin:<name>"
 		if km, c, err := pluginBindingsChecked(d.Cfg); err == nil {
 			d.Keys, pluginConflicts = km, c
 		}
@@ -147,8 +147,8 @@ func (a *App) approve(ctx context.Context, ap mcp.Approval) (bool, error) {
 
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{a.init(), pump(a.mcpUI), a.idleTick()}
-	a.m15.lastKey = time.Now()
-	if a.passcodeSet() { // M15.37: the app starts locked
+	a.term.lastKey = time.Now()
+	if a.passcodeSet() { // the app starts locked
 		a.lock()
 	}
 	if themeName(a.d.Cfg.Theme.Name) == "auto" {
@@ -429,10 +429,10 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.say("%s: connection works (%s)", m.name, m.info)
 	case tea.FocusMsg:
-		a.m15.blurred = false
+		a.term.blurred = false
 		return a, nil
 	case tea.BlurMsg:
-		a.m15.blurred = true
+		a.term.blurred = true
 		return a, nil
 	case idleTickMsg:
 		return a, tea.Batch(a.idleCheck(time.Now()), a.idleTick())
@@ -531,10 +531,10 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.quit = true
 		return a, tea.Quit
 	case tea.KeyPressMsg:
-		a.m15.lastKey = time.Now()
+		a.term.lastKey = time.Now()
 		return a, a.key(m)
 	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.MouseMotionMsg:
-		a.m15.lastKey = time.Now()
+		a.term.lastKey = time.Now()
 		return a, a.mouse(msg.(tea.MouseMsg))
 	case tea.MouseWheelMsg:
 		// the wheel is three arrow keys (the terminal convention), so every pane and dialog
@@ -631,7 +631,7 @@ func (a *App) key(k tea.KeyPressMsg) tea.Cmd {
 
 // run executes a prefix action. Workspace-only actions are ignored on the welcome screen.
 func (a *App) run(action string) tea.Cmd {
-	if cmd, ok := a.runM678(action); ok {
+	if cmd, ok := a.runAppAction(action); ok {
 		return cmd
 	}
 	switch action {

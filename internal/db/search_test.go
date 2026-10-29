@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -135,3 +136,52 @@ func TestSearchAllSchemasOnlyWhereObjectsHonourIt(t *testing.T) {
 		}
 	}
 }
+
+type mongoLike struct{ Session }
+
+func (*mongoLike) Caps() Capabilities { return Capabilities{Dialect: "mongo"} }
+
+func TestSystemSchemasPerDialect(t *testing.T) {
+	for dialect, want := range map[string][]string{
+		"mysql":      {"a", "pg_catalog", "system", "b"},
+		"clickhouse": {"a", "pg_catalog", "mysql", "sys", "performance_schema", "b"},
+		"postgres":   {"a", "mysql", "sys", "performance_schema", "system", "INFORMATION_SCHEMA", "b"},
+	} {
+		got, err := SearchSchemas(t.Context(), &schemasFake{dialect: dialect}, SearchOptions{AllSchemas: true})
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("%s: %v %v, want %v", dialect, err, got, want)
+		}
+	}
+}
+
+func TestSearchAllSchemas(t *testing.T) {
+	f := &schemasFake{}
+	var got []string
+	err := Search(t.Context(), f, SearchOptions{Value: "x", Op: "Contains", AllSchemas: true}, func(h SearchHit) { got = append(got, h.Ref.Schema+"."+h.Ref.Name) })
+	if err != nil || !slices.Equal(got, []string{"a.t", "b.t"}) {
+		t.Errorf("%v %v", err, got)
+	}
+}
+
+type schemasFake struct {
+	Session
+	dialect string
+}
+
+func (f *schemasFake) Caps() Capabilities {
+	if f.dialect == "" {
+		return Capabilities{Dialect: "postgres", Schemas: true}
+	}
+	return Capabilities{Dialect: f.dialect, Schemas: true}
+}
+func (*schemasFake) CurrentSchema() string { return "a" }
+func (f *schemasFake) Schemas(_ context.Context) ([]string, error) {
+	if len(f.dialect) > 0 {
+		return []string{"a", "pg_catalog", "mysql", "sys", "performance_schema", "system", "INFORMATION_SCHEMA", "b"}, nil
+	}
+	return []string{"a", "pg_catalog", "b"}, nil
+}
+func (*schemasFake) Objects(_ context.Context, s string) ([]Object, error) {
+	return []Object{{ObjRef: ObjRef{Schema: s, Name: "t", Kind: KindTable}}}, nil
+}
+func (*schemasFake) Count(context.Context, RowQuery, bool) (Count, error) { return Count{N: 1}, nil }
