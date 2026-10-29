@@ -785,10 +785,13 @@ func (a *App) render() string {
 	if !a.zen() {
 		out += "\n" + a.statusLine()
 	}
-	for _, o := range a.overlays {
+	for i, o := range a.overlays {
 		if l, ok := o.(*lockDlg); ok { // the lock covers everything
 			out = l.cover(a.th, a.w, a.h)
 			continue
+		}
+		if i == len(a.overlays)-1 { // only the top dialog is bright: everything under it recedes
+			out = a.th.backdrop(out)
 		}
 		out = composite(out, o.View(a.th, a.w, a.h), a.w, a.h)
 	}
@@ -901,10 +904,14 @@ func (a *App) topBar() string {
 // for the focused pane (or the latest toast) on the right.
 func (a *App) statusLine() string {
 	var l string
-	if a.machine.Pending() {
+	w := a.ws()
+	switch {
+	case a.machine.Pending():
 		l = a.th.Prefix.Render(" PREFIX ")
+	case w != nil && w.focusLabel() != "": // which pane has the keys, named like an editor's mode
+		l = a.th.TabActive.Render(" " + w.focusLabel() + " ")
 	}
-	if w := a.ws(); w != nil {
+	if w != nil {
 		if c := w.statusContext(); c != "" {
 			l += a.th.StatusBar.Foreground(lipgloss.Color(a.th.pal["dim"])).Render(" " + c + " ")
 		}
@@ -923,6 +930,9 @@ func (a *App) statusLine() string {
 	default:
 		// hints give way to the context: drop pairs from the end until both fit (help stays)
 		pairs, own := a.contextHintPairs(), len(a.d.Cfg.General.Hints) > 0
+		if w != nil && !own {
+			pairs = a.withFillers(dropShown(pairs, w.focusHint), w.focusHint)
+		}
 		for {
 			right = a.th.StatusBar.Render(" " + a.renderHints(pairs) + " ")
 			if len(pairs) <= 2 || a.w-width(l)-width(right) >= 0 {
@@ -963,10 +973,10 @@ func (a *App) contextHintPairs() []string {
 	switch a.context() {
 	case keymap.Grid:
 		pairs = []string{"↵", "edit", k("commit"), "commit", k("filters"), "filter", k("new_query_tab"), "sql"}
-	case keymap.Editor:
-		pairs = []string{k("run_current"), "run", k("run_all"), "run all", k("cancel_query"), "cancel"}
-	case keymap.Results:
-		pairs = []string{"↵", "quick look", "[ ]", "result tabs", "Esc", "editor"}
+	case keymap.Editor: // run, run all and the limit sit on the run bar under the editor
+		pairs = []string{k("find"), "find", k("toggle_comment"), "comment", k("complete"), "complete", k("cancel_query"), "cancel"}
+	case keymap.Results: // the frame names Enter (edit or quick look) and the result tabs
+		pairs = []string{k("copy_rows"), "copy", k("find"), "search", k("chart"), "chart", "Esc", "editor"}
 	case keymap.Sidebar:
 		pairs = []string{"↵", "open", "/", "find", "m", "menu", k("new_query_tab"), "sql"}
 	case keymap.FilterBar:
@@ -991,6 +1001,22 @@ func (a *App) contextHintPairs() []string {
 		}
 	}
 	return append(pairs, pre+" ?", "help")
+}
+
+// withFillers tops up a status line that the focused frame's hints left with only help: the keys that
+// work from anywhere (find anything, a new SQL editor), unless the frame already shows them.
+func (a *App) withFillers(pairs []string, shown string) []string {
+	if len(pairs) > 2 {
+		return pairs
+	}
+	var fill []string
+	for _, f := range [][2]string{{"open_anything", "find anything"}, {"new_query_tab", "sql"}} {
+		if k := boundKey(a.d.Keys, keymap.Global, f[0]); k != "" {
+			fill = append(fill, k, f[1])
+		}
+	}
+	fill = dropShown(append(fill, "", ""), shown) // dropShown keeps the last pair, so a blank one goes last
+	return append(fill[:len(fill)-2], pairs...)
 }
 
 func (a *App) renderHints(pairs []string) string {

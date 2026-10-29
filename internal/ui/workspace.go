@@ -39,18 +39,21 @@ type detailer interface {
 }
 
 type Workspace struct {
-	a       *App
-	id      int
-	conn    config.Connection
-	o       *Opened
-	side    *Opened // the process list's own session, opened on first use
-	sess    db.Session
-	caps    db.Capabilities
-	level   safemode.Level
-	sb      *sidebar
-	tabs    []tabber
-	cur     int
-	nextTab int
+	a *App
+	// focusHint is the plain text of the focused frame's key hints from the last render; the status line
+	// leaves out the pairs it already shows, so one key is not advertised twice on screen.
+	focusHint string
+	id        int
+	conn      config.Connection
+	o         *Opened
+	side      *Opened // the process list's own session, opened on first use
+	sess      db.Session
+	caps      db.Capabilities
+	level     safemode.Level
+	sb        *sidebar
+	tabs      []tabber
+	cur       int
+	nextTab   int
 
 	focusSB      bool
 	focusDetail  bool // the row-detail pane has the keyboard (focus_right from the grid)
@@ -1052,18 +1055,14 @@ func schemaSuffix(s string) string {
 
 // statusContext is the middle zone of the status bar: where you are in the data.
 func (w *Workspace) statusContext() string {
+	if q, ok := w.tab().(*queryTab); ok && !w.focusSB && !w.focusDetail && !w.consoleFocused() && !q.focusResults && q.ed != nil {
+		return fmt.Sprintf("Ln %d, Col %d", q.ed.cur.row+1, q.ed.cur.col+1)
+	}
 	t, ok := w.tab().(*tableTab)
 	if !ok || t.view != viewData {
 		return ""
 	}
-	var parts []string
-	if t.counted {
-		total := fmt.Sprint(t.count.N)
-		if !t.count.Exact {
-			total = "~" + total
-		}
-		parts = append(parts, fmt.Sprintf("rows %d–%d of %s", min(t.offset+1, t.offset+t.loadedRows), t.offset+t.loadedRows, total))
-	}
+	var parts []string // the row range is in the grid's own footer; this line adds the sort and filters
 	for _, s := range t.sort {
 		dir := "▲"
 		if s.Desc {
@@ -1104,7 +1103,9 @@ func (w *Workspace) crumbs(th Theme) (left, right []string) {
 	if t := w.tab(); t != nil {
 		left = append(left, th.StatusBar.Bold(true).Render(t.Title()))
 	}
-	if w.level == safemode.Silent {
+	if w.level == safemode.Silent && c.Tag == "production" { // nothing asks before a write on production: say so loudly
+		right = append(right, th.Warn.Background(bg).Render("safe mode off"))
+	} else if w.level == safemode.Silent {
 		right = append(right, th.StatusBar.Foreground(lipgloss.Color(th.pal["dim"])).Render("safe mode off"))
 	} else {
 		right = append(right, th.Warn.Background(bg).Bold(true).Render("⚠ "+w.level.Label()))
@@ -1150,10 +1151,11 @@ func layoutOf(showSB, showDetail, showConsole bool, W, H int) (sbW, detW, conH, 
 }
 
 func (w *Workspace) view(th Theme, W, H int) string {
+	w.focusHint = ""
 	sbW, detW, conH, mainW, mainH := layoutOf(w.showSB, w.showDetail, w.showConsole, W, H)
 	var cols []string
 	if sbW > 0 {
-		cols = append(cols, w.frame(th, w.sb.title(th), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
+		cols = append(cols, w.frame(th, w.sb.title(th, sbW-6, w.focusSB), w.sb.hint(th), w.sb.view(th, sbW-4, mainH-2, w.focusSB), sbW, mainH, w.focusSB), " ")
 	}
 	if w.panes.split {
 		cols = append(cols, w.splitFrames(th, mainW, mainH))
@@ -1260,17 +1262,19 @@ func (w *Workspace) emptyView(th Theme, W, H int) string {
 		"   "+th.Dim.Render(w.sess.CurrentDatabase()+"  ·  ")+objs,
 		"",
 		"   "+th.Section.Render("Get started"),
-		"   "+th.Hints("↵", "open the highlighted table in the sidebar"),
-		"   "+th.Hints("/", "find a table by name  (in the sidebar)"),
-		"   "+th.Hints(k("new_query_tab"), "open a SQL editor"),
-		"   "+th.Hints(k("open_anything"), "open anything: tables, saved queries, features"),
+		"   "+th.chips("↵", "open the highlighted table in the sidebar"),
+		"   "+th.chips("/", "find a table by name (in the sidebar)"),
+		"   "+th.chips(k("new_query_tab"), "open a SQL editor"),
+		"   "+th.chips(k("open_anything"), "open anything: tables, saved queries, features"),
+		"   "+th.chip(k("focus_left"))+" "+th.chip(k("focus_right"))+th.Hint.Render(" move between panes (the bright border shows which has the keys)"),
 		"",
 		"   "+th.Section.Render("Then"),
-		"   "+th.Hints("↵", "edit a cell  ·  edits stay local until you commit"),
-		"   "+th.Hints(k("preview"), "preview the SQL")+"   "+th.Hints(k("commit"), "commit")+"   "+th.Hints(k("discard"), "discard"),
-		"   "+th.Hints(k("filters"), "filter rows")+"   "+th.Hints(k("show_structure"), "structure")+"   "+th.Hints(k("safe_mode"), "safe mode"),
+		"   "+th.chips("↵", "edit a cell (edits stay local until you commit)"),
+		"   "+th.chips(k("preview"), "preview the SQL", k("commit"), "commit", k("discard"), "discard"),
+		"   "+th.chips(k("filters"), "filter rows", k("show_structure"), "structure", k("safe_mode"), "safe mode"),
 		"",
-		"   "+th.Dim.Render(pre+" ? lists every key for the pane you are in  ·  Esc cancels the prefix  ·  "+pre+" "+pre+" sends it literally"))
+		"   "+th.chips(pre+" ?", "every key for the pane you are in"),
+		"   "+th.chips("Esc", "cancels the prefix", pre+" "+pre, "sends "+pre+" itself"))
 	for len(lines) < H {
 		lines = append(lines, "")
 	}

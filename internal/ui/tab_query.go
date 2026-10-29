@@ -1137,8 +1137,9 @@ func (t *queryTab) Hint(th Theme) string {
 	if t.focusResults && len(t.res) > 0 && !t.hideResults {
 		return resultHint(th, t.curResult())
 	}
-	pre := keymap.Display(t.ws.a.d.Keys.Prefix)
-	return th.chips(pre+" ↵", "run", pre+" M-j", "results", pre+" a", "save query", "C-a", "select all")
+	// run, run all and the limit are on the run bar under the editor; the border carries the next steps
+	km := t.ws.a.d.Keys
+	return th.chips(boundKey(km, keymap.Global, "focus_down"), "results", boundKey(km, keymap.Editor, "add_to_queries"), "save query", boundKey(km, keymap.Editor, "beautify"), "beautify", boundKey(km, keymap.Editor, "explain"), "explain")
 }
 
 func (t *queryTab) resultsView(th Theme, W, H int) string {

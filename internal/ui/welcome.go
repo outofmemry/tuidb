@@ -463,19 +463,19 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 	}
 	f := newForm(title, []formField{
 		{Kind: fHeading, Value: "Server"},
-		{Key: "name", Label: "Name", Kind: fText, Value: c.Name},
+		{Key: "name", Label: "Name", Kind: fText, Value: c.Name, Hint: "required: how it shows in the list"},
 		{Key: "driver", Label: "Driver", Kind: fChoice, Value: c.Driver, Options: config.Drivers},
 		{Key: "host", Label: "Host", Kind: fText, Value: orDefault(c.Host, "127.0.0.1"), Show: server},
 		{Key: "port", Label: "Port", Kind: fText, Value: port, Show: server},
-		{Key: "user", Label: "User", Kind: fText, Value: c.User, Show: server},
+		{Key: "user", Label: "User", Kind: fText, Value: c.User, Hint: "the database login", Show: server},
 		{Key: "password", Label: "Password", Kind: fSecret, Value: c.Password, Show: server},
-		{Key: "password_cmd", Label: "Password cmd", Kind: fText, Value: c.PasswordCmd, Show: server},
-		{Key: "database", Label: "Database", Kind: fText, Value: c.Database},
+		{Key: "password_cmd", Label: "Password cmd", Kind: fText, Value: c.PasswordCmd, Hint: "optional: a command that prints the password", Show: server},
+		{Key: "database", Label: "Database", Kind: fText, Value: c.Database, Hint: "empty: the server default"},
 		{Kind: fHeading, Value: "Workspace"},
 		{Key: "tag", Label: "Tag", Kind: fChoice, Value: c.Tag, Options: tags},
-		{Key: "color", Label: "Status color", Kind: fText, Value: c.Color},
+		{Key: "color", Label: "Status color", Kind: fText, Value: c.Color, Hint: "optional: #rrggbb or a name such as red"},
 		{Key: "safe_mode", Label: "Safe mode", Kind: fChoice, Value: c.SafeMode, Options: safe},
-		{Key: "group", Label: "Group", Kind: fText, Value: c.Group},
+		{Key: "group", Label: "Group", Kind: fText, Value: c.Group, Hint: "optional: a folder in the list"},
 		{Kind: fHeading, Value: "Transport"},
 		{Key: "encoding", Label: "Encoding", Kind: fText, Value: c.Encoding, Hint: "server default (UTF8, latin1…)", Show: server},
 		{Key: "ssl_mode", Label: "SSL mode", Kind: fChoice, Value: c.SSLMode, Options: sslModes},
@@ -751,7 +751,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 	// ---- body: connections frame (+ quick start frame when wide enough)
 	const lastW = 9
 	last := w.a.d.State.LastConnected()
-	bodyH := max(6, H-len(head)-2)
+	bodyH := max(6, H-len(head))
 	sideW := 0
 	if W >= 118 {
 		sideW = 54
@@ -827,7 +827,7 @@ func (w *welcome) view(th Theme, W, H int) string {
 			name = th.Bold.Render(name)
 		}
 		// a stripe in the driver color leads each row, so a mixed list scans by engine
-		line := th.DriverStyle(c.Driver).Render("▎") + cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(addr, addrW)) + th.Dim.Render(fit(ago(last[c.Name]), lastW)) + tagS
+		line := th.DriverStyle(c.Driver).Render("▎") + cursor + " " + name + th.DriverStyle(c.Driver).Render(fit(c.Driver, 12)) + th.Dim.Render(fit(fit(addr, addrW-1), addrW)) + th.Dim.Render(fit(ago(last[c.Name]), lastW)) + tagS
 		if i == w.sel {
 			line = th.SelRow.Render(fit(line, listW-4))
 		}

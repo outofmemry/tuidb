@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"webtuidb/internal/keymap"
 )
@@ -93,7 +94,62 @@ func (w *Workspace) cue() string {
 	return ""
 }
 
-// frame is frame() with the workspace's cue colour on the border.
+// frame is frame() with the workspace's cue colour on the border. It notes the focused frame's hints
+// for the status line (focusHint).
 func (w *Workspace) frame(th Theme, title, hint, content string, W, H int, focused bool) string {
+	if focused && hint != "" && width(hint) <= W-4 { // frameEdge drops a hint that does not fit
+		w.focusHint = squash(ansi.Strip(hint))
+	}
 	return frameCue(th, w.cue(), title, hint, content, W, H, focused)
+}
+
+// squash collapses runs of spaces to one, so rendered chips ("  C-d s   commit") compare as "C-d s commit".
+func squash(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// focusLabel names the focused pane for the status line's pill ("" on the start page).
+func (w *Workspace) focusLabel() string {
+	switch {
+	case w.focusDetail:
+		return "ROW DETAILS"
+	case w.focusSB && w.sb.tab == 1:
+		return "SAVED QUERIES"
+	case w.focusSB && w.sb.tab == 2:
+		return "HISTORY"
+	}
+	switch w.context() {
+	case keymap.Console:
+		return "CONSOLE"
+	case keymap.Sidebar:
+		return "OBJECTS"
+	case keymap.Grid:
+		return "DATA"
+	case keymap.Editor:
+		return "EDITOR"
+	case keymap.Results:
+		return "RESULTS"
+	case keymap.Structure:
+		return "STRUCTURE"
+	case keymap.FilterBar:
+		return "FILTER"
+	}
+	return ""
+}
+
+// dropShown removes the key/label pairs the focused frame's border already shows; help always stays.
+func dropShown(pairs []string, shown string) []string {
+	if shown == "" {
+		return pairs
+	}
+	shown = " " + shown + " "
+	var out []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		last := i+2 >= len(pairs)
+		if !last && strings.Contains(shown, " "+squash(keyGlyph(pairs[i])+" "+pairs[i+1])+" ") {
+			continue
+		}
+		out = append(out, pairs[i], pairs[i+1])
+	}
+	return out
 }

@@ -959,9 +959,27 @@ func (w *Workspace) closeTabsFor(ref db.ObjRef, closeThem bool) {
 	}
 }
 
-// title is the sidebar's tab strip, set into the frame's top edge like the main pane's tabs.
-func (s *sidebar) title(th Theme) string {
-	return th.segmented([]string{"1 Objects", "2 Queries", "3 History"}, nil, s.tab) // the digits switch tabs (T-P3-12)
+// title is the sidebar's tab strip, set into the frame's top edge like the main pane's tabs. When the
+// strip is wider than maxW the idle tabs shrink to their digit, so no label is cut off with "…".
+func (s *sidebar) title(th Theme, maxW int, focused bool) string {
+	if !focused { // like the main tab bar: the active tab dims while the keys go elsewhere
+		th.TabActive = th.TabActive.Faint(true)
+	}
+	items := []string{"1 Objects", "2 Queries", "3 History"} // the digits switch tabs (T-P3-12)
+	if full := th.segmented(items, nil, s.tab); width(full) <= maxW {
+		return full
+	}
+	digits := ""
+	for i := range items {
+		if i != s.tab {
+			digits += " " + items[i][:1]
+			items[i] = items[i][:1]
+		}
+	}
+	if compact := th.segmented(items, nil, s.tab); width(compact) <= maxW {
+		return compact
+	}
+	return th.TabActive.Render(" "+items[s.tab]+" ") + th.Dim.Render(digits) // narrowest: the other digits as plain text
 }
 
 func (s *sidebar) hint(th Theme) string {
@@ -987,7 +1005,13 @@ func (s *sidebar) view(th Theme, W, H int, focused bool) string {
 	case s.searching || s.q.Value() != "":
 		head = append(head, " "+th.Accent.Render("/")+" "+s.q.View(W-4, th, s.searching))
 	case s.tab == 0 && s.w.caps.Schemas:
-		head = append(head, fit(" "+th.Bold.Render(where)+th.Dim.Render("  s switch schema"), W))
+		hint := "  s switch schema"
+		for _, h := range []string{hint, "  s schema", ""} { // the shortest hint that fits, rather than a cut one
+			if hint = h; width(where)+1+width(h) <= W {
+				break
+			}
+		}
+		head = append(head, fit(" "+th.Bold.Render(where)+th.Dim.Render(hint), W))
 	case s.tab == 0:
 		head = append(head, fit(" "+th.Bold.Render(where), W))
 	case s.tab == 1:

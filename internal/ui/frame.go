@@ -19,27 +19,36 @@ const logoW = 44
 
 // frame draws content inside a rounded border with the title set into the top edge.
 // The result is exactly w cells wide and h lines tall; content is clipped or padded to fit.
-// A focused frame uses the accent color so the active pane is always obvious.
+// A focused frame uses the accent color so the active pane is always obvious; only the focused
+// frame carries its key hints, so the screen shows one set of hints at a time.
 func frame(th Theme, title, hint, content string, w, h int, focused bool) string {
 	edge := th.Border
 	ttl := th.Dim.Bold(true)
 	if focused {
 		edge = th.Accent
 		ttl = th.Accent.Bold(true)
+	} else {
+		hint = ""
 	}
 	return frameEdge(th, edge, ttl, title, hint, content, w, h)
 }
 
-// frameCue is frame with the border in the colour cue ("" = the theme's); the title still shows the focus.
+// frameCue is frame with the border in the colour cue ("" = the theme's). The focused frame takes the
+// full cue colour; the others take the cue faded toward the theme's border colour, so a production
+// workspace stays tinted everywhere and the focused pane still stands out.
 func frameCue(th Theme, cue, title, hint, content string, w, h int, focused bool) string {
 	if cue == "" {
 		return frame(th, title, hint, content, w, h, focused)
 	}
 	ttl := th.Dim.Bold(true)
+	col := cue
 	if focused {
 		ttl = th.Accent.Bold(true)
+	} else {
+		hint = ""
+		col = blend(cue, th.pal["border"], 0.55)
 	}
-	return frameEdge(th, lipgloss.NewStyle().Foreground(lipgloss.Color(cue)), ttl, title, hint, content, w, h)
+	return frameEdge(th, lipgloss.NewStyle().Foreground(lipgloss.Color(col)), ttl, title, hint, content, w, h)
 }
 
 // frameEdge is frame with explicit edge and title styles (dialogs use the accent or, for
@@ -105,9 +114,29 @@ func (t Theme) hintChips(hint string) string {
 	return strings.Join(parts, "  ")
 }
 
-// chip renders a key as a small badge, used in bars and hints: [C-d s].
+// chip renders a key as a small badge, used in bars and hints: [C-d s]. The key is written in one
+// notation everywhere (keyGlyph), whichever way the caller spelled it.
 func (t Theme) chip(key string) string {
-	return lipgloss.NewStyle().Background(lipgloss.Color(t.pal["header_bg"])).Foreground(lipgloss.Color(t.pal["accent"])).Bold(true).Render(" " + key + " ")
+	return lipgloss.NewStyle().Background(lipgloss.Color(t.pal["header_bg"])).Foreground(lipgloss.Color(t.pal["accent"])).Bold(true).Render(" " + keyGlyph(key) + " ")
+}
+
+// keyGlyph spells a key the way every hint in the terminal UI does: tmux-style modifiers (C-, M-, S-)
+// and ↵ for Enter, so "Alt+Enter", "M-Enter" and "M-↵" all read "M-↵". The help screen keeps the
+// config spelling ("C-d Enter"), which is what [keys] takes.
+func keyGlyph(key string) string {
+	parts := strings.Split(key, " ")
+	for i, p := range parts {
+		for _, m := range [][2]string{{"Ctrl+", "C-"}, {"ctrl+", "C-"}, {"Alt+", "M-"}, {"alt+", "M-"}, {"Shift+", "S-"}, {"shift+", "S-"}} {
+			for strings.Contains(p, m[0]) && len(p) > len(m[0]) {
+				p = strings.Replace(p, m[0], m[1], 1)
+			}
+		}
+		if strings.HasSuffix(p, "Enter") || strings.HasSuffix(p, "enter") {
+			p = p[:len(p)-5] + "↵"
+		}
+		parts[i] = p
+	}
+	return strings.Join(parts, " ")
 }
 
 // chips renders key/label pairs as badges with labels: [↵] open  [/] find.

@@ -27,14 +27,42 @@ func boxEdge(th Theme, edge lipgloss.Style, title string, content []string, hint
 	inner := w - 4
 	lines := append([]string{""}, content...)
 	if hint != "" {
-		hint = th.hintChips(hint)
-		if width(hint) > inner-2 {
-			lines = append(lines, "", fit(hint, inner))
+		if chips := th.hintChips(hint); width(chips) <= inner-2 {
+			hint = chips
+		} else { // too long for the bottom edge: the keys wrap over lines inside the box, none cut off
+			lines = append(lines, "")
+			cur := ""
+			for _, piece := range strings.Split(hint, "   ") {
+				if strings.TrimSpace(piece) == "" {
+					continue
+				}
+				c := th.hintChips(piece)
+				if cur != "" && width(cur)+2+width(c) > inner {
+					lines = append(lines, cur)
+					cur = ""
+				}
+				if cur != "" {
+					cur += "  "
+				}
+				cur += c
+			}
+			lines = append(lines, fit(cur, inner))
 			hint = ""
 		}
 	}
 	lines = append(lines, "")
 	return frameEdge(th, edge, edge.Bold(true), title, hint, strings.Join(lines, "\n"), w, len(lines)+2)
+}
+
+// backdrop is the screen under a dialog: the same text in one muted colour, so the dialog is the only
+// bright thing on screen and its edges read without a shadow.
+func (t Theme) backdrop(s string) string {
+	st := lipgloss.NewStyle().Foreground(lipgloss.Color(blend(t.pal["dim"], t.pal["border"], 0.6)))
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = st.Render(ansi.Strip(l))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // composite draws box centered over base (both multi-line, base is W x H).
@@ -411,7 +439,7 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 			focusRow = len(rows)
 		}
 		if fl.Kind == fLabel && fl.Label == "" && !sqlish(fl.Value) { // a note: wrapped over the full width, not cut at the value column
-			for _, l := range wrapText(fl.Value, w-8) {
+			for _, l := range wordWrap(fl.Value, w-8) {
 				rows = append(rows, "  "+th.Dim.Render(l))
 			}
 			continue
@@ -425,15 +453,30 @@ func (f *formDlg) View(th Theme, maxW, maxH int) string {
 		switch fl.Kind {
 		case fText, fSecret:
 			val = fl.edit.View(vw, th, i == f.idx)
+			if fl.Hint != "" && fl.edit.Value() == "" && vw > 2 { // an empty field shows what goes in it
+				ph := th.Dim.Italic(true)
+				if i == f.idx {
+					val = th.SelCell.Render(" ") + ph.Background(th.CurRow.GetBackground()).Render(fit(" "+fl.Hint, vw-1))
+				} else {
+					val = ph.Render(fit(fl.Hint, vw))
+				}
+			}
 		case fBool:
 			val = th.Dim.Render("[ ]")
 			if fl.Value == "true" {
 				val = "[" + th.OK.Bold(true).Render("x") + "]"
 			}
 		case fChoice:
-			val = th.Dim.Render("‹ ") + th.Bold.Render(fl.Value) + th.Dim.Render(" ›")
+			shown := th.Bold.Render(fl.Value)
+			if fl.Value == "" { // an empty choice reads as a value, not as a gap
+				shown = th.Dim.Italic(true).Render("not set")
+			}
+			val = th.Dim.Render("‹ ") + shown + th.Dim.Render(" ›")
 			if i == f.idx {
-				val = th.Accent.Render("‹ ") + th.Accent.Bold(true).Render(fl.Value) + th.Accent.Render(" ›")
+				if fl.Value != "" {
+					shown = th.Accent.Bold(true).Render(fl.Value)
+				}
+				val = th.Accent.Render("‹ ") + shown + th.Accent.Render(" ›")
 			}
 		case fLabel:
 			val = th.Dim.Render(fl.Value)

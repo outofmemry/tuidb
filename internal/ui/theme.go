@@ -307,7 +307,7 @@ func (t Theme) DriverStyle(driver string) lipgloss.Style {
 func (t Theme) Hints(pairs ...string) string {
 	var parts []string
 	for i := 0; i+1 < len(pairs); i += 2 {
-		parts = append(parts, t.Key.Render(pairs[i])+" "+t.Hint.Render(pairs[i+1]))
+		parts = append(parts, t.Key.Render(keyGlyph(pairs[i]))+" "+t.Hint.Render(pairs[i+1]))
 	}
 	return strings.Join(parts, t.Hint.Render("  ·  "))
 }

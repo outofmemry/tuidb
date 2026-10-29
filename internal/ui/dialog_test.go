@@ -212,3 +212,46 @@ func TestFlowDialogsKeepInputOnError(t *testing.T) {
 		t.Fatal("savedQueryName")
 	}
 }
+
+// An empty text field shows its hint as a placeholder, an empty choice reads "not set", and a hint
+// line too long for the bottom edge wraps inside the box instead of ending in "…".
+func TestFormPlaceholdersAndWrappedHints(t *testing.T) {
+	h := newHarness(t, nil)
+	f := newForm("New thing", []formField{
+		{Key: "name", Label: "Name", Kind: fText, Hint: "required: how it shows"},
+		{Key: "tag", Label: "Tag", Kind: fChoice, Options: []string{"", "production"}},
+		{Key: "db", Label: "Database", Kind: fText, Value: "shop", Hint: "empty: the default"},
+	}, nil)
+	f.hotHint = "Ctrl+t: test the connection   Ctrl+o: password cmd preset   Ctrl+g: something else entirely"
+	v := stripANSI(f.View(h.a.th, 70, 40))
+	for _, want := range []string{"required: how it shows", "‹ not set ›", "C-t  test the connection", "C-o  password cmd preset", "something else entirely"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("form lacks %q:\n%s", want, v)
+		}
+	}
+	if strings.Contains(v, "empty: the default") {
+		t.Error("a field with a value still shows its placeholder")
+	}
+	if strings.Contains(v, "…") {
+		t.Errorf("the hint line was cut:\n%s", v)
+	}
+}
+
+// The screen under the top dialog is recoloured in one muted colour: same text, no other styling.
+func TestBackdropMutesTheScreen(t *testing.T) {
+	h := newHarness(t, nil)
+	th := h.a.th
+	in := th.Accent.Render("bright") + " " + th.Err.Render("red")
+	out := th.backdrop(in)
+	if stripANSI(out) != "bright red" {
+		t.Fatalf("backdrop changed the text: %q", stripANSI(out))
+	}
+	if strings.Count(out, "\x1b[38;") != 1 {
+		t.Errorf("backdrop keeps more than one colour: %q", out)
+	}
+	h.connect()
+	h.prefix("?")
+	if !strings.Contains(h.screen(), "Key bindings") {
+		t.Fatal("help did not open")
+	}
+}
