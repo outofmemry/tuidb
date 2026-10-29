@@ -41,6 +41,7 @@ type fakeSession struct {
 	ulist            []db.User
 	pins             []*pinnedFake
 	reorder          bool // Caps().ReorderColumns
+	sharedKey        bool // Columns marks the primary key as not unique
 	adminOpts        []map[string]string
 	userChanges      []db.UserChange
 }
@@ -113,7 +114,11 @@ func (f *fakeSession) Objects(_ context.Context, sc string) ([]db.Object, error)
 }
 func (f *fakeSession) Columns(context.Context, db.ObjRef) ([]db.Column, error) {
 	f.colCalls.Add(1)
-	return append([]db.Column(nil), customerCols...), nil
+	cols := append([]db.Column(nil), customerCols...)
+	if f.sharedKey { // ClickHouse: the primary key is a sorting key, not a unique one
+		cols[0].KeyNotUnique = true
+	}
+	return cols, nil
 }
 func (f *fakeSession) Indexes(context.Context, db.ObjRef) ([]db.Index, error) {
 	return []db.Index{{Name: "customers_pkey", Columns: []string{"id"}, Unique: true, Primary: true}}, nil

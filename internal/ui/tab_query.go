@@ -357,6 +357,7 @@ func (t *queryTab) run(stmts []db.Stmt) tea.Cmd {
 }
 
 func (t *queryTab) runBound(stmts []db.Stmt) tea.Cmd {
+	stmts = finishRoutineSwap(t.ws.caps.Dialect, stmts)
 	var gated []db.Statement
 	for _, s := range stmts {
 		gated = append(gated, db.Statement{Text: s.Text})

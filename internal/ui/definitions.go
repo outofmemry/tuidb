@@ -28,7 +28,9 @@ func (w *Workspace) editDefinition(ref db.ObjRef) tea.Cmd {
 }
 
 // editableDDL turns a CREATE statement into one that can be run over the existing object.
-// shortcut: MySQL routine bodies containing ';' are split by the editor (no DELIMITER support), upgrade when needed.
+// MySQL routine bodies contain ';', so the text sets DELIMITER $$ (the splitter understands it).
+// shortcut: MySQL has no RENAME for routines and a routine cannot be created from a prepared statement, so the
+// final name is restored by finishRoutineSwap, which re-issues the CREATE under the original name when the tab runs.
 func editableDDL(dialect string, ref db.ObjRef, ddl string) string {
 	d, _ := db.DialectFor(dialect)
 	name := ref.Name
@@ -53,14 +55,53 @@ func editableDDL(dialect string, ref db.ObjRef, ddl string) string {
 			body := strings.Replace(ddl, "`"+ref.Name+"`", "`"+tmp+"`", 1)
 			body = regexp.MustCompile(`(?i)^CREATE\s+DEFINER=[^ ]+\s+`).ReplaceAllString(body, "CREATE ")
 			return fmt.Sprintf("-- Definition of %s. The routine body may contain ';', so the terminator is switched to $$.\n"+
-				"-- Running all creates %s first; the old routine is dropped only after that succeeds.\n"+
-				"DELIMITER $$\n%s$$\nDROP %s IF EXISTS %s$$\nDELIMITER ;\n"+
-				"-- MySQL cannot rename routines: run this tab again after changing `%s` back to `%s` above, or keep the new name.\n",
-				ref.Name, tmp, body, kind, name, tmp, ref.Name)
+				"-- Running all creates the new body as %s first (a body the server rejects stops here and changes nothing), drops the old\n"+
+				"-- routine, creates the same body again as %s and drops %s, so the routine ends up under its own name.\n"+
+				"DELIMITER $$\n%s$$\nDROP %s IF EXISTS %s$$\nDELIMITER ;\n",
+				ref.Name, tmp, ref.Name, tmp, body, kind, name)
 		}
 	}
 	head := fmt.Sprintf("-- Definition of %s. Edit it, then run all to apply (it asks first in safe mode).\n", ref.Name)
 	return head + drop + ddl + "\n"
+}
+
+var (
+	routineTmpRe  = regexp.MustCompile("(?is)\\bCREATE\\s+(?:DEFINER\\s*=\\s*\\S+\\s+)?(FUNCTION|PROCEDURE)\\s+`([^`]+)__webtuidb_new`")
+	routineDropRe = regexp.MustCompile("(?is)^(?:\\s*--[^\\n]*\\n)*\\s*DROP\\s+(?:FUNCTION|PROCEDURE)\\s+IF\\s+EXISTS\\s+(?:`[^`]+`\\.)?`([^`]+)`\\s*;?\\s*$")
+)
+
+// finishRoutineSwap completes the edit flow editableDDL writes for a MySQL routine. MySQL cannot rename a
+// routine, so after "CREATE `f__webtuidb_new`" and "DROP ... `f`" it appends the same CREATE under `f`
+// and drops the temporary one: the run ends with the routine under its original name, or, when the
+// first CREATE is rejected, with the old routine untouched (the run stops at the first error).
+func finishRoutineSwap(dialect string, stmts []db.Stmt) []db.Stmt {
+	if dialect != "mysql" {
+		return stmts
+	}
+	var out []db.Stmt
+	for i := 0; i < len(stmts); i++ {
+		out = append(out, stmts[i])
+		m := routineTmpRe.FindStringSubmatchIndex(stmts[i].Text)
+		if m == nil || i+1 >= len(stmts) {
+			continue
+		}
+		kind, orig := stmts[i].Text[m[2]:m[3]], stmts[i].Text[m[4]:m[5]]
+		d := routineDropRe.FindStringSubmatch(stmts[i+1].Text)
+		if d == nil || d[1] != orig {
+			continue
+		}
+		if i+2 < len(stmts) && strings.Contains(stmts[i+2].Text, "FUNCTION `"+orig+"`") || i+2 < len(stmts) && strings.Contains(stmts[i+2].Text, "PROCEDURE `"+orig+"`") {
+			continue // the text already creates it again
+		}
+		out = append(out, stmts[i+1])
+		i++
+		tmp := orig + "__webtuidb_new"
+		create := strings.Replace(stmts[i-1].Text[m[0]:], "`"+tmp+"`", "`"+orig+"`", 1)
+		out = append(out,
+			db.Stmt{Text: create, Start: stmts[i].Start, End: stmts[i].End},
+			db.Stmt{Text: "DROP " + kind + " IF EXISTS `" + tmp + "`", Start: stmts[i].Start, End: stmts[i].End})
+	}
+	return out
 }
 
 // triggerSQL is a statement pair that replaces trigger t on table ref.
