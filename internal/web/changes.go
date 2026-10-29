@@ -79,7 +79,7 @@ func buildChanges(c *cached, req editReq) ([]db.Change, error) {
 		idx[col.Name] = i
 	}
 	var keyCols []int
-	shared := false // the table has a key, but several rows can share it (ClickHouse sorting key): rows are matched on every value
+	shared := false                                   // the table has a key, but several rows can share it (ClickHouse sorting key): rows are matched on every value
 	if len(req.Updates) > 0 || len(req.Deletes) > 0 { // inserts need no key, so a hidden PK only blocks update/delete
 		anyKey := false
 		for _, col := range c.cols {
