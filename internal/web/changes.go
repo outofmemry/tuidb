@@ -79,9 +79,14 @@ func buildChanges(c *cached, req editReq) ([]db.Change, error) {
 		idx[col.Name] = i
 	}
 	var keyCols []int
+	shared := false // the table has a key, but several rows can share it (ClickHouse sorting key): rows are matched on every value
 	if len(req.Updates) > 0 || len(req.Deletes) > 0 { // inserts need no key, so a hidden PK only blocks update/delete
+		anyKey := false
 		for _, col := range c.cols {
-			if !col.PK {
+			if col.PK {
+				anyKey = true
+			}
+			if !col.RowKey() {
 				continue
 			}
 			i, ok := idx[col.Name]
@@ -89,6 +94,12 @@ func buildChanges(c *cached, req editReq) ([]db.Change, error) {
 				return nil, bad("primary key column %q is hidden; show it before editing", col.Name)
 			}
 			keyCols = append(keyCols, i)
+		}
+		if len(keyCols) == 0 && anyKey { // like the terminal grid: duplicate rows are all affected
+			shared = true
+			for i := range c.res.Columns {
+				keyCols = append(keyCols, i)
+			}
 		}
 		if len(keyCols) == 0 { // a key-less WHERE could hit many rows; the TUI refuses too
 			return nil, bad("this table has no primary key; rows cannot be updated or deleted safely")
@@ -101,7 +112,7 @@ func buildChanges(c *cached, req editReq) ([]db.Change, error) {
 		kv := make([]db.KeyVal, len(keyCols))
 		for j, ci := range keyCols {
 			kv[j] = db.KeyVal{Col: c.res.Columns[ci].Name, Val: c.res.Rows[row][ci]}
-			if want != nil && want[kv[j].Col] != db.FormatValue(kv[j].Val) {
+			if w, seen := want[kv[j].Col]; want != nil && (seen || !shared) && w != db.FormatValue(kv[j].Val) {
 				return nil, bad("row %d no longer matches what was edited (%s changed); reload the table", row, kv[j].Col)
 			}
 		}

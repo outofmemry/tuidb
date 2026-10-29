@@ -177,6 +177,7 @@ type session struct {
 	conn     chdriver.Conn
 	cur      string
 	colCache map[string][]string
+	rowCols  map[string][]string // per table: the columns a SELECT * returns, filled by Columns; what Plan matches rows on
 }
 
 var dialect = db.ClickHouse
@@ -279,7 +280,8 @@ func (s *session) Columns(ctx context.Context, ref db.ObjRef) ([]db.Column, erro
 	}
 	out := make([]db.Column, len(rows))
 	for i, r := range rows {
-		c := db.Column{Name: str(r[0]), OrigName: str(r[0]), Type: str(r[1]), PK: r[4] == uint64(1)}
+		// ClickHouse's primary key is the sorting key and does not make rows unique
+		c := db.Column{Name: str(r[0]), OrigName: str(r[0]), Type: str(r[1]), PK: r[4] == uint64(1), KeyNotUnique: r[4] == uint64(1)}
 		c.Nullable = strings.HasPrefix(c.Type, "Nullable(")
 		kind, expr := str(r[2]), str(r[3])
 		switch {
@@ -293,6 +295,18 @@ func (s *session) Columns(ctx context.Context, ref db.ObjRef) ([]db.Column, erro
 		}
 		out[i] = c
 	}
+	s.mu.Lock()
+	if s.rowCols == nil {
+		s.rowCols = map[string][]string{}
+	}
+	names := []string{}
+	for i, c := range out {
+		if k := str(rows[i][2]); k != "MATERIALIZED" && k != "ALIAS" && k != "EPHEMERAL" { // SELECT * does not return these
+			names = append(names, c.Name)
+		}
+	}
+	s.rowCols[s.dbOf(ref)+"."+ref.Name] = names
+	s.mu.Unlock()
 	return out, nil
 }
 
@@ -506,6 +520,7 @@ func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result,
 			res.Message = fmt.Sprintf("%d rows affected", n)
 		}
 		s.invalidate()
+		s.forgetRowCols()
 	}
 	if !res.HasRows && res.Message == "" {
 		res.Message = "OK"
@@ -523,6 +538,9 @@ func (s *session) invalidate() {
 func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 	defer s.invalidate()
 	for _, st := range stmts {
+		if !rowMutation.MatchString(st.Text) { // DDL may change the columns Plan matches rows on
+			s.forgetRowCols()
+		}
 		if _, err := s.run(ctx, st.Text, st.Args...); err != nil {
 			return fmt.Errorf("%s: %w", st.Shown(), err)
 		}
@@ -530,8 +548,69 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 	return nil
 }
 
+// rowMutation matches the statements Plan generates for row edits: they leave the columns as they were.
+var rowMutation = regexp.MustCompile(`(?is)^\s*(insert\s|alter\s+table\s+\S+\s+(update|delete)\b)`)
+
+func (s *session) forgetRowCols() {
+	s.mu.Lock()
+	s.rowCols = nil
+	s.mu.Unlock()
+}
+
+// noteMatchAll is added to the previewed text of an edit that matches the row on every column value.
+const noteMatchAll = "  -- matches the row on every column value: the ClickHouse sorting key is not unique"
+
+// Plan builds the row edits. ClickHouse has no unique key (the primary key is the sorting key, which
+// many rows can share), so an UPDATE or DELETE is only addressed to one row when it matches on every
+// column; an edit keyed on less is refused instead of silently changing every row that shares the key.
 func (s *session) Plan(changes []db.Change) ([]db.Statement, error) {
-	return db.PlanSQL(dialect, changes)
+	out, err := db.PlanSQL(dialect, changes)
+	if err != nil {
+		return nil, err
+	}
+	for i, c := range changes {
+		if c.Kind == db.Insert {
+			continue
+		}
+		cols, err := s.matchCols(c.ObjRef)
+		if err != nil {
+			return nil, err
+		}
+		have := map[string]bool{}
+		for _, k := range c.Key {
+			have[k.Col] = true
+		}
+		for _, n := range cols {
+			if !have[n] {
+				verb := "update"
+				if c.Kind == db.Delete {
+					verb = "delete from"
+				}
+				return nil, fmt.Errorf("cannot %s %s: the ClickHouse sorting key is not unique, so the row can only be addressed by all of its column values, and %q is not among them (show every column)", verb, c.Name, n)
+			}
+		}
+		out[i].Display = out[i].Shown() + noteMatchAll
+	}
+	return out, nil
+}
+
+// matchCols are the columns of ref that a row match must cover.
+func (s *session) matchCols(ref db.ObjRef) ([]string, error) {
+	key := s.dbOf(ref) + "." + ref.Name
+	s.mu.RLock()
+	cols, ok := s.rowCols[key]
+	s.mu.RUnlock()
+	if ok {
+		return cols, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if _, err := s.Columns(ctx, ref); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rowCols[key], nil
 }
 
 func (s *session) Processes(ctx context.Context) ([]db.ProcessInfo, error) {

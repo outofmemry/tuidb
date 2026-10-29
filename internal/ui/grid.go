@@ -27,10 +27,11 @@ const (
 )
 
 type gridCol struct {
-	Name  string
-	Type  string
-	PK    bool
-	Width int
+	Name   string
+	Type   string
+	PK     bool
+	Shared bool // PK is a key several rows can share (ClickHouse): rows are matched on every value instead
+	Width  int
 }
 
 type gridRow struct {
@@ -481,12 +482,12 @@ func (g *Grid) HasPending() bool {
 }
 
 // Changes turns the pending edits into db.Changes for table ref. Rows are identified by their PK
-// columns' original values, or by every original value when the table has no primary key
-// (so duplicate rows in a PK-less table are all affected, as in TablePlus).
+// columns' original values, or by every original value when the table has no primary key or only a
+// non-unique one (so duplicate rows in such a table are all affected, as in TablePlus).
 func (g *Grid) Changes(ref db.ObjRef) []db.Change {
 	var keyCols []int
 	for i, c := range g.Cols {
-		if c.PK {
+		if c.PK && !c.Shared {
 			keyCols = append(keyCols, i)
 		}
 	}

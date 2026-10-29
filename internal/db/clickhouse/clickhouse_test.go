@@ -198,3 +198,50 @@ func TestUseRe(t *testing.T) {
 		}
 	}
 }
+
+// ClickHouse's primary key is a sorting key that rows share, so an edit keyed on it could change many
+// rows: Plan only addresses a row by every column value and refuses anything less, saying which.
+func TestPlanMatchesRowOnEveryColumn(t *testing.T) {
+	s := &session{cur: "app", rowCols: map[string][]string{"app.events": {"id", "kind"}}}
+	ref := db.ObjRef{Name: "events", Kind: db.KindTable}
+	both := []db.KeyVal{{Col: "id", Val: int64(1)}, {Col: "kind", Val: "a"}}
+	set := []db.KeyVal{{Col: "kind", Val: "b"}}
+
+	st, err := s.Plan([]db.Change{{Kind: db.Update, ObjRef: ref, Key: both, Set: set}, {Kind: db.Delete, ObjRef: ref, Key: both}})
+	if err != nil || len(st) != 2 {
+		t.Fatalf("full-row match refused: %v", err)
+	}
+	for _, x := range st {
+		if !strings.Contains(x.Text, "`id` = ? AND `kind` = ?") || !strings.Contains(x.Shown(), "the ClickHouse sorting key is not unique") {
+			t.Errorf("statement %q / %q must match every column and say so", x.Text, x.Shown())
+		}
+		if strings.Contains(x.Text, "--") {
+			t.Errorf("the note belongs in the preview only: %q", x.Text)
+		}
+	}
+	for _, k := range []db.Change{
+		{Kind: db.Update, ObjRef: ref, Key: both[:1], Set: set},
+		{Kind: db.Delete, ObjRef: ref, Key: both[:1]},
+	} {
+		if _, err := s.Plan([]db.Change{k}); err == nil || !strings.Contains(err.Error(), "sorting key is not unique") || !strings.Contains(err.Error(), `"kind"`) {
+			t.Errorf("a sorting-key match must be refused with a reason: %v", err)
+		}
+	}
+	// inserts need no key
+	if _, err := s.Plan([]db.Change{{Kind: db.Insert, ObjRef: ref, Set: both}}); err != nil {
+		t.Errorf("insert: %v", err)
+	}
+}
+
+func TestRowMutationMatcher(t *testing.T) {
+	for _, q := range []string{"ALTER TABLE `a`.`t` UPDATE `x` = ? WHERE 1", "ALTER TABLE `t` DELETE WHERE 1", "INSERT INTO t (a) VALUES (1)"} {
+		if !rowMutation.MatchString(q) {
+			t.Errorf("%q is a row edit", q)
+		}
+	}
+	for _, q := range []string{"ALTER TABLE t ADD COLUMN x Int8", "DROP TABLE t", "RENAME TABLE a TO b"} {
+		if rowMutation.MatchString(q) {
+			t.Errorf("%q changes the columns", q)
+		}
+	}
+}

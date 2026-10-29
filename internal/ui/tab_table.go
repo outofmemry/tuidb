@@ -467,10 +467,10 @@ func (t *tableTab) describeQuery() string {
 }
 
 func (t *tableTab) fill(res *db.Result) {
-	pk := map[string]bool{}
+	pk, shared := map[string]bool{}, map[string]bool{}
 	types := map[string]string{}
 	for _, c := range t.cols {
-		pk[c.Name], types[c.Name] = c.PK, c.Type
+		pk[c.Name], shared[c.Name], types[c.Name] = c.PK, c.KeyNotUnique, c.Type
 	}
 	cols := make([]gridCol, len(res.Columns))
 	for i, c := range res.Columns {
@@ -478,7 +478,7 @@ func (t *tableTab) fill(res *db.Result) {
 		if typ == "" {
 			typ = types[c.Name]
 		}
-		cols[i] = gridCol{Name: c.Name, Type: typ, PK: pk[c.Name]}
+		cols[i] = gridCol{Name: c.Name, Type: typ, PK: pk[c.Name], Shared: shared[c.Name]}
 	}
 	first := len(t.grid.Cols) == 0
 	t.grid.SetData(cols, res.Rows)
@@ -515,7 +515,7 @@ func (t *tableTab) applyCols() {
 	}
 	for i := range t.grid.Cols {
 		if c, ok := by[t.grid.Cols[i].Name]; ok {
-			t.grid.Cols[i].PK = c.PK
+			t.grid.Cols[i].PK, t.grid.Cols[i].Shared = c.PK, c.KeyNotUnique
 			if t.grid.Cols[i].Type == "" {
 				t.grid.Cols[i].Type = c.Type
 			}
@@ -532,14 +532,14 @@ func (t *tableTab) keyVisible(shown []db.ResultColumn) bool {
 	}
 	hasPK := false
 	for _, c := range t.cols {
-		if c.PK {
+		if c.RowKey() {
 			hasPK = true
 			if !have[c.Name] {
 				return false
 			}
 		}
 	}
-	return hasPK || t.hiddenCount() == 0
+	return hasPK || t.hiddenCount() == 0 // no unique key: rows are matched on every value, so none may be hidden
 }
 
 // ---- input ------------------------------------------------------------------------------
@@ -983,7 +983,11 @@ func (t *tableTab) Commit() tea.Cmd {
 		})
 	}
 	if t.keylessWrites() {
-		t.ws.a.push(&confirmDlg{title: t.ref.Name + " has no primary key", yes: "Commit anyway", danger: true, onYes: send,
+		title := t.ref.Name + " has no primary key"
+		if t.sharedKey() {
+			title = t.ref.Name + " has no unique key"
+		}
+		t.ws.a.push(&confirmDlg{title: title, yes: "Commit anyway", danger: true, onYes: send,
 			lines: []string{"Rows are identified by all of their values, so every row identical to an edited or deleted one is changed or deleted too."}})
 		return nil
 	}
@@ -998,10 +1002,20 @@ func (t *tableTab) preimage() string {
 	return db.Preimage(t.grid.Changes(t.ref))
 }
 
-// keylessWrites: an update or delete is pending on a table without a primary key.
+// sharedKey: the table's primary key is not unique (ClickHouse), so edits match the row on every value.
+func (t *tableTab) sharedKey() bool {
+	for _, c := range t.cols {
+		if c.KeyNotUnique {
+			return true
+		}
+	}
+	return false
+}
+
+// keylessWrites: an update or delete is pending on a table without a unique key.
 func (t *tableTab) keylessWrites() bool {
 	for _, c := range t.cols {
-		if c.PK {
+		if c.RowKey() {
 			return false
 		}
 	}
@@ -1098,7 +1112,7 @@ func (t *tableTab) Detail() []string {
 
 func (t *tableTab) setView(v int) tea.Cmd {
 	if (v == viewJSON || v == viewTree) && !t.ws.caps.Document {
-		return t.ws.a.fail(fmt.Errorf("Json and Tree views are for document engines (MongoDB, Redis)"))
+		return t.ws.a.fail(fmt.Errorf("Json and Tree views are for document engines (MongoDB, Redis, DynamoDB)"))
 	}
 	t.view = v
 	if v >= viewJSON {

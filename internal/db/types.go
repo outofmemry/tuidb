@@ -34,11 +34,12 @@ type Capabilities struct {
 	Transactions   bool // Apply() is atomic
 	ProcessList    bool
 	Users          bool
-	Document       bool     // grid also offers Json/Tree views (MongoDB, Redis)
+	Document       bool     // grid also offers Json/Tree views (MongoDB, Redis, DynamoDB)
 	Editor         string   // "sql" | "redis" | "mongo"
 	Dialect        string   // "postgres" | "mysql" | "clickhouse" | "redis" | "mongo" | "sqlite" | "duckdb" | "cql" | "partiql"
 	DatabaseNoun   string   // "database" (SQL, Mongo) or "db index" (Redis)
 	Types          []string // column types offered by the structure editor / Set Value; empty = the PostgreSQL list
+	NoSubquery     bool     // a statement cannot be wrapped as a derived table (CQL, PartiQL): no paging by re-running it as a subquery
 	Explain        string   // plan format: "" = by Dialect, "text" = plain EXPLAIN, "none" = unsupported
 }
 
@@ -82,9 +83,15 @@ type Column struct {
 	Default  string // SQL expression text; "" = none
 	HasDef   bool
 	PK       bool
-	Extra    string // auto_increment, identity, comment...
-	FK       *ForeignKey
+	// KeyNotUnique: PK marks a key that several rows can share (the ClickHouse sorting key), so it must not
+	// be what an UPDATE or DELETE matches on. See RowKey.
+	KeyNotUnique bool
+	Extra        string // auto_increment, identity, comment...
+	FK           *ForeignKey
 }
+
+// RowKey says whether the column is part of a key that identifies exactly one row.
+func (c Column) RowKey() bool { return c.PK && !c.KeyNotUnique }
 
 type ForeignKey struct {
 	Name       string

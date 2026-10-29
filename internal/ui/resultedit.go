@@ -101,7 +101,7 @@ func (t *queryTab) applyResultCols(m resultColsMsg) {
 	pk := map[string]bool{}
 	nPK := 0
 	for _, c := range m.cols {
-		if c.PK {
+		if c.RowKey() { // a result row is only addressed by a key that is unique
 			pk[c.Name] = true
 			nPK++
 		}

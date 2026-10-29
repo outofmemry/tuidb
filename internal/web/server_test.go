@@ -277,6 +277,38 @@ func TestNoPKRejectsUpdateDeleteButAllowsInsert(t *testing.T) {
 	}
 }
 
+// A key several rows can share (the ClickHouse sorting key) is not a row key: the row is matched on every visible value.
+func TestSharedKeyMatchesOnEveryVisibleColumn(t *testing.T) {
+	c := &cached{
+		ref: db.ObjRef{Name: "t"}, cols: []db.Column{{Name: "ts", PK: true, KeyNotUnique: true}, {Name: "n"}},
+		res: &db.Result{Columns: []db.ResultColumn{{Name: "ts"}, {Name: "n"}}, Rows: [][]any{{"2026-01-01", "x"}}},
+	}
+	upd := func(ts string) editReq {
+		var r editReq
+		if err := json.Unmarshal([]byte(`{"updates":[{"row":0,"set":{"n":"y"},"key":{"ts":"`+ts+`"}}]}`), &r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	ch, err := buildChanges(c, upd("2026-01-01"))
+	if err != nil || len(ch) != 1 || len(ch[0].Key) != 2 || ch[0].Key[0].Col != "ts" || ch[0].Key[1].Col != "n" || ch[0].Key[1].Val != "x" {
+		t.Fatalf("every visible column must match the row: %+v %v", ch, err)
+	}
+	if _, err := buildChanges(c, upd("1999")); err == nil {
+		t.Fatal("a stale shared-key value must still be refused")
+	}
+	if ch, err := buildChanges(c, editReq{Deletes: []int{0}}); err != nil || len(ch[0].Key) != 2 {
+		t.Fatalf("delete: %+v %v", ch, err)
+	}
+	// a unique key next to it still wins
+	c.cols = append(c.cols, db.Column{Name: "id", PK: true})
+	c.res.Columns = append(c.res.Columns, db.ResultColumn{Name: "id"})
+	c.res.Rows[0] = append(c.res.Rows[0], 7)
+	if ch, err := buildChanges(c, editReq{Deletes: []int{0}}); err != nil || len(ch[0].Key) != 1 || ch[0].Key[0].Col != "id" {
+		t.Fatalf("a unique key must be preferred: %+v %v", ch, err)
+	}
+}
+
 func TestHiddenPKOnlyBlocksKeyedChanges(t *testing.T) {
 	c := &cached{
 		ref: db.ObjRef{Name: "t"}, cols: []db.Column{{Name: "id", PK: true}, {Name: "n"}},
