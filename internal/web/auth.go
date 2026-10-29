@@ -84,6 +84,29 @@ func (l *logins) valid(v string) bool {
 	return ok && time.Now().Before(exp)
 }
 
+func (l *logins) remove(v string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.m, v)
+}
+
+// logout forgets the caller's login cookie on the server and tells the browser to drop it. It needs no credentials
+// (it only ever removes one), but it is refused for a cross-site request like every other call.
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	if !s.originOK(r) || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return
+	}
+	if c, err := r.Cookie(cookieName); err == nil {
+		s.logins.remove(c.Value)
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, Secure: s.tls(), SameSite: http.SameSiteStrictMode,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // login trades the configured [web] password for an HttpOnly cookie that api() accepts in place of the bearer token.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	pw := s.o.Cfg.Web.Password

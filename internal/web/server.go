@@ -375,6 +375,7 @@ func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
 	// global
 	m.HandleFunc("POST /api/login", s.login)
+	m.HandleFunc("POST /api/logout", s.logout)
 	m.HandleFunc("GET /api/meta", s.api(s.meta))
 	m.HandleFunc("GET /api/connections", s.api(s.getConns))
 	m.HandleFunc("PUT /api/connections", s.api(s.putConns))

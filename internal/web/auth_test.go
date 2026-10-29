@@ -56,6 +56,14 @@ func TestLoginCookie(t *testing.T) {
 	if meta["login"] != true {
 		t.Fatalf("meta: %v", meta["login"])
 	}
+	// logout: the cookie is cleared in the browser and stops working on the server
+	r = hit("POST", "/api/logout", "", c)
+	if r.StatusCode != 200 || len(r.Cookies()) != 1 || r.Cookies()[0].Name != cookieName || r.Cookies()[0].MaxAge >= 0 {
+		t.Fatalf("logout must clear the cookie: %d %+v", r.StatusCode, r.Cookies())
+	}
+	if r := hit("GET", "/api/connections", "", c); r.StatusCode != 401 {
+		t.Fatalf("the cookie must be dead after logout: %d", r.StatusCode)
+	}
 	// no password configured: the endpoint is off
 	e2 := newEnv(t, "")
 	if code, _ := e2.call("POST", "/api/login", map[string]string{"password": ""}, ""); code != 404 {

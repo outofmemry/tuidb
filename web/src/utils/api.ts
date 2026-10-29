@@ -1,5 +1,7 @@
 import { handoffPut, handoffTake, linkWithToken } from './links'
 import { confirm } from './prompts'
+import { logoutSteps } from './logout'
+import { openSessions } from './workspaces'
 
 // Types use the Go field names of the db/config structs (the API serializes them as-is).
 const KEY = 'webtuidb-token'
@@ -27,6 +29,15 @@ export function openWindow(url: string) {
   try { handoffPut(localStorage, token()) } catch { url = withToken(url) } // no storage: fall back to the fragment
   window.open(url, '_blank', 'noopener')
 }
+
+// signOut logs this browser tab out: its sessions are closed, the server expires the [web] password login cookie, the token (sessionStorage
+// and memory) and the rest of what the tab kept are cleared, and the page reloads at the start, which asks to sign in again.
+export const signOut = (go: () => void = () => location.assign('/')) => logoutSteps({
+  sessions: Object.values(openSessions()),
+  call: (method, path) => api(method, path),
+  forget: () => { memToken = ''; try { sessionStorage.clear() } catch { /* storage blocked: nothing was kept */ } },
+  go,
+})
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body: any) { super(message) }
