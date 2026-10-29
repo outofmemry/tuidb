@@ -24,6 +24,8 @@ jobs:
           extended: true
       - uses: actions/configure-pages@v5
         id: pages
+        with:
+          enablement: true # creates the Pages site (source: GitHub Actions) on first run
       - name: Build
         run: hugo -s docs --minify --baseURL "${{ steps.pages.outputs.base_url }}/"
       - uses: actions/upload-pages-artifact@v3
