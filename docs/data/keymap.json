@@ -1,0 +1,3499 @@
+{
+ "prefix": "ctrl+d",
+ "actions": {
+  "help": {
+   "key": "?",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "list key bindings",
+   "keys": [
+    {
+     "key": "?",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "open_anything": {
+   "key": "p",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "open anything",
+   "keys": [
+    {
+     "key": "p",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "open_connection": {
+   "key": "K",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "open connection",
+   "keys": [
+    {
+     "key": "K",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "new_session": {
+   "key": "n",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "new session (connection, then database)",
+   "keys": [
+    {
+     "key": "n",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "open_database": {
+   "key": "k",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "open database",
+   "keys": [
+    {
+     "key": "k",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "new_query_tab": {
+   "key": "e",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "new SQL editor tab",
+   "keys": [
+    {
+     "key": "e",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "new_tab": {
+   "key": "t",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "new tab",
+   "keys": [
+    {
+     "key": "t",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "close_tab": {
+   "key": "w",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "close tab",
+   "keys": [
+    {
+     "key": "w",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "next_tab": {
+   "key": "]",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "next tab",
+   "keys": [
+    {
+     "key": "]",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "prev_tab": {
+   "key": "[",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "previous tab",
+   "keys": [
+    {
+     "key": "[",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "next_workspace": {
+   "key": "}",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "next workspace",
+   "keys": [
+    {
+     "key": "}",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "prev_workspace": {
+   "key": "{",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "previous workspace",
+   "keys": [
+    {
+     "key": "{",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "workspaces": {
+   "key": "\\",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "show all workspaces",
+   "keys": [
+    {
+     "key": "\\",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "switch_session": {
+   "key": "l",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "switch session",
+   "keys": [
+    {
+     "key": "l",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "focus_left": {
+   "key": "alt+h",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "focus pane left",
+   "keys": [
+    {
+     "key": "alt+h",
+     "context": "global",
+     "noPrefix": false
+    },
+    {
+     "key": "ctrl+h",
+     "context": "global",
+     "noPrefix": true
+    }
+   ]
+  },
+  "focus_down": {
+   "key": "alt+j",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "focus pane down",
+   "keys": [
+    {
+     "key": "alt+j",
+     "context": "global",
+     "noPrefix": false
+    },
+    {
+     "key": "ctrl+j",
+     "context": "global",
+     "noPrefix": true
+    }
+   ]
+  },
+  "focus_up": {
+   "key": "alt+k",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "focus pane up",
+   "keys": [
+    {
+     "key": "alt+k",
+     "context": "global",
+     "noPrefix": false
+    },
+    {
+     "key": "ctrl+k",
+     "context": "global",
+     "noPrefix": true
+    }
+   ]
+  },
+  "focus_right": {
+   "key": "alt+l",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "focus pane right",
+   "keys": [
+    {
+     "key": "alt+l",
+     "context": "global",
+     "noPrefix": false
+    },
+    {
+     "key": "ctrl+l",
+     "context": "global",
+     "noPrefix": true
+    }
+   ]
+  },
+  "toggle_sidebar": {
+   "key": "0",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "toggle left sidebar",
+   "keys": [
+    {
+     "key": "0",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "toggle_row_detail": {
+   "key": "space",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "toggle row detail",
+   "keys": [
+    {
+     "key": "space",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "toggle_console": {
+   "key": "ctrl+c",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "toggle console log",
+   "keys": [
+    {
+     "key": "ctrl+c",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "toggle_results": {
+   "key": "`",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "toggle results pane",
+   "keys": [
+    {
+     "key": "`",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "commit": {
+   "key": "s",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "commit changes",
+   "keys": [
+    {
+     "key": "s",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "preview": {
+   "key": "P",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "preview changes as SQL",
+   "keys": [
+    {
+     "key": "P",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "discard": {
+   "key": "backspace",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "discard changes",
+   "keys": [
+    {
+     "key": "backspace",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "undo": {
+   "key": "z",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "undo",
+   "keys": [
+    {
+     "key": "z",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "redo": {
+   "key": "Z",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "redo",
+   "keys": [
+    {
+     "key": "Z",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "reload": {
+   "key": "r",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "reload workspace",
+   "keys": [
+    {
+     "key": "r",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "reload_tab": {
+   "key": "alt+r",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "reload current tab",
+   "keys": [
+    {
+     "key": "alt+r",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "reconnect": {
+   "key": "R",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "reconnect",
+   "keys": [
+    {
+     "key": "R",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "disconnect": {
+   "key": "alt+.",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "disconnect",
+   "keys": [
+    {
+     "key": "alt+.",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "process_list": {
+   "key": ".",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "process list",
+   "keys": [
+    {
+     "key": ".",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "safe_mode": {
+   "key": "S",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "change safe mode",
+   "keys": [
+    {
+     "key": "S",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "search_in_database": {
+   "key": "/",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "search in database",
+   "keys": [
+    {
+     "key": "/",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "users": {
+   "key": "u",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "user management",
+   "keys": [
+    {
+     "key": "u",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "diagram": {
+   "key": "d",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "ER diagram",
+   "keys": [
+    {
+     "key": "d",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "metrics": {
+   "key": "m",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "metrics board",
+   "keys": [
+    {
+     "key": "m",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "backup": {
+   "key": "b",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "backup database",
+   "keys": [
+    {
+     "key": "b",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "restore": {
+   "key": "B",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "restore database",
+   "keys": [
+    {
+     "key": "B",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "export": {
+   "key": "E",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "export",
+   "keys": [
+    {
+     "key": "E",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "import": {
+   "key": "I",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "import",
+   "keys": [
+    {
+     "key": "I",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "assistant": {
+   "key": "A",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "AI assistant",
+   "keys": [
+    {
+     "key": "A",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "close_other_tabs": {
+   "key": "alt+w",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "close other tabs",
+   "keys": [
+    {
+     "key": "alt+w",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "close_tabs_right": {
+   "key": "alt+W",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "close tabs to the right",
+   "keys": [
+    {
+     "key": "alt+W",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "close_all_tabs": {
+   "key": "alt+A",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "close all tabs",
+   "keys": [
+    {
+     "key": "alt+A",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "rename_tab": {
+   "key": "alt+n",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "rename tab",
+   "keys": [
+    {
+     "key": "alt+n",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "cancel_queries": {
+   "key": "alt+x",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "cancel running queries",
+   "keys": [
+    {
+     "key": "alt+x",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "connection_details": {
+   "key": "alt+K",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "connection details",
+   "keys": [
+    {
+     "key": "alt+K",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "plugins": {
+   "key": "alt+p",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "run a plugin",
+   "keys": [
+    {
+     "key": "alt+p",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "go_back": {
+   "key": "<",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go back",
+   "keys": [
+    {
+     "key": "<",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "go_forward": {
+   "key": ">",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go forward",
+   "keys": [
+    {
+     "key": ">",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "split_right": {
+   "key": "\"",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "split pane right",
+   "keys": [
+    {
+     "key": "\"",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "split_down": {
+   "key": "alt+\"",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "split pane down",
+   "keys": [
+    {
+     "key": "alt+\"",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "close_other_connections": {
+   "key": "alt+Q",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "close other connections",
+   "keys": [
+    {
+     "key": "alt+Q",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "open_file": {
+   "key": "O",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "open a SQL file",
+   "keys": [
+    {
+     "key": "O",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "open_recent": {
+   "key": "alt+O",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "open a recent file",
+   "keys": [
+    {
+     "key": "alt+O",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "settings": {
+   "key": ",",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "settings",
+   "keys": [
+    {
+     "key": ",",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "next_pane": {
+   "key": "alt+]",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "next pane",
+   "keys": [
+    {
+     "key": "alt+]",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "prev_pane": {
+   "key": "alt+[",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "previous pane",
+   "keys": [
+    {
+     "key": "alt+[",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "quit": {
+   "key": "q",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "quit",
+   "keys": [
+    {
+     "key": "q",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "run_current": {
+   "key": "enter",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "run current statement/selection",
+   "keys": [
+    {
+     "key": "enter",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "run_all": {
+   "key": "alt+enter",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "run all statements",
+   "keys": [
+    {
+     "key": "alt+enter",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "cancel_query": {
+   "key": ".",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "cancel running query",
+   "keys": [
+    {
+     "key": ".",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "beautify": {
+   "key": "i",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "beautify SQL",
+   "keys": [
+    {
+     "key": "i",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "uglify": {
+   "key": "I",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "uglify SQL",
+   "keys": [
+    {
+     "key": "I",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "toggle_comment": {
+   "key": "/",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "toggle line comment",
+   "keys": [
+    {
+     "key": "/",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "block_comment": {
+   "key": "alt+/",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "toggle block comment",
+   "keys": [
+    {
+     "key": "alt+/",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "save_sql_as": {
+   "key": "W",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "save SQL to file",
+   "keys": [
+    {
+     "key": "W",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "set_limit": {
+   "key": "L",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "set row limit",
+   "keys": [
+    {
+     "key": "L",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "add_to_queries": {
+   "key": "a",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "add to saved queries",
+   "keys": [
+    {
+     "key": "a",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "find": {
+   "key": "f",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "find",
+   "keys": [
+    {
+     "key": "f",
+     "context": "editor",
+     "noPrefix": false
+    },
+    {
+     "key": "f",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+/",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "find_replace": {
+   "key": "alt+f",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "find and replace",
+   "keys": [
+    {
+     "key": "alt+f",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "select_next_occurrence": {
+   "key": "D",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "select next occurrence (terminal: one cursor, jumps; web: adds a caret)",
+   "keys": [
+    {
+     "key": "D",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "select_all_occurrences": {
+   "key": "ctrl+g",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "select all occurrences",
+   "keys": [
+    {
+     "key": "ctrl+g",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "variables": {
+   "key": "alt+v",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "query parameters (variables)",
+   "keys": [
+    {
+     "key": "alt+v",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "vim_mode": {
+   "key": "v",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "toggle Vim keys",
+   "keys": [
+    {
+     "key": "v",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "invisibles": {
+   "key": "alt+s",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "show invisible characters",
+   "keys": [
+    {
+     "key": "alt+s",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "fold": {
+   "key": "alt+z",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "fold / unfold the current statement",
+   "keys": [
+    {
+     "key": "alt+z",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "wrap_lines": {
+   "key": "alt+g",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "toggle line wrap",
+   "keys": [
+    {
+     "key": "alt+g",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "cleanup_variables": {
+   "key": "alt+V",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "forget remembered variables",
+   "keys": [
+    {
+     "key": "alt+V",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "upper_case": {
+   "key": "U",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "selection to upper case",
+   "keys": [
+    {
+     "key": "U",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "lower_case": {
+   "key": "u",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "selection to lower case",
+   "keys": [
+    {
+     "key": "u",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "capitalize": {
+   "key": "alt+u",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "capitalize selection",
+   "keys": [
+    {
+     "key": "alt+u",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "use_selection_find": {
+   "key": "alt+e",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "use selection for find",
+   "keys": [
+    {
+     "key": "alt+e",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "jump_to_selection": {
+   "key": "alt+;",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "jump to selection",
+   "keys": [
+    {
+     "key": "alt+;",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "complete": {
+   "key": "ctrl+space",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "open autocomplete",
+   "keys": [
+    {
+     "key": "ctrl+space",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "add_row": {
+   "key": "i",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "add row (editable result)",
+   "keys": [
+    {
+     "key": "i",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "i",
+     "context": "grid",
+     "noPrefix": false
+    },
+    {
+     "key": "i",
+     "context": "structure",
+     "noPrefix": false
+    }
+   ]
+  },
+  "duplicate_rows": {
+   "key": "D",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "duplicate rows (editable result)",
+   "keys": [
+    {
+     "key": "D",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "D",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "delete_rows": {
+   "key": "delete",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "delete rows (editable result)",
+   "keys": [
+    {
+     "key": "delete",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "delete",
+     "context": "grid",
+     "noPrefix": false
+    },
+    {
+     "key": "delete",
+     "context": "structure",
+     "noPrefix": false
+    }
+   ]
+  },
+  "set_value": {
+   "key": "alt+enter",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "set value (editable result)",
+   "keys": [
+    {
+     "key": "alt+enter",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+enter",
+     "context": "grid",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+enter",
+     "context": "structure",
+     "noPrefix": false
+    }
+   ]
+  },
+  "copy_rows": {
+   "key": "c",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "copy rows",
+   "keys": [
+    {
+     "key": "c",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "c",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "copy_rows_as": {
+   "key": "alt+c",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "copy rows as...",
+   "keys": [
+    {
+     "key": "alt+c",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+c",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "copy_cells": {
+   "key": "C",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "copy selected cells",
+   "keys": [
+    {
+     "key": "C",
+     "context": "results",
+     "noPrefix": false
+    },
+    {
+     "key": "C",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "chart": {
+   "key": "g",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "toggle chart view",
+   "keys": [
+    {
+     "key": "g",
+     "context": "results",
+     "noPrefix": false
+    }
+   ]
+  },
+  "load_more": {
+   "key": "alt+m",
+   "context": "results",
+   "noPrefix": false,
+   "desc": "load more rows",
+   "keys": [
+    {
+     "key": "alt+m",
+     "context": "results",
+     "noPrefix": false
+    }
+   ]
+  },
+  "paste_rows": {
+   "key": "v",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "paste rows",
+   "keys": [
+    {
+     "key": "v",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "paste_cells": {
+   "key": "V",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "paste into selected cells",
+   "keys": [
+    {
+     "key": "V",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "quick_look": {
+   "key": "enter",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "quick look",
+   "keys": [
+    {
+     "key": "enter",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "filters": {
+   "key": "f",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "show filters",
+   "keys": [
+    {
+     "key": "f",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "columns": {
+   "key": "alt+f",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "choose visible columns",
+   "keys": [
+    {
+     "key": "alt+f",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "quick_filter": {
+   "key": "x",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "quick filter on this cell",
+   "keys": [
+    {
+     "key": "x",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "follow_fk": {
+   "key": "o",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "open the row a foreign key points to",
+   "keys": [
+    {
+     "key": "o",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "first_row": {
+   "key": "up",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "first row",
+   "keys": [
+    {
+     "key": "up",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "last_row": {
+   "key": "down",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "last row",
+   "keys": [
+    {
+     "key": "down",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "next_page": {
+   "key": "right",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "next page",
+   "keys": [
+    {
+     "key": "right",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "prev_page": {
+   "key": "left",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "previous page",
+   "keys": [
+    {
+     "key": "left",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "count_exact": {
+   "key": "#",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "count rows exactly",
+   "keys": [
+    {
+     "key": "#",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "page_settings": {
+   "key": "L",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "set row limit and offset",
+   "keys": [
+    {
+     "key": "L",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "hide_column": {
+   "key": "_",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "hide this column",
+   "keys": [
+    {
+     "key": "_",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "show_all_columns": {
+   "key": "+",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "show all columns",
+   "keys": [
+    {
+     "key": "+",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "sort_columns": {
+   "key": "alt+o",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "sort by several columns",
+   "keys": [
+    {
+     "key": "alt+o",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "explain": {
+   "key": "X",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "explain the current statement",
+   "keys": [
+    {
+     "key": "X",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "find_next": {
+   "key": "n",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "find next",
+   "keys": [
+    {
+     "key": "n",
+     "context": "editor",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+g",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "find_prev": {
+   "key": "N",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "find previous",
+   "keys": [
+    {
+     "key": "N",
+     "context": "editor",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+G",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "block_select": {
+   "key": "V",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "rectangular block selection",
+   "keys": [
+    {
+     "key": "V",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "filter_sql": {
+   "key": "s",
+   "context": "filterbar",
+   "noPrefix": false,
+   "desc": "show the generated WHERE clause",
+   "keys": [
+    {
+     "key": "s",
+     "context": "filterbar",
+     "noPrefix": false
+    }
+   ]
+  },
+  "mark": {
+   "key": "space",
+   "context": "sidebar",
+   "noPrefix": false,
+   "desc": "mark / unmark item (multi-select)",
+   "keys": [
+    {
+     "key": "space",
+     "context": "sidebar",
+     "noPrefix": false
+    }
+   ]
+  },
+  "new_schema": {
+   "key": "alt+n",
+   "context": "sidebar",
+   "noPrefix": false,
+   "desc": "create schema",
+   "keys": [
+    {
+     "key": "alt+n",
+     "context": "sidebar",
+     "noPrefix": false
+    }
+   ]
+  },
+  "bulk_update": {
+   "key": "alt+b",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "bulk update rows matching the filter",
+   "keys": [
+    {
+     "key": "alt+b",
+     "context": "grid",
+     "noPrefix": false
+    }
+   ]
+  },
+  "apply_filters": {
+   "key": "enter",
+   "context": "filterbar",
+   "noPrefix": false,
+   "desc": "apply checked filters",
+   "keys": [
+    {
+     "key": "enter",
+     "context": "filterbar",
+     "noPrefix": false
+    }
+   ]
+  },
+  "show_data": {
+   "key": "(",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "show table data",
+   "keys": [
+    {
+     "key": "(",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "show_structure": {
+   "key": ")",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "show table structure",
+   "keys": [
+    {
+     "key": ")",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "show_index": {
+   "key": "alt+i",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "show indexes",
+   "keys": [
+    {
+     "key": "alt+i",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "show_ddl": {
+   "key": "alt+d",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "show DDL",
+   "keys": [
+    {
+     "key": "alt+d",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "triggers": {
+   "key": "alt+t",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "edit this table's triggers",
+   "keys": [
+    {
+     "key": "alt+t",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "show_json": {
+   "key": "J",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "show Json view (MongoDB, Redis)",
+   "keys": [
+    {
+     "key": "J",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "show_tree": {
+   "key": "T",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "show Tree view (MongoDB, Redis)",
+   "keys": [
+    {
+     "key": "T",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "sidebar_search": {
+   "key": "F",
+   "context": "sidebar",
+   "noPrefix": false,
+   "desc": "search sidebar",
+   "keys": [
+    {
+     "key": "F",
+     "context": "sidebar",
+     "noPrefix": false
+    }
+   ]
+  },
+  "truncate": {
+   "key": "alt+delete",
+   "context": "sidebar",
+   "noPrefix": false,
+   "desc": "truncate table",
+   "keys": [
+    {
+     "key": "alt+delete",
+     "context": "sidebar",
+     "noPrefix": false
+    }
+   ]
+  },
+  "delete_item": {
+   "key": "delete",
+   "context": "sidebar",
+   "noPrefix": false,
+   "desc": "delete item",
+   "keys": [
+    {
+     "key": "delete",
+     "context": "sidebar",
+     "noPrefix": false
+    }
+   ]
+  },
+  "close_pane": {
+   "key": "alt+q",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "close this split pane",
+   "keys": [
+    {
+     "key": "alt+q",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "toggle_panels": {
+   "key": "alt+0",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "zen: hide sidebar, console, row detail and status",
+   "keys": [
+    {
+     "key": "alt+0",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "move_tab_left": {
+   "key": "alt+{",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "move tab left",
+   "keys": [
+    {
+     "key": "alt+{",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "move_tab_right": {
+   "key": "alt+}",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "move tab right",
+   "keys": [
+    {
+     "key": "alt+}",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "jobs": {
+   "key": "alt+J",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "background jobs (import, export, backup, restore, search)",
+   "keys": [
+    {
+     "key": "alt+J",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "lock": {
+   "key": "alt+L",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "lock with the passcode",
+   "keys": [
+    {
+     "key": "alt+L",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "assistant_new": {
+   "key": "alt+N",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "assistant: new chat",
+   "keys": [
+    {
+     "key": "alt+N",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "assistant_clear": {
+   "key": "alt+X",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "assistant: clear chat",
+   "keys": [
+    {
+     "key": "alt+X",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "assistant_history": {
+   "key": "alt+Y",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "assistant: chat history",
+   "keys": [
+    {
+     "key": "alt+Y",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "copy_cells_as": {
+   "key": "alt+C",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "copy selected cells as...",
+   "keys": [
+    {
+     "key": "alt+C",
+     "context": "grid",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+C",
+     "context": "results",
+     "noPrefix": false
+    }
+   ]
+  },
+  "copy_column": {
+   "key": "alt+y",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "copy all column values",
+   "keys": [
+    {
+     "key": "alt+y",
+     "context": "grid",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+y",
+     "context": "results",
+     "noPrefix": false
+    }
+   ]
+  },
+  "column_menu": {
+   "key": "alt+H",
+   "context": "grid",
+   "noPrefix": false,
+   "desc": "column header menu (sort, filter, hide)",
+   "keys": [
+    {
+     "key": "alt+H",
+     "context": "grid",
+     "noPrefix": false
+    },
+    {
+     "key": "alt+H",
+     "context": "results",
+     "noPrefix": false
+    }
+   ]
+  },
+  "select_word": {
+   "key": "alt+D",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "select word",
+   "keys": [
+    {
+     "key": "alt+D",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "select_all": {
+   "key": "alt+a",
+   "context": "editor",
+   "noPrefix": false,
+   "desc": "select all",
+   "keys": [
+    {
+     "key": "alt+a",
+     "context": "editor",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_1": {
+   "key": "1",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 1",
+   "keys": [
+    {
+     "key": "1",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_2": {
+   "key": "2",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 2",
+   "keys": [
+    {
+     "key": "2",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_3": {
+   "key": "3",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 3",
+   "keys": [
+    {
+     "key": "3",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_4": {
+   "key": "4",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 4",
+   "keys": [
+    {
+     "key": "4",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_5": {
+   "key": "5",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 5",
+   "keys": [
+    {
+     "key": "5",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_6": {
+   "key": "6",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 6",
+   "keys": [
+    {
+     "key": "6",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_7": {
+   "key": "7",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 7",
+   "keys": [
+    {
+     "key": "7",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_8": {
+   "key": "8",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 8",
+   "keys": [
+    {
+     "key": "8",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "tab_9": {
+   "key": "9",
+   "context": "global",
+   "noPrefix": false,
+   "desc": "go to tab 9",
+   "keys": [
+    {
+     "key": "9",
+     "context": "global",
+     "noPrefix": false
+    }
+   ]
+  },
+  "filter_clear_all": {
+   "key": "alt+c",
+   "context": "filterbar",
+   "noPrefix": true,
+   "desc": "clear all filters",
+   "keys": [
+    {
+     "key": "alt+c",
+     "context": "filterbar",
+     "noPrefix": true
+    }
+   ]
+  },
+  "filter_export": {
+   "key": "alt+e",
+   "context": "filterbar",
+   "noPrefix": true,
+   "desc": "export the filtered rows",
+   "keys": [
+    {
+     "key": "alt+e",
+     "context": "filterbar",
+     "noPrefix": true
+    }
+   ]
+  },
+  "filter_add_copy": {
+   "key": "alt+n",
+   "context": "filterbar",
+   "noPrefix": true,
+   "desc": "add a filter as a copy of this one",
+   "keys": [
+    {
+     "key": "alt+n",
+     "context": "filterbar",
+     "noPrefix": true
+    }
+   ]
+  },
+  "console_find": {
+   "key": "/",
+   "context": "console",
+   "noPrefix": true,
+   "desc": "console: find",
+   "keys": [
+    {
+     "key": "/",
+     "context": "console",
+     "noPrefix": true
+    }
+   ]
+  },
+  "console_next": {
+   "key": "n",
+   "context": "console",
+   "noPrefix": true,
+   "desc": "console: next match",
+   "keys": [
+    {
+     "key": "n",
+     "context": "console",
+     "noPrefix": true
+    }
+   ]
+  },
+  "console_prev": {
+   "key": "N",
+   "context": "console",
+   "noPrefix": true,
+   "desc": "console: previous match",
+   "keys": [
+    {
+     "key": "N",
+     "context": "console",
+     "noPrefix": true
+    }
+   ]
+  },
+  "console_copy": {
+   "key": "y",
+   "context": "console",
+   "noPrefix": true,
+   "desc": "console: copy line",
+   "keys": [
+    {
+     "key": "y",
+     "context": "console",
+     "noPrefix": true
+    }
+   ]
+  },
+  "console_errors": {
+   "key": "e",
+   "context": "console",
+   "noPrefix": true,
+   "desc": "console: errors only",
+   "keys": [
+    {
+     "key": "e",
+     "context": "console",
+     "noPrefix": true
+    }
+   ]
+  },
+  "console_menu": {
+   "key": "m",
+   "context": "console",
+   "noPrefix": true,
+   "desc": "console: menu",
+   "keys": [
+    {
+     "key": "m",
+     "context": "console",
+     "noPrefix": true
+    }
+   ]
+  }
+ },
+ "bindings": [
+  {
+   "Action": "help",
+   "Key": "?",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "list key bindings"
+  },
+  {
+   "Action": "open_anything",
+   "Key": "p",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "open anything"
+  },
+  {
+   "Action": "open_connection",
+   "Key": "K",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "open connection"
+  },
+  {
+   "Action": "new_session",
+   "Key": "n",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "new session (connection, then database)"
+  },
+  {
+   "Action": "open_database",
+   "Key": "k",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "open database"
+  },
+  {
+   "Action": "new_query_tab",
+   "Key": "e",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "new SQL editor tab"
+  },
+  {
+   "Action": "new_tab",
+   "Key": "t",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "new tab"
+  },
+  {
+   "Action": "close_tab",
+   "Key": "w",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "close tab"
+  },
+  {
+   "Action": "next_tab",
+   "Key": "]",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "next tab"
+  },
+  {
+   "Action": "prev_tab",
+   "Key": "[",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "previous tab"
+  },
+  {
+   "Action": "next_workspace",
+   "Key": "}",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "next workspace"
+  },
+  {
+   "Action": "prev_workspace",
+   "Key": "{",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "previous workspace"
+  },
+  {
+   "Action": "workspaces",
+   "Key": "\\",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "show all workspaces"
+  },
+  {
+   "Action": "switch_session",
+   "Key": "l",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "switch session"
+  },
+  {
+   "Action": "focus_left",
+   "Key": "alt+h",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "focus pane left"
+  },
+  {
+   "Action": "focus_down",
+   "Key": "alt+j",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "focus pane down"
+  },
+  {
+   "Action": "focus_up",
+   "Key": "alt+k",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "focus pane up"
+  },
+  {
+   "Action": "focus_right",
+   "Key": "alt+l",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "focus pane right"
+  },
+  {
+   "Action": "toggle_sidebar",
+   "Key": "0",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "toggle left sidebar"
+  },
+  {
+   "Action": "toggle_row_detail",
+   "Key": "space",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "toggle row detail"
+  },
+  {
+   "Action": "toggle_console",
+   "Key": "ctrl+c",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "toggle console log"
+  },
+  {
+   "Action": "toggle_results",
+   "Key": "`",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "toggle results pane"
+  },
+  {
+   "Action": "commit",
+   "Key": "s",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "commit changes"
+  },
+  {
+   "Action": "preview",
+   "Key": "P",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "preview changes as SQL"
+  },
+  {
+   "Action": "discard",
+   "Key": "backspace",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "discard changes"
+  },
+  {
+   "Action": "undo",
+   "Key": "z",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "undo"
+  },
+  {
+   "Action": "redo",
+   "Key": "Z",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "redo"
+  },
+  {
+   "Action": "reload",
+   "Key": "r",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "reload workspace"
+  },
+  {
+   "Action": "reload_tab",
+   "Key": "alt+r",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "reload current tab"
+  },
+  {
+   "Action": "reconnect",
+   "Key": "R",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "reconnect"
+  },
+  {
+   "Action": "disconnect",
+   "Key": "alt+.",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "disconnect"
+  },
+  {
+   "Action": "process_list",
+   "Key": ".",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "process list"
+  },
+  {
+   "Action": "safe_mode",
+   "Key": "S",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "change safe mode"
+  },
+  {
+   "Action": "search_in_database",
+   "Key": "/",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "search in database"
+  },
+  {
+   "Action": "users",
+   "Key": "u",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "user management"
+  },
+  {
+   "Action": "diagram",
+   "Key": "d",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "ER diagram"
+  },
+  {
+   "Action": "metrics",
+   "Key": "m",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "metrics board"
+  },
+  {
+   "Action": "backup",
+   "Key": "b",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "backup database"
+  },
+  {
+   "Action": "restore",
+   "Key": "B",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "restore database"
+  },
+  {
+   "Action": "export",
+   "Key": "E",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "export"
+  },
+  {
+   "Action": "import",
+   "Key": "I",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "import"
+  },
+  {
+   "Action": "assistant",
+   "Key": "A",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "AI assistant"
+  },
+  {
+   "Action": "close_other_tabs",
+   "Key": "alt+w",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "close other tabs"
+  },
+  {
+   "Action": "close_tabs_right",
+   "Key": "alt+W",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "close tabs to the right"
+  },
+  {
+   "Action": "close_all_tabs",
+   "Key": "alt+A",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "close all tabs"
+  },
+  {
+   "Action": "rename_tab",
+   "Key": "alt+n",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "rename tab"
+  },
+  {
+   "Action": "cancel_queries",
+   "Key": "alt+x",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "cancel running queries"
+  },
+  {
+   "Action": "connection_details",
+   "Key": "alt+K",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "connection details"
+  },
+  {
+   "Action": "plugins",
+   "Key": "alt+p",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "run a plugin"
+  },
+  {
+   "Action": "go_back",
+   "Key": "<",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go back"
+  },
+  {
+   "Action": "go_forward",
+   "Key": ">",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go forward"
+  },
+  {
+   "Action": "split_right",
+   "Key": "\"",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "split pane right"
+  },
+  {
+   "Action": "split_down",
+   "Key": "alt+\"",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "split pane down"
+  },
+  {
+   "Action": "close_other_connections",
+   "Key": "alt+Q",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "close other connections"
+  },
+  {
+   "Action": "open_file",
+   "Key": "O",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "open a SQL file"
+  },
+  {
+   "Action": "open_recent",
+   "Key": "alt+O",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "open a recent file"
+  },
+  {
+   "Action": "settings",
+   "Key": ",",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "settings"
+  },
+  {
+   "Action": "next_pane",
+   "Key": "alt+]",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "next pane"
+  },
+  {
+   "Action": "prev_pane",
+   "Key": "alt+[",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "previous pane"
+  },
+  {
+   "Action": "quit",
+   "Key": "q",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "quit"
+  },
+  {
+   "Action": "run_current",
+   "Key": "enter",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "run current statement/selection"
+  },
+  {
+   "Action": "run_all",
+   "Key": "alt+enter",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "run all statements"
+  },
+  {
+   "Action": "cancel_query",
+   "Key": ".",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "cancel running query"
+  },
+  {
+   "Action": "beautify",
+   "Key": "i",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "beautify SQL"
+  },
+  {
+   "Action": "uglify",
+   "Key": "I",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "uglify SQL"
+  },
+  {
+   "Action": "toggle_comment",
+   "Key": "/",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "toggle line comment"
+  },
+  {
+   "Action": "block_comment",
+   "Key": "alt+/",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "toggle block comment"
+  },
+  {
+   "Action": "save_sql_as",
+   "Key": "W",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "save SQL to file"
+  },
+  {
+   "Action": "set_limit",
+   "Key": "L",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "set row limit"
+  },
+  {
+   "Action": "add_to_queries",
+   "Key": "a",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "add to saved queries"
+  },
+  {
+   "Action": "find",
+   "Key": "f",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "find"
+  },
+  {
+   "Action": "find_replace",
+   "Key": "alt+f",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "find and replace"
+  },
+  {
+   "Action": "select_next_occurrence",
+   "Key": "D",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "select next occurrence (terminal: one cursor, jumps; web: adds a caret)"
+  },
+  {
+   "Action": "select_all_occurrences",
+   "Key": "ctrl+g",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "select all occurrences"
+  },
+  {
+   "Action": "variables",
+   "Key": "alt+v",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "query parameters (variables)"
+  },
+  {
+   "Action": "vim_mode",
+   "Key": "v",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "toggle Vim keys"
+  },
+  {
+   "Action": "invisibles",
+   "Key": "alt+s",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "show invisible characters"
+  },
+  {
+   "Action": "fold",
+   "Key": "alt+z",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "fold / unfold the current statement"
+  },
+  {
+   "Action": "wrap_lines",
+   "Key": "alt+g",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "toggle line wrap"
+  },
+  {
+   "Action": "cleanup_variables",
+   "Key": "alt+V",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "forget remembered variables"
+  },
+  {
+   "Action": "upper_case",
+   "Key": "U",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "selection to upper case"
+  },
+  {
+   "Action": "lower_case",
+   "Key": "u",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "selection to lower case"
+  },
+  {
+   "Action": "capitalize",
+   "Key": "alt+u",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "capitalize selection"
+  },
+  {
+   "Action": "use_selection_find",
+   "Key": "alt+e",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "use selection for find"
+  },
+  {
+   "Action": "jump_to_selection",
+   "Key": "alt+;",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "jump to selection"
+  },
+  {
+   "Action": "complete",
+   "Key": "ctrl+space",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "open autocomplete"
+  },
+  {
+   "Action": "find",
+   "Key": "f",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "search results"
+  },
+  {
+   "Action": "add_row",
+   "Key": "i",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "add row (editable result)"
+  },
+  {
+   "Action": "duplicate_rows",
+   "Key": "D",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "duplicate rows (editable result)"
+  },
+  {
+   "Action": "delete_rows",
+   "Key": "delete",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "delete rows (editable result)"
+  },
+  {
+   "Action": "set_value",
+   "Key": "alt+enter",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "set value (editable result)"
+  },
+  {
+   "Action": "copy_rows",
+   "Key": "c",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "copy rows"
+  },
+  {
+   "Action": "copy_rows_as",
+   "Key": "alt+c",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "copy rows as..."
+  },
+  {
+   "Action": "copy_cells",
+   "Key": "C",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "copy selected cells"
+  },
+  {
+   "Action": "chart",
+   "Key": "g",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "toggle chart view"
+  },
+  {
+   "Action": "load_more",
+   "Key": "alt+m",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "load more rows"
+  },
+  {
+   "Action": "add_row",
+   "Key": "i",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "add row"
+  },
+  {
+   "Action": "duplicate_rows",
+   "Key": "D",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "duplicate rows"
+  },
+  {
+   "Action": "delete_rows",
+   "Key": "delete",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "delete rows"
+  },
+  {
+   "Action": "copy_rows",
+   "Key": "c",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "copy rows"
+  },
+  {
+   "Action": "copy_rows_as",
+   "Key": "alt+c",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "copy rows as..."
+  },
+  {
+   "Action": "copy_cells",
+   "Key": "C",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "copy selected cells"
+  },
+  {
+   "Action": "paste_rows",
+   "Key": "v",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "paste rows"
+  },
+  {
+   "Action": "paste_cells",
+   "Key": "V",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "paste into selected cells"
+  },
+  {
+   "Action": "quick_look",
+   "Key": "enter",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "quick look"
+  },
+  {
+   "Action": "set_value",
+   "Key": "alt+enter",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "set value (NULL/DEFAULT/...)"
+  },
+  {
+   "Action": "filters",
+   "Key": "f",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "show filters"
+  },
+  {
+   "Action": "columns",
+   "Key": "alt+f",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "choose visible columns"
+  },
+  {
+   "Action": "quick_filter",
+   "Key": "x",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "quick filter on this cell"
+  },
+  {
+   "Action": "follow_fk",
+   "Key": "o",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "open the row a foreign key points to"
+  },
+  {
+   "Action": "first_row",
+   "Key": "up",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "first row"
+  },
+  {
+   "Action": "last_row",
+   "Key": "down",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "last row"
+  },
+  {
+   "Action": "next_page",
+   "Key": "right",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "next page"
+  },
+  {
+   "Action": "prev_page",
+   "Key": "left",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "previous page"
+  },
+  {
+   "Action": "count_exact",
+   "Key": "#",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "count rows exactly"
+  },
+  {
+   "Action": "page_settings",
+   "Key": "L",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "set row limit and offset"
+  },
+  {
+   "Action": "hide_column",
+   "Key": "_",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "hide this column"
+  },
+  {
+   "Action": "show_all_columns",
+   "Key": "+",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "show all columns"
+  },
+  {
+   "Action": "sort_columns",
+   "Key": "alt+o",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "sort by several columns"
+  },
+  {
+   "Action": "explain",
+   "Key": "X",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "explain the current statement"
+  },
+  {
+   "Action": "find_next",
+   "Key": "n",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "find next"
+  },
+  {
+   "Action": "find_prev",
+   "Key": "N",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "find previous"
+  },
+  {
+   "Action": "block_select",
+   "Key": "V",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "rectangular block selection"
+  },
+  {
+   "Action": "filter_sql",
+   "Key": "s",
+   "Context": "filterbar",
+   "NoPrefix": false,
+   "Desc": "show the generated WHERE clause"
+  },
+  {
+   "Action": "mark",
+   "Key": "space",
+   "Context": "sidebar",
+   "NoPrefix": false,
+   "Desc": "mark / unmark item (multi-select)"
+  },
+  {
+   "Action": "new_schema",
+   "Key": "alt+n",
+   "Context": "sidebar",
+   "NoPrefix": false,
+   "Desc": "create schema"
+  },
+  {
+   "Action": "bulk_update",
+   "Key": "alt+b",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "bulk update rows matching the filter"
+  },
+  {
+   "Action": "apply_filters",
+   "Key": "enter",
+   "Context": "filterbar",
+   "NoPrefix": false,
+   "Desc": "apply checked filters"
+  },
+  {
+   "Action": "find",
+   "Key": "alt+/",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "find in the grid"
+  },
+  {
+   "Action": "find_next",
+   "Key": "alt+g",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "find next"
+  },
+  {
+   "Action": "find_prev",
+   "Key": "alt+G",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "find previous"
+  },
+  {
+   "Action": "add_row",
+   "Key": "i",
+   "Context": "structure",
+   "NoPrefix": false,
+   "Desc": "add column / index"
+  },
+  {
+   "Action": "delete_rows",
+   "Key": "delete",
+   "Context": "structure",
+   "NoPrefix": false,
+   "Desc": "delete column / index"
+  },
+  {
+   "Action": "set_value",
+   "Key": "alt+enter",
+   "Context": "structure",
+   "NoPrefix": false,
+   "Desc": "set value / toggle"
+  },
+  {
+   "Action": "show_data",
+   "Key": "(",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "show table data"
+  },
+  {
+   "Action": "show_structure",
+   "Key": ")",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "show table structure"
+  },
+  {
+   "Action": "show_index",
+   "Key": "alt+i",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "show indexes"
+  },
+  {
+   "Action": "show_ddl",
+   "Key": "alt+d",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "show DDL"
+  },
+  {
+   "Action": "triggers",
+   "Key": "alt+t",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "edit this table's triggers"
+  },
+  {
+   "Action": "show_json",
+   "Key": "J",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "show Json view (MongoDB, Redis)"
+  },
+  {
+   "Action": "show_tree",
+   "Key": "T",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "show Tree view (MongoDB, Redis)"
+  },
+  {
+   "Action": "sidebar_search",
+   "Key": "F",
+   "Context": "sidebar",
+   "NoPrefix": false,
+   "Desc": "search sidebar"
+  },
+  {
+   "Action": "truncate",
+   "Key": "alt+delete",
+   "Context": "sidebar",
+   "NoPrefix": false,
+   "Desc": "truncate table"
+  },
+  {
+   "Action": "delete_item",
+   "Key": "delete",
+   "Context": "sidebar",
+   "NoPrefix": false,
+   "Desc": "delete item"
+  },
+  {
+   "Action": "close_pane",
+   "Key": "alt+q",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "close this split pane"
+  },
+  {
+   "Action": "toggle_panels",
+   "Key": "alt+0",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "zen: hide sidebar, console, row detail and status"
+  },
+  {
+   "Action": "move_tab_left",
+   "Key": "alt+{",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "move tab left"
+  },
+  {
+   "Action": "move_tab_right",
+   "Key": "alt+}",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "move tab right"
+  },
+  {
+   "Action": "jobs",
+   "Key": "alt+J",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "background jobs (import, export, backup, restore, search)"
+  },
+  {
+   "Action": "lock",
+   "Key": "alt+L",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "lock with the passcode"
+  },
+  {
+   "Action": "assistant_new",
+   "Key": "alt+N",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "assistant: new chat"
+  },
+  {
+   "Action": "assistant_clear",
+   "Key": "alt+X",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "assistant: clear chat"
+  },
+  {
+   "Action": "assistant_history",
+   "Key": "alt+Y",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "assistant: chat history"
+  },
+  {
+   "Action": "copy_cells_as",
+   "Key": "alt+C",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "copy selected cells as..."
+  },
+  {
+   "Action": "copy_cells_as",
+   "Key": "alt+C",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "copy selected cells as..."
+  },
+  {
+   "Action": "copy_column",
+   "Key": "alt+y",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "copy all column values"
+  },
+  {
+   "Action": "copy_column",
+   "Key": "alt+y",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "copy all column values"
+  },
+  {
+   "Action": "column_menu",
+   "Key": "alt+H",
+   "Context": "grid",
+   "NoPrefix": false,
+   "Desc": "column header menu (sort, filter, hide)"
+  },
+  {
+   "Action": "column_menu",
+   "Key": "alt+H",
+   "Context": "results",
+   "NoPrefix": false,
+   "Desc": "column header menu (sort, filter, hide)"
+  },
+  {
+   "Action": "select_word",
+   "Key": "alt+D",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "select word"
+  },
+  {
+   "Action": "select_all",
+   "Key": "alt+a",
+   "Context": "editor",
+   "NoPrefix": false,
+   "Desc": "select all"
+  },
+  {
+   "Action": "tab_1",
+   "Key": "1",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 1"
+  },
+  {
+   "Action": "tab_2",
+   "Key": "2",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 2"
+  },
+  {
+   "Action": "tab_3",
+   "Key": "3",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 3"
+  },
+  {
+   "Action": "tab_4",
+   "Key": "4",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 4"
+  },
+  {
+   "Action": "tab_5",
+   "Key": "5",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 5"
+  },
+  {
+   "Action": "tab_6",
+   "Key": "6",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 6"
+  },
+  {
+   "Action": "tab_7",
+   "Key": "7",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 7"
+  },
+  {
+   "Action": "tab_8",
+   "Key": "8",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 8"
+  },
+  {
+   "Action": "tab_9",
+   "Key": "9",
+   "Context": "global",
+   "NoPrefix": false,
+   "Desc": "go to tab 9"
+  },
+  {
+   "Action": "focus_left",
+   "Key": "ctrl+h",
+   "Context": "global",
+   "NoPrefix": true,
+   "Desc": "focus pane left"
+  },
+  {
+   "Action": "focus_down",
+   "Key": "ctrl+j",
+   "Context": "global",
+   "NoPrefix": true,
+   "Desc": "focus pane down"
+  },
+  {
+   "Action": "focus_up",
+   "Key": "ctrl+k",
+   "Context": "global",
+   "NoPrefix": true,
+   "Desc": "focus pane up"
+  },
+  {
+   "Action": "focus_right",
+   "Key": "ctrl+l",
+   "Context": "global",
+   "NoPrefix": true,
+   "Desc": "focus pane right"
+  },
+  {
+   "Action": "filter_clear_all",
+   "Key": "alt+c",
+   "Context": "filterbar",
+   "NoPrefix": true,
+   "Desc": "clear all filters"
+  },
+  {
+   "Action": "filter_export",
+   "Key": "alt+e",
+   "Context": "filterbar",
+   "NoPrefix": true,
+   "Desc": "export the filtered rows"
+  },
+  {
+   "Action": "filter_add_copy",
+   "Key": "alt+n",
+   "Context": "filterbar",
+   "NoPrefix": true,
+   "Desc": "add a filter as a copy of this one"
+  },
+  {
+   "Action": "console_find",
+   "Key": "/",
+   "Context": "console",
+   "NoPrefix": true,
+   "Desc": "console: find"
+  },
+  {
+   "Action": "console_next",
+   "Key": "n",
+   "Context": "console",
+   "NoPrefix": true,
+   "Desc": "console: next match"
+  },
+  {
+   "Action": "console_prev",
+   "Key": "N",
+   "Context": "console",
+   "NoPrefix": true,
+   "Desc": "console: previous match"
+  },
+  {
+   "Action": "console_copy",
+   "Key": "y",
+   "Context": "console",
+   "NoPrefix": true,
+   "Desc": "console: copy line"
+  },
+  {
+   "Action": "console_errors",
+   "Key": "e",
+   "Context": "console",
+   "NoPrefix": true,
+   "Desc": "console: errors only"
+  },
+  {
+   "Action": "console_menu",
+   "Key": "m",
+   "Context": "console",
+   "NoPrefix": true,
+   "Desc": "console: menu"
+  }
+ ]
+}

@@ -1,0 +1,3 @@
+{{- /* {{< key "C-d f" >}} renders a key sequence as keycaps; "C-d" is the default prefix. */ -}}
+{{- $seq := .Get 0 -}}
+<span class="wt-keys">{{ range $i, $k := split $seq " " }}{{ if $i }}<span class="wt-then"> </span>{{ end }}<kbd>{{ $k }}</kbd>{{ end }}</span>

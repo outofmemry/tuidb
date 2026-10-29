@@ -1,0 +1,10 @@
+public/
+resources/_gen/
+.hugo_build.lock
+tools/node_modules/
+tools/env/data/webtuidb/*
+!tools/env/data/webtuidb/queries/
+!tools/env/data/webtuidb/boards/
+tools/env/data/webtuidb/queries/**/*.lock
+tools/env/serve.log
+.reshoot-plan

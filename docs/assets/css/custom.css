@@ -1,0 +1,15 @@
+/* webtuidb docs: screenshot figures and keycaps */
+.wt-shots { margin: 1.5rem 0; }
+.wt-shots-row { display: flex; flex-direction: column; gap: 1rem; }
+.wt-shots-half .wt-shots-row { flex-direction: row; flex-wrap: wrap; }
+.wt-shots-half .wt-shot { flex: 1 1 320px; }
+.wt-shot { position: relative; border: 1px solid hsl(var(--primary-hue) 10% 50% / .25); border-radius: 6px; overflow: hidden; background: #1a1b26; }
+.wt-shot img { display: block; width: 100%; height: auto; margin: 0; }
+.wt-shot-label { position: absolute; top: .45rem; right: .55rem; z-index: 1; font: 600 .68rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .02em; color: #c0caf5; background: rgb(26 27 38 / .85); border: 1px solid rgb(192 202 245 / .25); border-radius: 999px; padding: .25rem .55rem; }
+.wt-shots figcaption { font-size: .85rem; opacity: .8; margin-top: .5rem; text-align: left; }
+.wt-keys kbd { font: 500 .8em/1 ui-monospace, SFMono-Regular, Menlo, monospace; padding: .15em .45em; border-radius: 4px; border: 1px solid hsl(var(--primary-hue) 10% 50% / .4); border-bottom-width: 2px; background: hsl(var(--primary-hue) 10% 50% / .12); white-space: nowrap; }
+.wt-keys .wt-then { display: inline-block; width: .35em; }
+.hextra-code-block pre { font-size: .82rem; }
+table td code, table th code { white-space: nowrap; }
+.wt-keymap td:nth-child(2) { white-space: nowrap; }
+.wt-keymap small { opacity: .7; }

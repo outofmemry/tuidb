@@ -1,0 +1,25 @@
+{{- /* Renders every binding from data/keymap.json (exported from GET /api/meta by docs/tools/export-meta.sh).
+       {{< keymap-table >}}                 all contexts, one table each
+       {{< keymap-table context="grid" >}}  one context */ -}}
+{{- $km := hugo.Data.keymap -}}
+{{- $only := .Get "context" -}}
+{{- $order := slice "global" "sidebar" "grid" "editor" "results" "structure" "filterbar" "console" -}}
+{{- $titles := dict "global" "Global" "sidebar" "Sidebar" "grid" "Data grid" "editor" "SQL editor" "results" "Results" "structure" "Structure" "filterbar" "Filter bar" "console" "Console" -}}
+{{- range $ctx := $order }}
+{{- if or (not $only) (eq $only $ctx) }}
+{{- $rows := where $km.bindings "Context" $ctx }}
+{{- if $rows }}
+{{- if not $only }}
+<h3 id="keys-{{ $ctx }}">{{ index $titles $ctx }}</h3>
+{{- end }}
+<table class="wt-keymap">
+<thead><tr><th>Action</th><th>Key</th><th>What it does</th></tr></thead>
+<tbody>
+{{- range $rows }}
+<tr><td><code>{{ .Action }}</code></td><td><span class="wt-keys">{{ if not .NoPrefix }}<kbd>{{ $km.prefix }}</kbd> {{ end }}<kbd>{{ .Key }}</kbd></span>{{ if .NoPrefix }} <small>(no prefix)</small>{{ end }}</td><td>{{ .Desc }}</td></tr>
+{{- end }}
+</tbody>
+</table>
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,4 @@
+{{- /* {{< action "commit" >}} shows an action name with its default binding from data/keymap.json */ -}}
+{{- $name := .Get 0 -}}
+{{- $b := index hugo.Data.keymap.actions $name -}}
+<code>{{ $name }}</code>{{ with $b }} (<span class="wt-keys">{{ range $i, $k := split .key " " }}{{ if $i }} {{ end }}<kbd>{{ $k }}</kbd>{{ end }}</span>){{ end }}

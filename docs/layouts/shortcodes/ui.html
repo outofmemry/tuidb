@@ -1,0 +1,26 @@
+{{- /* Screenshot pair: {{< ui tui="grid-sort" web="grid-sort" >}}Caption{{< /ui >}}
+       tui / web are file stems under static/img/tui and static/img/web (".png" added). Either may be omitted.
+       tui-alt / web-alt override the alt text; width="half" puts the two side by side. */ -}}
+{{- /* a side whose PNG is missing is skipped, so a page never shows a broken image */ -}}
+{{- $tui := .Get "tui" -}}{{- if and $tui (not (fileExists (printf "static/img/tui/%s.png" $tui))) }}{{ $tui = "" }}{{ end -}}
+{{- $web := .Get "web" -}}{{- if and $web (not (fileExists (printf "static/img/web/%s.png" $web))) }}{{ $web = "" }}{{ end -}}
+{{- $caption := trim .Inner " \n" -}}
+{{- if or $tui $web }}
+<figure class="wt-shots{{ if eq (.Get "width") "half" }} wt-shots-half{{ end }}">
+  <div class="wt-shots-row">
+  {{- if $tui }}
+    <div class="wt-shot">
+      <span class="wt-shot-label">Terminal</span>
+      <a href="{{ (printf "img/tui/%s.png" $tui) | relURL }}" target="_blank" rel="noopener"><img src="{{ (printf "img/tui/%s.png" $tui) | relURL }}" alt="{{ or (.Get "tui-alt") (printf "%s in the terminal UI" ($caption | plainify)) }}" loading="lazy"></a>
+    </div>
+  {{- end }}
+  {{- if $web }}
+    <div class="wt-shot">
+      <span class="wt-shot-label">Web</span>
+      <a href="{{ (printf "img/web/%s.png" $web) | relURL }}" target="_blank" rel="noopener"><img src="{{ (printf "img/web/%s.png" $web) | relURL }}" alt="{{ or (.Get "web-alt") (printf "%s in the web UI" ($caption | plainify)) }}" loading="lazy"></a>
+    </div>
+  {{- end }}
+  </div>
+  {{- with $caption }}<figcaption>{{ . | markdownify }}</figcaption>{{ end }}
+</figure>
+{{- end }}

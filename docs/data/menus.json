@@ -1,0 +1,644 @@
+{
+ "console": [
+  {
+   "label": "Find\u2026",
+   "action": "find"
+  },
+  {
+   "label": "Copy line",
+   "action": "copy"
+  },
+  {
+   "label": "Errors only",
+   "action": "errors_only"
+  },
+  {
+   "label": "Clear",
+   "action": "clear_console"
+  }
+ ],
+ "database": [
+  {
+   "label": "Open in current tab",
+   "action": "open"
+  },
+  {
+   "label": "Open in new workspace",
+   "action": "open_workspace"
+  },
+  {
+   "label": "Copy database name",
+   "action": "copy_name"
+  },
+  {
+   "label": "New database\u2026",
+   "action": "new_database"
+  },
+  {
+   "label": "Rename\u2026",
+   "action": "rename",
+   "when": "cap:RenameDB"
+  },
+  {
+   "label": "Drop\u2026",
+   "action": "drop"
+  }
+ ],
+ "filter_bar": [
+  {
+   "label": "Apply",
+   "action": "apply_filters"
+  },
+  {
+   "label": "Add filter",
+   "action": "filter_add"
+  },
+  {
+   "label": "Add a filter as a copy",
+   "action": "filter_add_copy"
+  },
+  {
+   "label": "Show SQL",
+   "action": "filter_sql"
+  },
+  {
+   "label": "Clear all",
+   "action": "filter_clear_all"
+  },
+  {
+   "label": "Export filtered rows",
+   "action": "filter_export"
+  }
+ ],
+ "grid": [
+  {
+   "label": "Quick look",
+   "action": "quick_look"
+  },
+  {
+   "label": "Set value\u2026",
+   "action": "set_value"
+  },
+  {
+   "label": "Add row",
+   "action": "add_row"
+  },
+  {
+   "label": "Duplicate rows",
+   "action": "duplicate_rows"
+  },
+  {
+   "label": "Delete rows",
+   "action": "delete_rows"
+  },
+  {
+   "label": "Copy rows",
+   "action": "copy_rows"
+  },
+  {
+   "label": "Copy rows as\u2026",
+   "action": "copy_rows_as"
+  },
+  {
+   "label": "Copy selected cells",
+   "action": "copy_cells"
+  },
+  {
+   "label": "Copy selected cells as\u2026",
+   "action": "copy_cells_as"
+  },
+  {
+   "label": "Copy all column values",
+   "action": "copy_column"
+  },
+  {
+   "label": "Paste rows",
+   "action": "paste_rows"
+  },
+  {
+   "label": "Paste into selected cells",
+   "action": "paste_cells"
+  },
+  {
+   "label": "Quick filter on this cell",
+   "action": "quick_filter"
+  },
+  {
+   "label": "Open the row a foreign key points to",
+   "action": "follow_fk"
+  },
+  {
+   "label": "Hide this column",
+   "action": "hide_column"
+  },
+  {
+   "label": "Show all columns",
+   "action": "show_all_columns"
+  },
+  {
+   "label": "Sort by several columns\u2026",
+   "action": "sort_columns"
+  },
+  {
+   "label": "Bulk update\u2026",
+   "action": "bulk_update"
+  },
+  {
+   "label": "Row limit and offset\u2026",
+   "action": "page_settings"
+  },
+  {
+   "label": "Count rows exactly",
+   "action": "count_exact"
+  },
+  {
+   "label": "Export\u2026",
+   "action": "export"
+  },
+  {
+   "label": "Import\u2026",
+   "action": "import"
+  }
+ ],
+ "header": [
+  {
+   "label": "Sort ascending",
+   "action": "sort_asc"
+  },
+  {
+   "label": "Sort descending",
+   "action": "sort_desc"
+  },
+  {
+   "label": "Remove sort",
+   "action": "sort_none"
+  },
+  {
+   "label": "Sort by several columns\u2026",
+   "action": "sort_columns"
+  },
+  {
+   "label": "Filter with this column",
+   "action": "filter_column"
+  },
+  {
+   "label": "Hide this column",
+   "action": "hide_column"
+  },
+  {
+   "label": "Show all columns",
+   "action": "show_all_columns"
+  },
+  {
+   "label": "Copy column name",
+   "action": "copy_name"
+  },
+  {
+   "label": "Copy all column values",
+   "action": "copy_column"
+  },
+  {
+   "label": "Copy column definition",
+   "action": "copy_definition"
+  }
+ ],
+ "jobs": [
+  {
+   "label": "Stop",
+   "action": "cancel"
+  },
+  {
+   "label": "Open folder",
+   "action": "reveal",
+   "ui": "tui",
+   "why": "the browser downloads the file instead"
+  },
+  {
+   "label": "Download",
+   "action": "download",
+   "ui": "web",
+   "why": "the terminal reveals the file instead"
+  },
+  {
+   "label": "Dismiss",
+   "action": "close"
+  }
+ ],
+ "process_list": [
+  {
+   "label": "Kill selected",
+   "action": "kill"
+  },
+  {
+   "label": "Quick look",
+   "action": "quick_look"
+  },
+  {
+   "label": "Copy as\u2026",
+   "action": "copy_rows_as"
+  },
+  {
+   "label": "Export\u2026",
+   "action": "export"
+  },
+  {
+   "label": "Dismiss",
+   "action": "close"
+  }
+ ],
+ "result": [
+  {
+   "label": "Quick look",
+   "action": "quick_look"
+  },
+  {
+   "label": "Set value\u2026",
+   "action": "set_value",
+   "when": "editable"
+  },
+  {
+   "label": "Add row",
+   "action": "add_row",
+   "when": "editable"
+  },
+  {
+   "label": "Duplicate rows",
+   "action": "duplicate_rows",
+   "when": "editable"
+  },
+  {
+   "label": "Delete rows",
+   "action": "delete_rows",
+   "when": "editable"
+  },
+  {
+   "label": "Copy rows",
+   "action": "copy_rows"
+  },
+  {
+   "label": "Copy rows as\u2026",
+   "action": "copy_rows_as"
+  },
+  {
+   "label": "Copy selected cells",
+   "action": "copy_cells"
+  },
+  {
+   "label": "Copy selected cells as\u2026",
+   "action": "copy_cells_as"
+  },
+  {
+   "label": "Copy all column values",
+   "action": "copy_column"
+  },
+  {
+   "label": "Toggle chart",
+   "action": "chart"
+  },
+  {
+   "label": "Load more",
+   "action": "load_more"
+  },
+  {
+   "label": "Pin result",
+   "action": "pin"
+  },
+  {
+   "label": "Export\u2026",
+   "action": "export"
+  },
+  {
+   "label": "Add to metrics board\u2026",
+   "action": "add_to_board",
+   "ui": "tui",
+   "why": "the web board form takes no query yet"
+  }
+ ],
+ "sidebar_history": [
+  {
+   "label": "Insert into editor",
+   "action": "insert"
+  },
+  {
+   "label": "Run in a new tab",
+   "action": "open_new_tab"
+  },
+  {
+   "label": "Add to saved queries\u2026",
+   "action": "add_to_queries"
+  },
+  {
+   "label": "Copy",
+   "action": "copy"
+  },
+  {
+   "label": "Clear all\u2026",
+   "action": "clear_all"
+  }
+ ],
+ "sidebar_new": [
+  {
+   "label": "New table\u2026",
+   "action": "new_table"
+  },
+  {
+   "label": "New view\u2026",
+   "action": "new_view",
+   "when": "cap:Views"
+  },
+  {
+   "label": "New materialized view\u2026",
+   "action": "new_matview",
+   "when": "cap:MatViews"
+  },
+  {
+   "label": "New function / procedure\u2026",
+   "action": "new_function",
+   "when": "cap:Functions"
+  },
+  {
+   "label": "New schema\u2026",
+   "action": "new_schema",
+   "when": "cap:Schemas"
+  },
+  {
+   "label": "New database\u2026",
+   "action": "new_database"
+  },
+  {
+   "label": "New item group\u2026",
+   "action": "new_group"
+  }
+ ],
+ "sidebar_object": [
+  {
+   "label": "Open",
+   "action": "open"
+  },
+  {
+   "label": "Open in new tab",
+   "action": "open_new_tab"
+  },
+  {
+   "label": "New table\u2026",
+   "action": "new_table"
+  },
+  {
+   "label": "Open structure",
+   "action": "show_structure",
+   "when": "tableish"
+  },
+  {
+   "label": "Edit definition",
+   "action": "edit_definition",
+   "when": "definition"
+  },
+  {
+   "label": "Triggers\u2026",
+   "action": "triggers",
+   "when": "table;cap:Triggers"
+  },
+  {
+   "label": "Show DDL",
+   "action": "show_ddl"
+  },
+  {
+   "label": "Copy name",
+   "action": "copy_name"
+  },
+  {
+   "label": "Copy script: CREATE",
+   "action": "script_create"
+  },
+  {
+   "label": "Copy script: DROP",
+   "action": "script_drop"
+  },
+  {
+   "label": "Copy script: TRUNCATE",
+   "action": "script_truncate",
+   "when": "table"
+  },
+  {
+   "label": "Copy script: SELECT top 100",
+   "action": "script_select100",
+   "when": "table"
+  },
+  {
+   "label": "Export\u2026",
+   "action": "export"
+  },
+  {
+   "label": "Export several tables\u2026",
+   "action": "export_many",
+   "when": "tableish"
+  },
+  {
+   "label": "Import into this table\u2026",
+   "action": "import",
+   "when": "table"
+  },
+  {
+   "label": "Clone\u2026",
+   "action": "clone",
+   "when": "table"
+  },
+  {
+   "label": "Rename\u2026",
+   "action": "rename",
+   "when": "table"
+  },
+  {
+   "label": "Truncate\u2026",
+   "action": "truncate",
+   "when": "table"
+  },
+  {
+   "label": "Delete\u2026",
+   "action": "delete_item"
+  },
+  {
+   "label": "Pin / unpin",
+   "action": "pin"
+  },
+  {
+   "label": "Mark / unmark",
+   "action": "mark"
+  },
+  {
+   "label": "Add to group\u2026",
+   "action": "group_add"
+  },
+  {
+   "label": "Remove from group",
+   "action": "group_remove",
+   "when": "group"
+  },
+  {
+   "label": "Diagram",
+   "action": "diagram",
+   "when": "tableish"
+  },
+  {
+   "label": "Set colour\u2026",
+   "action": "set_color",
+   "when": "tableish"
+  },
+  {
+   "label": "New schema\u2026",
+   "action": "new_schema",
+   "when": "cap:Schemas"
+  },
+  {
+   "label": "Drop schema\u2026",
+   "action": "drop_schema",
+   "when": "cap:Schemas"
+  }
+ ],
+ "sidebar_query": [
+  {
+   "label": "Open",
+   "action": "open"
+  },
+  {
+   "label": "Open in new tab",
+   "action": "open_new_tab"
+  },
+  {
+   "label": "Insert into editor",
+   "action": "insert"
+  },
+  {
+   "label": "Rename\u2026",
+   "action": "rename"
+  },
+  {
+   "label": "Move to folder\u2026",
+   "action": "move"
+  },
+  {
+   "label": "Reveal in file manager",
+   "action": "reveal"
+  },
+  {
+   "label": "Delete\u2026",
+   "action": "delete_item"
+  }
+ ],
+ "structure": [
+  {
+   "label": "Add",
+   "action": "add_row"
+  },
+  {
+   "label": "Delete",
+   "action": "delete_rows"
+  },
+  {
+   "label": "Set value / toggle",
+   "action": "set_value"
+  },
+  {
+   "label": "Move up",
+   "action": "move_up",
+   "when": "cap:ReorderColumns"
+  },
+  {
+   "label": "Move down",
+   "action": "move_down",
+   "when": "cap:ReorderColumns"
+  },
+  {
+   "label": "Copy as\u2026",
+   "action": "copy_rows_as"
+  }
+ ],
+ "tab": [
+  {
+   "label": "Close",
+   "action": "close_tab"
+  },
+  {
+   "label": "Close other tabs",
+   "action": "close_other_tabs"
+  },
+  {
+   "label": "Close tabs to the right",
+   "action": "close_tabs_right"
+  },
+  {
+   "label": "Close all tabs",
+   "action": "close_all_tabs"
+  },
+  {
+   "label": "Rename tab\u2026",
+   "action": "rename_tab"
+  },
+  {
+   "label": "Move left",
+   "action": "move_tab_left"
+  },
+  {
+   "label": "Move right",
+   "action": "move_tab_right"
+  },
+  {
+   "label": "Open workspace in a new browser tab",
+   "action": "open_window",
+   "ui": "web",
+   "why": "the terminal has one window"
+  },
+  {
+   "label": "Copy link",
+   "action": "copy_link",
+   "ui": "web",
+   "why": "the terminal has no URLs"
+  }
+ ],
+ "welcome": [
+  {
+   "label": "Connect",
+   "action": "connect"
+  },
+  {
+   "label": "Edit\u2026",
+   "action": "edit"
+  },
+  {
+   "label": "Duplicate",
+   "action": "duplicate"
+  },
+  {
+   "label": "Delete\u2026",
+   "action": "delete_item"
+  },
+  {
+   "label": "Test",
+   "action": "test"
+  },
+  {
+   "label": "Copy URL",
+   "action": "copy_url"
+  },
+  {
+   "label": "Copy URL with password",
+   "action": "copy_url_password"
+  },
+  {
+   "label": "Import URL\u2026",
+   "action": "import_url"
+  },
+  {
+   "label": "Export connections\u2026",
+   "action": "export_connections"
+  },
+  {
+   "label": "Import connections\u2026",
+   "action": "import_connections"
+  },
+  {
+   "label": "Sort by\u2026",
+   "action": "sort"
+  }
+ ]
+}

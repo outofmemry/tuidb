@@ -1,0 +1,243 @@
+{
+ "drivers": [
+  "postgres",
+  "mysql",
+  "mariadb",
+  "redshift",
+  "greenplum",
+  "vertica",
+  "singlestore",
+  "clickhouse",
+  "cassandra",
+  "dynamodb",
+  "redis",
+  "mongodb"
+ ],
+ "safeModes": [
+  "silent",
+  "alert1",
+  "alert2",
+  "safe1",
+  "safe2"
+ ],
+ "sslModes": [
+  "disable",
+  "prefer",
+  "require",
+  "verify-ca",
+  "verify-full",
+  "verify-identity"
+ ],
+ "operators": {
+  "clickhouse": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "LIKE",
+   "Contains",
+   "Not contains",
+   "Has prefix",
+   "Has suffix"
+  ],
+  "cql": [
+   "=",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "LIKE"
+  ],
+  "duckdb": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "LIKE",
+   "Contains",
+   "Not contains",
+   "Has prefix",
+   "Has suffix"
+  ],
+  "mongo": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "LIKE",
+   "Contains",
+   "Not contains",
+   "Has prefix",
+   "Has suffix"
+  ],
+  "mysql": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "LIKE",
+   "Contains",
+   "Not contains",
+   "Has prefix",
+   "Has suffix"
+  ],
+  "partiql": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "Contains",
+   "Not contains",
+   "Has prefix"
+  ],
+  "postgres": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "LIKE",
+   "ILIKE",
+   "Contains",
+   "Not contains",
+   "Has prefix",
+   "Has suffix"
+  ],
+  "redis": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "LIKE",
+   "Contains",
+   "Not contains",
+   "Has prefix",
+   "Has suffix"
+  ],
+  "sqlite": [
+   "=",
+   "<>",
+   "<",
+   ">",
+   "<=",
+   ">=",
+   "IN",
+   "NOT IN",
+   "IS NULL",
+   "IS NOT NULL",
+   "BETWEEN",
+   "NOT BETWEEN",
+   "LIKE",
+   "Contains",
+   "Not contains",
+   "Has prefix",
+   "Has suffix"
+  ]
+ },
+ "passwordCmdPresets": [
+  {
+   "name": "macOS Keychain",
+   "command": "security find-generic-password -s webtuidb -a <name> -w",
+   "note": "add it with: security add-generic-password -s webtuidb -a <name> -w"
+  },
+  {
+   "name": "Linux secret-tool",
+   "command": "secret-tool lookup service webtuidb account <name>",
+   "note": "add it with: secret-tool store --label=webtuidb service webtuidb account <name>"
+  },
+  {
+   "name": "pass",
+   "command": "pass show webtuidb/<name>",
+   "note": "add it with: pass insert webtuidb/<name>"
+  },
+  {
+   "name": "1Password",
+   "command": "op read \"op://Private/<name>/password\"",
+   "note": "needs the op CLI signed in"
+  }
+ ],
+ "export": {
+  "filename": "{table}-{date}",
+  "header": true
+ },
+ "tags": [
+  {
+   "color": "",
+   "name": "local"
+  },
+  {
+   "color": "",
+   "name": "testing"
+  },
+  {
+   "color": "",
+   "name": "development"
+  },
+  {
+   "color": "",
+   "name": "staging"
+  },
+  {
+   "color": "",
+   "name": "production"
+  }
+ ],
+ "themes": [],
+ "version": "v0.0.0-20261028174718-051da0eb92c8+dirty"
+}
