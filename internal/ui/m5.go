@@ -46,12 +46,6 @@ func (w *welcome) exportConns() tea.Cmd {
 			}
 		}
 		path := strings.TrimSpace(v["path"])
-		if path == "" {
-			return w.a.fail(errors.New("file name required"))
-		}
-		if v["pw"] == "true" && v["pass"] == "" {
-			return w.a.fail(errors.New("include passwords needs a passphrase"))
-		}
 		return w.a.ifFree(func() tea.Cmd {
 			err := writeAtomic(path, func(f io.Writer) error { return config.ExportConnections(f, cs, v["pass"], v["pw"] == "true") })
 			if err != nil {
@@ -59,6 +53,14 @@ func (w *welcome) exportConns() tea.Cmd {
 			}
 			return w.a.say("exported %s to %s", plural(len(cs), "connection"), path)
 		}, path)
+	}).checked(func(v map[string]string) error {
+		if strings.TrimSpace(v["path"]) == "" {
+			return errors.New("file name required")
+		}
+		if v["pw"] == "true" && v["pass"] == "" {
+			return errors.New("include passwords needs a passphrase")
+		}
+		return nil
 	}))
 	return nil
 }
@@ -98,6 +100,14 @@ func (w *welcome) importConns() tea.Cmd {
 			msg += "; left out for safety: " + strings.Join(dropped, ", ")
 		}
 		return w.a.say("%s", msg)
+	}).checked(func(v map[string]string) error { // a missing file or a wrong passphrase keeps the form open
+		f, err := os.Open(strings.TrimSpace(v["path"]))
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, _, err = config.ImportConnectionsOpts(f, v["pass"], false)
+		return err
 	}))
 	return nil
 }
@@ -115,8 +125,12 @@ func (w *Workspace) openTarget(t config.OpenTarget) tea.Cmd {
 	if ref.Schema == "" && w.caps.Schemas {
 		ref.Schema = w.sess.CurrentSchema()
 	}
+	var use tea.Cmd
+	if w.caps.Schemas && ref.Schema != w.sb.schema { // the sidebar, status line and editor follow the URL's schema
+		use = w.useSchema(ref.Schema)
+	}
 	if t.Column == "" {
-		return w.openObject(ref, false)
+		return tea.Batch(use, w.openObject(ref, false))
 	}
 	if t.Column == db.RawColumn || strings.IndexFunc(t.Column, unicode.IsControl) >= 0 {
 		return w.a.fail(fmt.Errorf("the URL names an invalid filter column"))
@@ -130,7 +144,7 @@ func (w *Workspace) openTarget(t config.OpenTarget) tea.Cmd {
 			op = o
 		}
 	}
-	return w.openFiltered(ref, db.FilterSet{Or: strings.EqualFold(t.Condition, "or"), Filters: []db.Filter{{Column: t.Column, Op: op, Value: t.Value, Enabled: true}}})
+	return tea.Batch(use, w.openFiltered(ref, db.FilterSet{Or: strings.EqualFold(t.Condition, "or"), Filters: []db.Filter{{Column: t.Column, Op: op, Value: t.Value, Enabled: true}}}))
 }
 
 // ---- MCP activity (M4 item 10, 11) -----------------------------------------------------------
@@ -333,14 +347,38 @@ func (w *Workspace) exportProcesses(ps []db.ProcessInfo) tea.Cmd {
 
 // ---- clipboard (M5) --------------------------------------------------------------------------
 
-// setClip copies text with OSC 52 through internal/clip when that applies (over SSH), else with Bubble Tea's clipboard.
+// clipMsg reports how setClip copied: via "osc52" cannot be confirmed, err means nothing could copy (T-P2-12).
+type clipMsg struct {
+	via string
+	err error
+}
+
+// setClip copies text with OSC 52 through internal/clip over SSH (the user's machine), else with the system
+// clipboard tool, else with Bubble Tea's OSC 52; the clipMsg it ends with corrects the caller's "copied" toast.
 func setClip(text string) tea.Cmd {
 	return func() tea.Msg {
 		if clip.Available() && clip.Write(text) == nil {
 			return nil
 		}
-		return tea.SetClipboard(text)()
+		if clip.System(text) == nil {
+			return nil
+		}
+		if !clip.TerminalMayCopy() {
+			return clipMsg{err: errors.New("Could not copy (no clipboard available)")}
+		}
+		return tea.BatchMsg{tea.SetClipboard(text), func() tea.Msg { return clipMsg{via: "osc52"} }}
 	}
+}
+
+// clipDone turns a failed copy into ✗ and marks a copy that only went to the terminal as such.
+func (a *App) clipDone(m clipMsg) tea.Cmd {
+	if m.err != nil {
+		return a.fail(m.err)
+	}
+	if via := " (via terminal, OSC 52)"; !a.toastErr && strings.Contains(a.toast, "copied") && !strings.HasSuffix(a.toast, via) {
+		a.toast += via
+	}
+	return nil
 }
 
 func (a *App) copyText(text, what string) tea.Cmd {

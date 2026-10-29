@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -528,6 +529,15 @@ func (w *welcome) form(c config.Connection, idx int) tea.Cmd {
 	if port == "" {
 		f.onChange("driver", f.values())
 	}
+	opened := f.values()
+	f.onCancel = func() tea.Cmd { // Esc: edits are not thrown away without asking
+		if maps.Equal(f.values(), opened) {
+			return nil
+		}
+		w.a.push(&confirmDlg{title: "Discard changes to this connection?", yes: "Discard", danger: true,
+			onYes: func() tea.Cmd { return nil }, onNo: func() tea.Cmd { w.a.push(f); return nil }})
+		return nil
+	}
 	w.a.push(f)
 	return nil
 }
@@ -832,7 +842,8 @@ func (w *welcome) view(th Theme, W, H int) string {
 	listFrame := frame(th, title, th.chips("↵", "connect", "n", "new", "e", "edit", "/", "search"), strings.Join(list, "\n"), listW, bodyH, true)
 	body := listFrame
 	if sideW > 0 {
-		pre := keymap.Display(w.a.d.Keys.Prefix)
+		k := func(ctx, action string) string { return boundKey(w.a.d.Keys, ctx, action) } // follows [keys] (T-P2-06)
+		g := keymap.Global
 		qs := []string{
 			" " + th.Section.Render("Connections"),
 			"  " + th.chips("↵", "connect to the highlighted one"),
@@ -842,9 +853,9 @@ func (w *welcome) view(th Theme, W, H int) string {
 			"",
 			" " + th.Section.Render("Once connected"),
 			"  " + th.chips("↵", "open a table from the sidebar"),
-			"  " + th.chips(pre+" e", "SQL editor") + "  " + th.chips(pre+" p", "find anything"),
-			"  " + th.chips(pre+" s", "commit") + "  " + th.chips(pre+" P", "preview SQL"),
-			"  " + th.chips(pre+" f", "filter rows") + "  " + th.chips(pre+" S", "safe mode"),
+			"  " + th.chips(k(g, "new_query_tab"), "SQL editor", k(g, "open_anything"), "find anything"),
+			"  " + th.chips(k(keymap.Grid, "commit"), "commit", k(g, "preview"), "preview SQL"),
+			"  " + th.chips(k(keymap.Grid, "filters"), "filter rows", k(g, "safe_mode"), "safe mode"),
 			"",
 			" " + th.Section.Render("Files"),
 			"  " + th.Dim.Render("~/.config/webtuidb/connections.toml"),

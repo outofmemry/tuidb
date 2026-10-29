@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { tableStateBody } from '../utils/tablestate'
 import { api, ApiError, clip, qs, recentKey, type Column, type Filter, type FilterSet, type Meta, type ObjRef, type Plan, type ResultData, type SessionInfo, type Sort, type Val } from '../utils/api'
@@ -13,6 +13,7 @@ import { cellMatches, findNext, replaceIn } from '../utils/gridfind'
 import { CellEditor, type CellTarget } from './CellEditor'
 import { CopyAsDialog, ExportDialog, ImportDialog } from './Tools'
 import { PageDialog, SetValueDialog, SortDialog, TabMenu, Tree, match } from './Extras'
+import { Layer, MENU, at as place } from './Layer'
 import { BulkUpdateDialog, ColumnDialog, planMoveColumn } from './Wave'
 import { copyText, formatRows, type CopyFormat } from '../utils/copy'
 import { cellsAs, columnText, rectOf, rectSize } from '../utils/m15_copy'
@@ -25,18 +26,19 @@ type Insert = { id: number; vals: Record<string, Val> }
 type View = 'data' | 'structure' | 'json' | 'tree' | 'ddl'
 type Pend = { edits: Edits; deletes: Set<string>; inserts: Insert[] }
 
-export function DataTab({ sid, info, meta, obj, notify, active, initFilters, initView, onFollow, onDirty }: { sid: string; info: SessionInfo; meta: Meta; obj: ObjRef; notify: (m: string) => void; active?: boolean; initFilters?: FilterSet; initView?: View; onFollow?: (ref: ObjRef, f: FilterSet) => void; onDirty?: (dirty: boolean) => void }) {
+export function DataTab({ sid, info, meta, obj, notify, active, initFilters, initView, onFollow, onDirty, onFilters }: { sid: string; info: SessionInfo; meta: Meta; obj: ObjRef; notify: (m: string) => void; active?: boolean; initFilters?: FilterSet; initView?: View; onFollow?: (ref: ObjRef, f: FilterSet) => void; onDirty?: (dirty: boolean) => void; onFilters?: (f: FilterSet) => void }) {
   const base = `/sessions/${sid}`
   const refQ = qs({ schema: obj.Schema, name: obj.Name, kind: obj.Kind })
   const stateQ = qs({ conn: info.name, db: info.database, table: recentKey(obj) })
 
-  const [view, setView] = useState<View>(initView ?? 'data')
+  const [view, setViewNow] = useState<View>(initView ?? 'data')
   const [filters, setFilters] = useState<FilterSet>({ Filters: [], Or: false })
   const [sort, setSort] = useState<Sort[]>([])
   const [hidden, setHidden] = useState<string[]>([])
   const [showBar, setShowBar] = useState(false)
   const [offset, setOffset] = useState(0)
   const [limit, setLimit] = useState(info.rowLimit)
+  const page = info.rowLimit > 0 ? Math.min(limit, info.rowLimit) : limit // the server never returns more than [general] row_limit rows at once
   const [nonce, setNonce] = useState(0)
   const [exact, setExact] = useState(false)
   const [ready, setReady] = useState(false)
@@ -72,11 +74,15 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
   const [expFilters, setExpFilters] = useState<FilterSet | null>(null) // "Export filtered rows": the bar's filters, all rows
   const structCtl: StructureCtl = useRef(null)
   const [structDirty, setStructDirty] = useState(false)
+  // leaving the structure view drops the editor's draft, so unsent structure changes are asked about first
+  const setView = async (v: View) => { if (v !== view && view === 'structure' && structDirty && !(await confirm('Discard the unsent structure changes?', undefined, 'Discard'))) return; setViewNow(v) }
+  useEffect(() => { onFilters?.(filters) }, [filters]) // eslint-disable-line react-hooks/exhaustive-deps
+  const noPkTold = useRef(false)
   const redo = useRef<Pend[]>([])
   const colRef = useRef(0)
   const cc = () => Math.max(0, Math.min(colRef.current, (rowsQ.data?.columns.length ?? 1) - 1)) // the cursor column, clamped: hiding it leaves colRef past the end
   const nextId = useRef(1)
-  const colsMenu = useRef<HTMLDetailsElement>(null)
+  const colsMenu = useRef<{ toggle: () => void }>(null)
 
   // restore what the TUI (or an earlier visit) remembered for this table
   const cols = useQuery({ queryKey: ['cols', sid, obj], queryFn: () => api<Column[]>('GET', `${base}/object/columns${refQ}`), gcTime: 0 })
@@ -138,7 +144,7 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
   useEffect(() => { onDirty?.(pending > 0 || structDirty) }, [pending, structDirty]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onDirty?.(false), []) // eslint-disable-line react-hooks/exhaustive-deps
   const clearPending = () => { setEdits({}); setDeletes(new Set()); setInserts([]); setSelected(null) }
-  const guard = async () => pending === 0 || (await confirm('Discard pending changes?'))
+  const guard = async () => pending === 0 || (await confirm('Discard pending changes?', undefined, 'Discard'))
   const reload = async () => { if (await guard()) { clearPending(); setNonce((n) => n + 1) } }
   const change = <T,>(set: (v: T) => void) => async (v: T) => { if (await guard()) { clearPending(); setOffset(0); set(v) } }
 
@@ -159,6 +165,10 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     return { byKey, hasKey: false, keys }
   }, [res])
   const rowIdx = (k: string) => keyed.byKey.get(k) ?? -1
+  const openCell = (t: CellTarget) => { // a table without a primary key opens read only: say why, once
+    if (res && !res.editable && obj.Kind === 'table' && !res.columns.some((c) => c.pk) && !noPkTold.current) { noPkTold.current = true; notify('This table has no primary key, so rows cannot be edited here.') }
+    setCell(t)
+  }
   // a reload that changed the data under the pending changes: keep what still points at a row with the same key, drop the rest
   const seen = useRef<ResultData | undefined>(undefined)
   useEffect(() => {
@@ -226,7 +236,7 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     return cur.Desc ? rest : [...rest, { Column: col, Desc: true }]
   })())
 
-  const addRow = () => { redo.current = []; const id = nextId.current++; setInserts((l) => [...l, { id, vals: {} }]); setSelected('n' + id) }
+  const addRow = () => { redo.current = []; const id = nextId.current++; setInserts((l) => [...l, { id, vals: {} }]); setSelected('n' + id); setFocusCell({ row: 'n' + id, col: Math.max(0, res?.columns.findIndex((c) => !c.pk) ?? 0), n: ++focusN.current }) } // the grid scrolls to the new row
   const duplicate = () => {
     if (!selected || !res) return
     const src = rows.find((r) => r.key === selected); if (!src) return
@@ -434,7 +444,7 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     return name
   })()
   const keyActions: Record<string, () => void> = {
-    reload_tab: reload, filters: () => setShowBar(!showBar), columns: () => { if (colsMenu.current) colsMenu.current.open = !colsMenu.current.open },
+    reload_tab: reload, filters: () => setShowBar(!showBar), columns: () => colsMenu.current?.toggle(),
     add_row: () => (view === 'structure' ? structCtl.current?.add() : addRow()), duplicate_rows: duplicate, delete_rows: () => (view === 'structure' ? structCtl.current?.del() : del()), commit, preview: previewSql, discard: clearPending,
     undo: () => { const m = marks[marks.length - 1]; if (m) { redo.current.push({ edits, deletes, inserts }); m.revert() } },
     redo: () => { const s = redo.current.pop(); if (!s) return notify('Nothing to redo'); setEdits(s.edits); setDeletes(s.deletes); setInserts(s.inserts) },
@@ -445,8 +455,8 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
     show_all_columns: () => change<string[]>(setHidden)([]),
     show_ddl: () => setView('ddl'), show_index: () => { setView('structure'); setSection('indexes') }, triggers: () => { setView('structure'); setSection('triggers') },
     show_tree: () => (info.caps.Document ? setView('tree') : notify('The Tree view is for document databases (MongoDB, Redis)')),
-    next_page: () => { if (res && res.cells.length >= limit) change<number>(setOffset)(offset + limit) },
-    prev_page: () => { if (offset > 0) change<number>(setOffset)(Math.max(0, offset - limit)) },
+    next_page: () => { if (res && res.cells.length >= page) change<number>(setOffset)(offset + page) },
+    prev_page: () => { if (offset > 0) change<number>(setOffset)(Math.max(0, offset - page)) },
     find: () => { if (view === 'data') openFind() }, find_next: () => stepFind(1), find_prev: () => stepFind(-1),
     first_row: () => rows[0] && setSelected(rows[0].key), last_row: () => rows.length && setSelected(rows[rows.length - 1].key),
     count_exact: () => setExact(true), show_data: () => setView('data'), show_structure: () => setView('structure'),
@@ -482,7 +492,7 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
       <div className="toolbar bg-canvas" role="toolbar" aria-label="Table toolbar">
         <button onClick={reload} title="Reload the rows">Reload</button>
         {view === 'data' && <button className={showBar ? 'btn-on' : ''} aria-pressed={showBar} onClick={() => setShowBar(!showBar)} title={showBar ? 'Hide the filter bar' : 'Show the filter bar'}>Filters{nActive > 0 && <span className="ml-1.5 inline-block min-w-[16px] px-1 rounded-[2px] bg-accent text-on-accent text-[10.5px] leading-[15px] text-center font-semibold align-[1px]">{nActive}</span>}</button>}
-        {view === 'data' && <ColumnsMenu all={colNames} hidden={hidden} onChange={change<string[]>(setHidden)} menuRef={colsMenu} />}
+        {view === 'data' && <ColumnsMenu all={colNames} hidden={hidden} onChange={change<string[]>(setHidden)} ref={colsMenu} />}
         <Select className="bg-raised border-transparent" aria-label="View" value={view} onChange={(v) => setView(v as View)} options={[{ value: 'data', label: 'Data' }, { value: 'structure', label: 'Structure' }, { value: 'ddl', label: 'DDL' }, ...(info.caps.Document ? [{ value: 'json', label: 'JSON' }, { value: 'tree', label: 'Tree' }] : [])]} />
         {view === 'data' && <button onClick={openFind} title="Find in the loaded rows (/)">Find</button>}
         <button onClick={() => { setExpFilters(null); setDlg('export') }} title="Export this table">Export</button>
@@ -511,15 +521,13 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
       {(rowsQ.isFetching || cols.isLoading) && <div className="relative h-[2px] -mb-[2px] z-[4] overflow-hidden bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] after:absolute after:inset-0 after:w-[40%] after:bg-accent after:animate-slide motion-reduce:after:animate-none motion-reduce:after:w-full motion-reduce:after:opacity-60" role="progressbar" aria-label="Loading rows" />}
       {!res && !rowsQ.error && <div className="p-2.5 text-[12.5px] text-ink-2">Loading rows…</div>}
       {rowsQ.error && <div className="p-2.5 text-[12.5px] text-del">{rowsQ.error.message}</div>}
-      {view === 'data' && res && res.cells.length === 0 && inserts.length === 0 && (
-        <div className="py-14 px-8 max-w-[46ch] text-ink-2 text-[15px] leading-normal">
-          <p className="m-0">{hasActive ? 'No rows match these filters.' : res.editable ? 'This table has no rows yet.' : 'This table has no rows.'}</p>
-          <p className="mt-3 mb-0 flex gap-2">{hasActive ? <button onClick={() => change<FilterSet>(setFilters)({ Filters: [], Or: false })}>Clear the filters</button> : res.editable ? <button className="btn-primary" onClick={addRow}>Add a row</button> : null}</p>
-        </div>
-      )}
-      {view === 'data' && res && (res.cells.length > 0 || inserts.length > 0) && (
+      {view === 'data' && res && (
         <div className="flex-1 min-h-0 flex">
-          <Grid colRef={colRef} columns={res.columns} rows={rows} sort={sort} onSort={onSort} edited={editedAll} editable={res.editable && !stale} onOpen={setCell} pretty={!!meta.config.table.AutoPrettyJSON}
+          <Grid colRef={colRef} columns={res.columns} rows={rows} sort={sort} onSort={onSort} edited={editedAll} editable={res.editable && !stale} onOpen={openCell} pretty={!!meta.config.table.AutoPrettyJSON}
+            empty={<div className="sticky left-0 py-14 px-8 max-w-[46ch] text-ink-2 text-[15px] leading-normal font-sans">
+              <p className="m-0">{hasActive ? 'No rows match these filters.' : res.editable ? 'This table has no rows yet.' : 'This table has no rows.'}</p>
+              <p className="mt-3 mb-0 flex gap-2">{hasActive ? <button onClick={() => change<FilterSet>(setFilters)({ Filters: [], Or: false })}>Clear the filters</button> : res.editable ? <button className="btn-primary" onClick={addRow}>Add a row</button> : null}</p>
+            </div>}
             selected={selected} onSelect={setSelected} onSpace={() => setDetail(!detail)} onHeaderMenu={(col, x, y) => setHmenu({ col, x, y })}
             zebra={!!cfg(meta, 'table', 'alternatingRows', false)} spatial={cfg<boolean>(meta, 'table', 'decodeSpatial', true) !== false} colTips={colTips} onCellMenu={(x, y) => setCmenu({ x, y })} onAddRow={() => res.editable && !stale && addRow()} onAddColumn={addColumn}
             widths={pxWidths} onResize={onResize} focusCell={focusCell} onCursor={(col, r) => setCursor((c) => (c.col === col && JSON.stringify(c.range) === JSON.stringify(r) ? c : { col, range: r }))} onFind={gridFind} />
@@ -568,16 +576,22 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
       )}
       {view === 'data' && (
         <div className="toolbar bg-canvas border-b-0! border-t border-rule text-[12px] text-ink-2">
-          <button disabled={offset === 0} onClick={() => change<number>(setOffset)(Math.max(0, offset - limit))} aria-label="Previous page" title="Previous page">‹ Prev</button>
+          <button disabled={offset === 0} onClick={() => change<number>(setOffset)(Math.max(0, offset - page))} aria-label="Previous page" title="Previous page">‹ Prev</button>
           <span className="tabular-nums"><span className="text-ink">{from.toLocaleString()}–{to.toLocaleString()}</span>{total ? <> of <span className="text-ink" title={total.exact ? 'Exact count' : 'Estimated from the table statistics'}>{total.exact ? '' : '≈'}{total.n.toLocaleString()}</span></> : ''}</span>
-          <button disabled={!res || res.cells.length < limit} onClick={() => change<number>(setOffset)(offset + limit)} aria-label="Next page" title="Next page">Next ›</button>
+          <button disabled={!res || res.cells.length < page} onClick={() => change<number>(setOffset)(offset + page)} aria-label="Next page" title="Next page">Next ›</button>
           {total && !total.exact && <button className="btn-ghost" onClick={() => setExact(true)} title="Run a COUNT(*) instead of the estimate">Count exactly</button>}
-          {total && limit > 0 && total.n > limit && <span className="text-ink-3">page {Math.floor(offset / limit) + 1}{total.exact ? ` of ${Math.max(1, Math.ceil(total.n / limit)).toLocaleString()}` : ''}</span>}
+          {total && page > 0 && total.n > page && <span className="text-ink-3">page {Math.floor(offset / page) + 1}{total.exact ? ` of ${Math.max(1, Math.ceil(total.n / page)).toLocaleString()}` : ''}</span>}
+          {limit > page && <span className="text-ink-3" title="Set by [general] row_limit in the config">capped at {page.toLocaleString()} per page by row_limit</span>}
           <span className="flex-1 min-w-0" />
+          {res?.editable && !stale && marks.length === 0 && !!res.cells.length && <span className="text-ink-3 max-[900px]:hidden" title="Double-click a cell, or select it and press Enter, to change its value. Changes are staged until you send them.">Double-click a cell to edit it</span>}
           {res?.truncated && <span className="chip border-edit text-edit">stopped at the row limit</span>}
           {rowsQ.isFetching && <span className="text-ink-3">Loading…</span>}
           <label className="flex items-center gap-1.5 text-ink-2">Rows per page <input className="w-[72px] text-right" type="number" min={1} aria-label="Rows per page" defaultValue={limit} key={limit}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} onBlur={(e) => { const n = Number(e.target.value); if (n > 0 && n !== limit) change<number>(setLimit)(n) }} /></label>
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} onBlur={(e) => {
+              const n = Number(e.target.value)
+              if (!Number.isInteger(n) || n < 1) { notify('Rows per page must be a whole number of 1 or more.'); e.target.value = String(limit); return }
+              if (n !== limit) change<number>(setLimit)(n)
+            }} /></label>
         </div>
       )}
       {plan && <PlanDialog sid={sid} plan={plan} onClose={() => setPlan(null)} onApplied={() => applied(planOwn)} />}
@@ -595,19 +609,20 @@ export function DataTab({ sid, info, meta, obj, notify, active, initFilters, ini
   )
 }
 
-function ColumnsMenu({ all, hidden, onChange, menuRef }: { all: string[]; hidden: string[]; onChange: (h: string[]) => void; menuRef?: React.RefObject<HTMLDetailsElement | null> }) {
+// ColumnsMenu picks the columns to show. It is a popover in the shared Layer, so it closes on an outside click and Escape like every menu.
+function ColumnsMenu({ all, hidden, onChange, ref }: { all: string[]; hidden: string[]; onChange: (h: string[]) => void; ref?: React.Ref<{ toggle: () => void }> }) {
   const [q, setQ] = useState('')
-  useEffect(() => { // an outside click closes the menu, as every other popover does
-    const h = (e: MouseEvent) => { const d = menuRef?.current; if (d?.open && !d.contains(e.target as Node)) d.open = false }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [menuRef])
+  const [open, setOpen] = useState<CSSProperties | null>(null)
+  const btn = useRef<HTMLButtonElement>(null)
+  const toggle = () => { const r = btn.current?.getBoundingClientRect(); setOpen((o) => (o || !r ? null : place(r, { width: 256, height: 380 }))) }
+  useImperativeHandle(ref, () => ({ toggle }))
   const shown = q ? all.filter((c) => c.toLowerCase().includes(q.toLowerCase())) : all
   return (
-    <details ref={menuRef} className="relative" onKeyDown={(e) => { if (e.key === 'Escape' && menuRef?.current) { menuRef.current.open = false } }}>
-      <summary className={`list-none border rounded-[2px] font-mono px-[11px] py-1 leading-5 cursor-pointer hover:bg-raised select-none [&::-webkit-details-marker]:hidden ${hidden.length ? 'border-accent/60' : 'border-rule-2'}`} title="Choose the columns to show">Columns{hidden.length ? <span className="text-ink-2"> {all.length - hidden.length}/{all.length}</span> : ''}</summary>
-      <div className="popover motion-safe:animate-pop absolute z-20 mt-1 w-64 p-2 flex flex-col gap-1">
-        {all.length > 8 && <input className="w-full bg-canvas" placeholder="Find a column" aria-label="Find a column" value={q} onChange={(e) => setQ(e.target.value)} />}
+    <>
+      <button ref={btn} className={hidden.length ? 'border-accent/60' : ''} aria-haspopup="dialog" aria-expanded={!!open} title="Choose the columns to show" onClick={toggle}>Columns{hidden.length ? <span className="text-ink-2"> {all.length - hidden.length}/{all.length}</span> : ''}</button>
+      {open && <Layer onClose={() => setOpen(null)}>
+      <div className={`${MENU} w-64 p-2 flex flex-col gap-1`} style={open} role="dialog" aria-label="Columns to show" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(null); btn.current?.focus() } }}>
+        {all.length > 8 ? <input autoFocus className="w-full bg-canvas" placeholder="Find a column" aria-label="Find a column" value={q} onChange={(e) => setQ(e.target.value)} /> : null}
         <div className="flex gap-1 text-[11.5px]"><button className="btn-ghost" onClick={() => onChange([])} disabled={!hidden.length}>Show all</button><button className="btn-ghost" onClick={() => onChange(all.slice(1))} disabled={all.length < 2} title="Keep only the first column">Hide all</button></div>
         <div className="max-h-[300px] overflow-auto">
           {shown.map((c) => (
@@ -615,8 +630,10 @@ function ColumnsMenu({ all, hidden, onChange, menuRef }: { all: string[]; hidden
           ))}
           {!shown.length && <div className="px-1 py-1 text-ink-2">No column matches.</div>}
         </div>
+        <div className="text-[11.5px] text-ink-3 px-1">Hidden columns stay hidden next time you open this table.</div>
       </div>
-    </details>
+      </Layer>}
+    </>
   )
 }
 

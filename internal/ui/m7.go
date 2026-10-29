@@ -346,10 +346,21 @@ func (w *Workspace) toolPaths() tea.Cmd {
 func (w *Workspace) backupAction(restore bool) tea.Cmd {
 	verb, dbName := map[bool]string{false: "Backup", true: "Restore"}[restore], w.sess.CurrentDatabase()
 	if w.conn.ReadOnly { // the dump tools log in on their own, so the driver-level read-only guard does not apply
-		return w.a.say("%s is read-only: backup and restore are refused", w.conn.Name)
+		return w.a.fail(fmt.Errorf("%s is read-only: backup and restore are refused", w.conn.Name))
 	}
 	if w.jobCancel != nil {
-		return w.a.say("another export, import, backup or search is still running (cancel it first)")
+		return w.a.fail(fmt.Errorf("another export, import, backup or search is still running (cancel it first)"))
+	}
+	// T-P3-17: say a missing tool before the form is filled in (a pg restore picks psql or pg_restore by the file).
+	// The form still opens, because Ctrl+t inside it is where the path gets set.
+	missing := ""
+	if tool := backup.ToolForConn(w.conn, restore); !(restore && w.conn.Driver == config.Postgres) {
+		if tool.Name == "" {
+			return w.a.fail(fmt.Errorf("backup is not supported for %s", w.conn.Driver))
+		}
+		if !tool.Found {
+			missing = tool.Name + " not found (on PATH or at its configured path): press Ctrl+t to set its path"
+		}
 	}
 	pg := w.conn.Driver == config.Postgres
 	pre := strings.ToLower(verb) + "." // the options last used are remembered per connection and per direction
@@ -447,9 +458,10 @@ func (w *Workspace) backupAction(restore bool) tea.Cmd {
 	}
 	f.submit = "Enter: continue"
 	f.hotHint = "Ctrl+t: tool paths   Ctrl+o: common options"
+	f.err = missing
 	f.hotkeys = map[string]func(map[string]string) tea.Cmd{
 		"ctrl+t": func(map[string]string) tea.Cmd { return w.toolPaths() },
-		"ctrl+o": func(map[string]string) tea.Cmd { return w.commonOptions(f, restore) },
+		"ctrl+o": func(v map[string]string) tea.Cmd { return w.commonOptions(f, restore, v) },
 	}
 	w.a.push(f)
 	return nil

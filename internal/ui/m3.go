@@ -440,7 +440,7 @@ func (w *Workspace) userMenu(ua db.UserAdmin, u db.User) tea.Cmd {
 			})
 			f.validate = func(v map[string]string) error {
 				if v["confirm"] != u.Name {
-					return fmt.Errorf("type %q to confirm", u.Name)
+					return fmt.Errorf("type “%s” to confirm", u.Name)
 				}
 				return nil
 			}
@@ -528,7 +528,7 @@ func (w *Workspace) userApply(ua db.UserAdmin, done string, chs ...db.UserChange
 	}
 	var lines []string
 	for _, s := range stmts {
-		lines = append(lines, s.Shown()+";", "")
+		lines = append(append(lines, sqlLines(s.Shown()+";")...), "")
 	}
 	w.a.push(&textViewDlg{title: fmt.Sprintf("Preview: %d statement(s)", len(stmts)), lines: lines, actions: []viewAction{{Key: "enter", Label: "Enter: apply", Do: func() tea.Cmd {
 		return w.execute(stmts, func(err error) tea.Cmd {

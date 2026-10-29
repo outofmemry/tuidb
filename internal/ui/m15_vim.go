@@ -512,7 +512,12 @@ func (t *queryTab) vimEx(cmd, note string) tea.Cmd {
 	}
 	var cmds []tea.Cmd
 	if strings.HasPrefix(cmd, "w") || cmd == "x" {
-		if t.savedAs != "" {
+		if t.file != "" { // a tab opened from a .sql file writes back to it
+			if err := t.writeBack(); err != nil {
+				return t.ws.a.fail(err)
+			}
+			cmds = append(cmds, t.ws.a.say("saved %s", t.file))
+		} else if t.savedAs != "" {
 			text := t.ed.Text()
 			if err := t.ws.a.d.Queries.Update(t.savedAs, text); err != nil {
 				return t.ws.a.fail(err)
@@ -525,15 +530,20 @@ func (t *queryTab) vimEx(cmd, note string) tea.Cmd {
 		}
 	}
 	if cmd == "q" || cmd == "q!" || cmd == "wq" || cmd == "x" {
+		closeIt := func() tea.Cmd {
+			if i := indexOf(t.ws.tabs, tabber(t)); i >= 0 {
+				t.ws.closeTab(i)
+			}
+			return nil
+		}
+		if cmd == "q" && (t.fileDirty() || t.inTx) { // :q! closes without asking
+			t.ws.askClose(t, closeIt)
+			return tea.Batch(cmds...)
+		}
 		if cmd == "q" && t.Dirty() {
 			return t.ws.a.say("unsaved changes (:q! discards them, :wq saves)")
 		}
-		for i, tb := range t.ws.tabs {
-			if tb == tabber(t) {
-				t.ws.closeTab(i)
-				break
-			}
-		}
+		closeIt()
 	}
 	return tea.Batch(cmds...)
 }

@@ -396,6 +396,9 @@ func (c Config) validate() error {
 			seen[a] = true
 		}
 	}
+	if c.General.QueryTimeoutSecs < 0 { // -5 used to save and silently turn the slow-query prompt off (T-P3-16)
+		return errors.New("general.query_timeout_secs must be >= 0 (0 = no limit)")
+	}
 	if c.Security.LockAfterMins < 0 {
 		return errors.New("security.lock_after_mins must be >= 0 (0 = never)")
 	}

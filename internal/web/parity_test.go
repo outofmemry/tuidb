@@ -163,7 +163,7 @@ func TestParityHelpListing(t *testing.T) {
 	}
 	// every meta binding appears in the -keys text with its action, key and description, in the same relative order
 	pos := 0
-	for _, c := range []string{keymap.Global, keymap.Sidebar, keymap.Grid, keymap.FilterBar, keymap.Structure, keymap.Editor, keymap.Results} {
+	for _, c := range keymap.Contexts { // console included (T-P2-07)
 		for _, b := range km.Bindings {
 			if b.Context != c {
 				continue
@@ -197,7 +197,7 @@ func TestParityHelpListing(t *testing.T) {
 }
 
 func ctxRank(c string) int {
-	for i, x := range []string{keymap.Global, keymap.Sidebar, keymap.Grid, keymap.FilterBar, keymap.Structure, keymap.Editor, keymap.Results} {
+	for i, x := range keymap.Contexts {
 		if x == c {
 			return i
 		}

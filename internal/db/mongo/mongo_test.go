@@ -89,6 +89,23 @@ func TestCoerceSet(t *testing.T) {
 	}
 }
 
+// W-P1-03: on a server east of UTC the grid text of a date, edited back, must keep the same instant.
+func TestDateRoundTripNoShift(t *testing.T) {
+	saved := time.Local
+	time.Local = time.FixedZone("IST", 5*3600+1800)
+	defer func() { time.Local = saved }()
+	d, err := coerceSet("2024-01-02 03:04:05", "date", "f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := db.FormatValue(cell(d)); got != "2024-01-02 03:04:05" {
+		t.Errorf("grid shows %q, want the UTC text the JSON view shows", got)
+	}
+	if d2, _ := coerceSet(db.FormatValue(cell(d)), "date", "f"); d2 != d {
+		t.Errorf("round trip shifted %v -> %v", d, d2)
+	}
+}
+
 func mustDec(s string) bson.Decimal128 {
 	d, err := bson.ParseDecimal128(s)
 	if err != nil {

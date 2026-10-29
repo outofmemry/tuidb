@@ -144,11 +144,18 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
   const [rev, setRev] = useState<Review | null>(null)
   const [newDb, setNewDb] = useState(false), [dbName, setDbName] = useState(''), [enc, setEnc] = useState(''), [col, setCol] = useState('') // restore into a database created on the spot
   const [paths, setPaths] = useState(false)
-  const [extra, setExtra] = useState(''), [ticked, setTicked] = useState<string[]>([]), [pattern, setPattern] = useState('') // M13.4: extra tool options and a file-name pattern
-  const common = useQuery({ queryKey: ['backup-common', sid, restore], gcTime: 0, retry: false, queryFn: async (): Promise<{ options: BackupOption[]; extra: string[] }> => {
-    // the server's list (backup.CommonOptions / AllowedExtra); the static copy is only the fallback when the request fails
-    try { const r = await api<{ options?: BackupOption[]; extra?: string[] }>('GET', `/sessions/${sid}/backup/options?restore=${restore ? 1 : 0}`); return { options: r.options ?? [], extra: r.extra ?? [] } } catch { return { options: commonBackupOptions(info.driver, restore), extra: [] } }
+  const [extra, setExtra] = useState(''), [ticked, setTicked] = useState<string[]>([]), [pattern, setPattern] = useState(restore ? '' : '{database}-{date}.sql') // M13.4: extra tool options and a file-name pattern; a backup starts from the default name, so Review command works at once
+  // a Postgres restore runs psql for a plain .sql file and pg_restore for an archive: once a file is named, ask for that tool's options
+  const [pickedFile, setPickedFile] = useState('')
+  useEffect(() => { const t = setTimeout(() => setPickedFile(file.trim()), 300); return () => clearTimeout(t) }, [file])
+  const byFile = restore && info.driver === 'postgres' ? pickedFile : ''
+  const common = useQuery({ queryKey: ['backup-common', sid, restore, byFile, byFile ? format : ''], gcTime: 0, retry: false, placeholderData: (prev) => prev, queryFn: async (): Promise<{ options: BackupOption[]; extra: string[] }> => {
+    // the server's list (backup.CommonOptionsFor / AllowedExtraFor); the static copy is only the fallback when the request fails
+    try { const r = await api<{ options?: BackupOption[]; extra?: string[] }>('GET', `/sessions/${sid}/backup/options?restore=${restore ? 1 : 0}${byFile ? qs({ file: byFile, format: format === 'custom' ? 'custom' : undefined }).replace(/^\?/, '&') : ''}`); return { options: r.options ?? [], extra: r.extra ?? [] } } catch { return { options: commonBackupOptions(info.driver, restore), extra: [] } }
   } })
+  useEffect(() => { // a flag the new tool does not take must not stay ticked
+    if (common.data && !common.isPlaceholderData) setTicked((t) => { const keep = t.filter((f) => common.data!.options.some((o) => o.Flag === f)); return keep.length === t.length ? t : keep })
+  }, [common.data, common.isPlaceholderData])
   const [job, setJob] = useState<{ id: string; data: Job } | null>(null)
   // what was chosen last time on this connection (remembered by the server, shared with the terminal UI)
   const last = useQuery({ queryKey: ['backup-options', info.name], queryFn: () => api<{ options: Record<string, string> }>('GET', '/state/backup-options' + qs({ conn: info.name })), gcTime: 0 })
@@ -168,7 +175,7 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
   const body = { File: file, filename: pattern.trim() || undefined, extra: extraArgs(ticked, extra), Gzip: gzip, Format: format, DataOnly: dataOnly, SchemaOnly: schemaOnly, ...(restore && newDb && dbName.trim() ? { NewDatabase: dbName.trim(), CreateOpts: opts ? { encoding: enc.trim(), collation: col.trim() } : undefined } : {}) }
   const call = async (run: boolean) => {
     setErr('')
-    if (run && !restore && rev?.exists && !(await confirm('That backup file already exists in the backups folder. Overwrite it?'))) return
+    if (run && !restore && rev?.exists && !(await confirm('That backup file already exists in the backups folder. Overwrite it?', undefined, 'Overwrite'))) return
     if (run) askNotify()
     try {
       const r = await api<Review>('POST', path, { ...body, Run: run, Confirmed: run, Password: password })
@@ -206,6 +213,7 @@ export function BackupDialog({ sid, info, restore, onClose, notify }: { sid: str
           </div>}
           <div className={ROW}><label className="w-28 text-ink-2" htmlFor="m13-pattern">File name pattern</label><input id="m13-pattern" className="flex-1 min-w-0" placeholder="{database}-{date}.sql" title="Tokens: {connection} {database} {table} {tag} {date} {time}. Used instead of the name above when filled." value={pattern} onChange={(e) => { setPattern(e.target.value); setRev(null) }} /></div>
           {!!common.data?.options.length && <fieldset className="border border-rule px-2.5 py-1.5 my-2 min-w-0"><legend className="text-ink-2 text-[12px] px-1">Common options</legend>
+            {restore && info.driver === 'postgres' && !byFile && <div className="text-ink-3 text-[11.5px] mb-1">Pick a file to see its tool's options (psql for .sql, pg_restore for an archive).</div>}
             <div className="flex flex-col gap-0.5 text-[12.5px]">{common.data.options.map((o) => <label key={o.Flag} className="flex items-center gap-1.5" title={o.Desc}><input type="checkbox" checked={ticked.includes(o.Flag)} onChange={(e) => { setTicked(e.target.checked ? [...ticked, o.Flag] : ticked.filter((x) => x !== o.Flag)); setRev(null) }} /><code>{o.Flag}</code><span className="text-ink-3">{o.Desc}</span></label>)}</div></fieldset>}
           <div className={ROW}><label className="w-28 text-ink-2" htmlFor="m13-extra">Extra options</label><input id="m13-extra" className="flex-1 min-w-0 font-mono" placeholder="--no-comments --lock-wait-timeout=5" value={extra} onChange={(e) => { setExtra(e.target.value); setRev(null) }} /></div>
           {!!common.data?.extra.length && <div className="text-ink-3 text-[11.5px] ml-28 pl-1 wrap-anywhere">Also accepted: {common.data.extra.join(' ')}</div>}

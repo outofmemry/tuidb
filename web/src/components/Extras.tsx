@@ -2,8 +2,11 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, api, qs, type DbObject, type MenuItem, type SessionInfo, type Sort, type Val } from '../utils/api'
-import { Dialog } from './Dialogs'
+import { Dialog, confirm } from './Dialogs'
+import { localRecent } from '../utils/files'
+import { copyText } from '../utils/copy'
 import { Select } from './Select'
+import { Layer, MENU, atPoint } from './Layer'
 
 const ACTIONS = 'flex justify-end gap-2 mt-[18px]'
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -21,7 +24,7 @@ export function SafeModeDialog({ sid, info, onClose, onDone }: { sid: string; in
   const go = async (level: string, password = '', confirmed = false) => {
     try { await api('POST', `/sessions/${sid}/safe-mode`, { level, password, ...(confirmed ? { confirmed } : {}) }); onDone() } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.body.gate?.confirm) { // no stored password to ask for: confirm instead
-        if (!confirmed && confirm(e.message || 'Change safe mode?')) return go(level, password, true)
+        if (!confirmed && await confirm(e.message || 'Change safe mode?', undefined, 'Change')) return go(level, password, true)
         setErr('')
       } else if (e instanceof ApiError && e.status === 409) { setPick(level); setErr(password ? 'Wrong password' : '') } else setErr(msg(e))
     }
@@ -128,7 +131,7 @@ export function ConsolePane({ conn, items, notify, onClose }: { conn: string; it
   useEffect(() => { setSel(-1) }, [find, errs])
   useEffect(() => { if (sel >= 0) end.current?.querySelector('[data-sel]')?.scrollIntoView({ block: 'nearest' }) }, [sel])
   const clear = async () => { await api('DELETE', '/console').catch(() => {}); q.refetch() }
-  const copy = (text: string) => navigator.clipboard.writeText(text).then(() => notify?.('Copied the line'), (e) => notify?.(msg(e)))
+  const copy = (text: string) => copyText(text).then(() => notify?.('Copied the line'), (e) => notify?.(msg(e)))
   const mark = (t: string): ReactNode => { // the find text is highlighted inside a plain-text line
     if (!find) return highlight(t)
     const at = t.toLowerCase().indexOf(find.toLowerCase())
@@ -183,9 +186,9 @@ export function ConsolePane({ conn, items, notify, onClose }: { conn: string; it
 // shortcut: on other engines a file that is not valid UTF-8 text is also sent as \x<hex>, which they store as text; native binary literals are the upgrade.
 // Only these run without the server's advanced flag (mirrors exprMacros in internal/web/changes.go).
 const MACROS = new Set(['now()', 'current_timestamp', 'current_date', 'current_time', 'localtimestamp', 'gen_random_uuid()', 'uuid_generate_v4()', 'uuid()', 'unix_timestamp()'])
-function expression(e: string, onPick: (v: Val) => void) {
+async function expression(e: string, onPick: (v: Val) => void) {
   if (MACROS.has(e.split(/\s+/).filter(Boolean).join('').toLowerCase())) return onPick({ $expr: e })
-  if (confirm('This expression is sent to the database as unescaped SQL. Use it?')) onPick({ $expr: e, $advanced: 'true' })
+  if (await confirm('This expression is sent to the database as unescaped SQL. Use it?', e, 'Use it')) onPick({ $expr: e, $advanced: 'true' })
 }
 export function SetValueDialog({ sid, schema, col, dialect, onPick, onClose }: { sid: string; schema: string; col: string; dialect: string; onPick: (v: Val) => void; onClose: () => void }) {
   const [date, setDate] = useState(''), [err, setErr] = useState(''), [expr, setExpr] = useState(''), [seq, setSeq] = useState('')
@@ -275,13 +278,12 @@ export function PageDialog({ limit, offset, onApply, onClose }: { limit: number;
 // items: [label, run, why]; a third entry greys the item and shows it as the tooltip. "-" is a separator.
 export function TabMenu({ x, y, items, onClose, label = 'Menu' }: { x: number; y: number; items: [string, () => void, string?][]; onClose: () => void; label?: string }) {
   return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} aria-hidden />
-      <div className="popover motion-safe:animate-pop fixed z-[41] min-w-[200px] max-h-[calc(100vh-16px)] overflow-auto p-1.5 font-mono text-[12.5px]" style={{ left: Math.max(4, Math.min(x, window.innerWidth - 240)), top: Math.max(4, Math.min(y, window.innerHeight - 30 * items.length - 16)) }} role="menu" aria-label={label}
-        onKeyDown={(e) => { const l = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role=menuitem]:not(:disabled)')], i = l.indexOf(document.activeElement as HTMLButtonElement); if (e.key === 'ArrowDown') l[(i + 1) % l.length]?.focus(); else if (e.key === 'ArrowUp') l[(i - 1 + l.length) % l.length]?.focus(); else if (e.key === 'Escape') onClose(); else return; e.preventDefault(); e.stopPropagation() }}>
+    <Layer onClose={onClose}>
+      <div className={`${MENU} min-w-[200px]`} style={atPoint(x, y, { height: 30 * items.length + 16 })} role="menu" aria-label={label}
+        onKeyDown={(e) => { const l = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role=menuitem]:not(:disabled)')], i = l.indexOf(document.activeElement as HTMLButtonElement); if (e.key === 'ArrowDown') l[(i + 1) % l.length]?.focus(); else if (e.key === 'ArrowUp') l[(i - 1 + l.length) % l.length]?.focus(); else if (e.key === 'Home') l[0]?.focus(); else if (e.key === 'End') l[l.length - 1]?.focus(); else if (e.key === 'Escape' || e.key === 'Tab') onClose(); else return; e.preventDefault(); e.stopPropagation() }}>
         {items.map(([text, run, why], i) => text === '-' ? <hr key={i} className="border-t border-rule my-1" /> : <button key={text} role="menuitem" autoFocus={i === 0} disabled={!!why} title={why} className={`menu-item ${/^(Delete|Drop|Truncate|Close all)/.test(text) ? 'btn-danger' : ''}`} onClick={() => { onClose(); run() }}>{text}</button>)}
       </div>
-    </>
+    </Layer>
   )
 }
 
@@ -307,7 +309,7 @@ export function DetailsDialog({ sid, info, onClose, onSaved }: { sid: string; in
   const [color, setColor] = useState(info.color || ''), [err, setErr] = useState('')
   const tls = [info.sslMode || 'default', info.ssh ? 'through an SSH tunnel' : ''].filter(Boolean).join(', ')
   const server = [info.host && `${info.host}${info.port ? ':' + info.port : ''}`].filter(Boolean).join('')
-  const rows: [string, string][] = [['Connection', info.name], ['Driver', info.driver], ['Server version', info.serverInfo], ['Host', server], [info.caps.DatabaseNoun || 'Database', info.database], ['Schema', info.schema], ['User', info.user ?? ''], ['TLS', info.host ? tls : ''], ['Tag', info.tag], ['Safe mode', info.levelLabel], ['Encoding', info.encoding ?? ''], ['Row limit', String(info.rowLimit)]]
+  const rows: [string, string][] = [['Connection', info.name], ['Driver', info.driver], ['Server version', info.serverInfo], ['Host', server], [info.caps.DatabaseNoun ? info.caps.DatabaseNoun[0].toUpperCase() + info.caps.DatabaseNoun.slice(1) : 'Database', info.database], ['Schema', info.schema], ['User', info.user ?? ''], ['TLS', info.host ? tls : ''], ['Tag', info.tag], ['Safe mode', info.levelLabel], ['Encoding', info.encoding ?? ''], ['Row limit', String(info.rowLimit)]]
   const save = async () => {
     try { await api('POST', `/sessions/${sid}/color`, { color }); onSaved() } catch (e) { setErr(msg(e)) }
   }
@@ -328,11 +330,13 @@ export function DetailsDialog({ sid, info, onClose, onSaved }: { sid: string; in
 
 export function RecentDialog({ onPick, onClose }: { onPick: (entry: string) => void; onClose: () => void }) {
   const q = useQuery({ queryKey: ['recent-files'], queryFn: () => api<{ files: string[] }>('GET', '/state/recent-files'), gcTime: 0 })
+  // the server's list holds paths (the terminal's); files picked in this browser are only names, kept in this browser
+  const files = q.data ? [...new Set([...q.data.files, ...localRecent()])] : []
   return (
     <Dialog title="Open a recent file" onClose={onClose}>
       {q.error && <div className="text-del">{q.error.message}</div>}
-      {q.data && !q.data.files.length && <div className="text-ink-2">No file was opened yet.</div>}
-      <div className="flex flex-col gap-0.5">{(q.data?.files ?? []).map((f, i) => <button key={f} autoFocus={i === 0} className="text-left border-transparent hover:border-ink-3 font-mono truncate" title={f} onClick={() => { onClose(); onPick(f) }}>{f}</button>)}</div>
+      {q.data && !files.length && <div className="text-ink-2">No file was opened yet.</div>}
+      <div className="flex flex-col gap-0.5">{files.map((f, i) => <button key={f} autoFocus={i === 0} className="text-left border-transparent hover:border-ink-3 font-mono truncate" title={f} onClick={() => { onClose(); onPick(f) }}>{f}</button>)}</div>
       <p className="text-ink-3 text-[12px]">A browser cannot reopen a file by name: files first opened here ask for the file again.</p>
       <div className={ACTIONS}><button onClick={onClose}>Cancel</button></div>
     </Dialog>

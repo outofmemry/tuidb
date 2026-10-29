@@ -175,6 +175,9 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("%s: %w", *cfgPath, err)
 	}
+	for _, w := range km.Warnings() { // T-P2-06: a [keys] entry that left another action unbound
+		fmt.Fprintln(os.Stderr, "webtuidb:", w)
+	}
 	if *theme {
 		fmt.Print(ui.ThemeTOML(cfg.Theme))
 		return nil

@@ -87,7 +87,7 @@ func (driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (
 	}
 	for _, b := range once {
 		if err := s.conn.Exec(ctx, b); err != nil {
-			return fail(fmt.Errorf("bootstrap %q: %w", b, err))
+			return fail(fmt.Errorf("bootstrap (%s): %w", b, err))
 		}
 	}
 	v, err := s.conn.ServerVersion()

@@ -47,8 +47,10 @@ func toggleExtra(text string, flags []string, on []bool) string {
 }
 
 // commonOptions opens the checklist of the tool's usual flags and writes the result into the form's Extra field.
-func (w *Workspace) commonOptions(f *formDlg, restore bool) tea.Cmd {
-	opts := backup.CommonOptions(w.conn.Driver, restore)
+// The list is built when it opens, from the File and Format values at that moment, so it offers only the flags of
+// the tool that file will run (psql or pg_restore, the mysql client).
+func (w *Workspace) commonOptions(f *formDlg, restore bool, v map[string]string) tea.Cmd {
+	opts := backup.CommonOptionsForFormat(w.conn.Driver, restore, strings.TrimSpace(v["file"]), v["format"])
 	if len(opts) == 0 {
 		return w.a.say("no common options for %s", w.conn.Driver)
 	}

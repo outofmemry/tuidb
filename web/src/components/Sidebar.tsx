@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, keyOf, qs, recentKey, type Column, type DbObject, type ItemGroup, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
-import { Dialog, ask, confirm } from './Dialogs'
+import { api, keyOf, qs, recentKey, switchSchema, type Column, type DbObject, type ItemGroup, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
+import { Dialog, PlanDialog, ask, confirm } from './Dialogs'
 import { TabMenu } from './Extras'
 import { MultiExportDialog } from './MultiExport'
 import { Select } from './Select'
@@ -21,6 +21,8 @@ const SWATCHES = ['#7aa2f7', '#4fc4a0', '#e0af68', '#ff9a5c', '#f7768e', '#bb9af
 
 // shortcut: system schemas are recognised by name; the drivers do not flag them
 const SYSTEM_SCHEMA = /^(information_schema|pg_.*|mysql|performance_schema|sys|system|INFORMATION_SCHEMA)$/
+// a read-only connection refuses these, so its menus leave them out
+const WRITES = new Set(['new_table', 'new_schema', 'new_database', 'drop_schema', 'import', 'clone', 'rename', 'truncate', 'delete_item'])
 const KINDS: [string, string][] = [['table', 'Tables'], ['view', 'Views'], ['matview', 'Materialized views'], ['function', 'Functions'], ['procedure', 'Procedures'], ['sequence', 'Sequences'], ['type', 'Types']]
 
 type Props = {
@@ -32,7 +34,10 @@ type Props = {
 export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText, onPlan, notify, onDiagram }: Props) {
   const qc = useQueryClient()
   const sb = meta.config.sidebar
-  const [schema, setSchema] = useState(info.schema)
+  // the schema shown is the session's current schema: switching it on the server makes the editor, search, Open anything,
+  // completion and the status bar follow, and it survives a reload (the terminal's sidebar does the same)
+  const schema = info.schema
+  const setSchema = (name: string) => switchSchema(sid, name).then((i) => qc.setQueryData(['session', sid], i), (e) => notify(e instanceof Error ? e.message : String(e)))
   const [filter, setFilter] = useState('')
   const [menuAt, setMenuAt] = useState<{ o: DbObject; x: number; y: number } | null>(null) // the object menu and where it opens
   const setMenu = (o: DbObject | null, at?: { x: number; y: number }) => setMenuAt(o ? { o, x: at?.x ?? 120, y: at?.y ?? 120 } : null)
@@ -52,6 +57,8 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [folders, setFolders] = useState<Set<string>>(new Set()) // open Redis key folders
   const [newTable, setNewTable] = useState<string | null>(null) // the New table designer, by name
+  const newDirty = useRef(false) // its draft differs from the one-column start: closing asks first
+  const [createPlan, setCreatePlan] = useState<Plan | null>(null) // its CREATE preview: Cancel goes back to the designer
   useEffect(() => {
     const h = (e: Event) => { if (onAction.current((e as CustomEvent).detail.action)) e.preventDefault() }
     window.addEventListener('webtuidb:action', h)
@@ -89,8 +96,9 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
     if (typed === null) return
     if (typed !== o.Name) return notify(`Type "${o.Name}" to confirm; nothing changed.`)
     const opts: Record<string, string> = {}
-    if (await confirm(`Cascade: also ${op === 'drop' ? 'drop' : 'truncate'} everything that depends on ${o.Name}? Cancel: no.`)) opts.cascade = 'true'
-    if (op === 'truncate' && info.caps.Dialect === 'postgres' && await confirm('Restart identity: reset the sequences of the table? Cancel: no.')) opts.restart_identity = 'true'
+    // dependents exist only on SQL engines; the answer goes into the preview, which still asks before anything is sent
+    if (info.caps.Editor === 'sql' && await confirm(`Also ${op === 'drop' ? 'drop' : 'truncate'} everything that depends on ${o.Name}?`, undefined, op === 'drop' ? 'Drop with dependents' : 'Truncate with dependents', op === 'drop' ? 'Drop only this' : 'Truncate only this')) opts.cascade = 'true'
+    if (op === 'truncate' && info.caps.Dialect === 'postgres' && await confirm('Also reset the sequences of the table (restart identity)?', undefined, 'Reset the sequences', 'Keep the sequences')) opts.restart_identity = 'true'
     admin(op, o, opts)
   }
   const marks = [...marked.values()]
@@ -107,7 +115,7 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
     const t = await ask(`Type the name of the schema to drop (${schema} is the one shown)`, schema); if (!t) return
     const again = await ask(`Type ${t} again to drop schema ${t} and everything in it`); if (again === null) return
     if (again !== t) return notify('The names did not match; nothing dropped.')
-    const cascade = await confirm(`Also drop everything inside ${t} (CASCADE)? Cancel drops it only if it is empty.`)
+    const cascade = await confirm(`Also drop everything inside ${t} (CASCADE)?`, undefined, 'Drop with its contents', 'Drop only if empty')
     admin('drop_schema', { Schema: t, Name: '', Kind: '' }, cascade ? { cascade: 'true' } : {})
   }
   const schemaOps = info.caps.Schemas && info.caps.Dialect === 'postgres'
@@ -159,7 +167,7 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
       case 'export': return setTool({ kind: 'export', obj: o })
       case 'export_many': return setMany([o])
       case 'import': return setTool({ kind: 'import', obj: o })
-      case 'clone': { const n = await ask('Clone as'); if (!n) return; const withData = info.caps.Dialect === 'cql' ? false : await confirm('Duplicate the content too? Cancel copies only the structure.'); admin('clone', o, { new_name: n, with_data: String(withData) }); return }
+      case 'clone': { const n = await ask('Clone as'); if (!n) return; const withData = info.caps.Dialect === 'cql' ? false : await confirm('Copy the rows too, or only the structure?', undefined, 'Structure and rows', 'Structure only'); admin('clone', o, { new_name: n, with_data: String(withData) }); return }
       case 'rename': { const n = await ask('New name', o.Name); if (n) admin('rename', o, { new_name: n }); return }
       case 'truncate': return dropOrTruncate('truncate', o)
       case 'delete_item': return dropOrTruncate('drop', o)
@@ -175,13 +183,13 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
   }
   const objectItems = (o: DbObject): [string, () => void, string?][] => {
     const inGroups = groups.filter((g) => g.items.includes(keyOf(o)))
-    const list = filterMenu(meta.menus?.sidebar_object ?? [{ label: 'Open', action: 'open' }], { kind: o.Kind, caps: info.caps as unknown as Record<string, unknown>, marked: marked.has(keyOf(o)), inGroup: inGroups.length > 0 })
+    const list = filterMenu(meta.menus?.sidebar_object ?? [{ label: 'Open', action: 'open' }], { kind: o.Kind, caps: info.caps as unknown as Record<string, unknown>, marked: marked.has(keyOf(o)), inGroup: inGroups.length > 0 }).filter((it) => !info.readOnly || !WRITES.has(it.action))
     // one "Remove from group" entry per group the item is in
     return list.flatMap((it: MenuItem): [string, () => void, string?][] => it.action === 'group_remove'
       ? inGroups.map((g) => [inGroups.length > 1 ? `${it.label} ${g.name}` : it.label, () => doObject('group_remove:' + g.name, o)])
       : [[it.label, () => doObject(it.action, o), whyNot(it)]])
   }
-  const newItems = (): [string, () => void, string?][] => filterMenu(meta.menus?.sidebar_new ?? [{ label: 'New table…', action: 'new_table' }], { caps: info.caps as unknown as Record<string, unknown> }).map((it) => [it.label, () => doNew(it.action), whyNot(it)])
+  const newItems = (): [string, () => void, string?][] => filterMenu(meta.menus?.sidebar_new ?? [{ label: 'New table…', action: 'new_table' }], { caps: info.caps as unknown as Record<string, unknown> }).filter((it) => !info.readOnly || !WRITES.has(it.action)).map((it) => [it.label, () => doNew(it.action), whyNot(it)])
   const doNew = async (a: string) => {
     switch (a) {
       case 'new_table': return askNewTable()
@@ -221,14 +229,15 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
 
   const toggle = (k: string) => setExpanded((x) => { const n = new Set(x); n.has(k) ? n.delete(k) : n.add(k); return n })
   const withCols = (o: ObjRef) => sb.ShowColumns && ['table', 'view', 'matview'].includes(o.Kind)
-  const item = (o: DbObject) => (<div key={o.Schema + '.' + o.Name + o.Kind}>
+  // qualify: Pinned and Recent mix schemas, so an item from a schema other than the one shown carries its schema
+  const item = (o: DbObject, qualify = false) => (<div key={o.Schema + '.' + o.Name + o.Kind}>
     <div className={`group flex items-center gap-2 h-[26px] pl-3 pr-2.5 cursor-pointer text-[12.5px] hover:bg-panel focus-visible:bg-panel ${marked.has(keyOf(o)) ? 'bg-raised shadow-[inset_3px_0_0_var(--accent)]' : ''} ${over === keyOf(o) ? 'outline outline-1 -outline-offset-1 outline-accent' : ''}`} data-sb-item tabIndex={0} role="treeitem" aria-selected={marked.has(keyOf(o)) || undefined}
       onClick={() => { last.current = o; clearTimeout(click.current); click.current = setTimeout(() => onOpen(o), 200) }}
       onDoubleClick={() => { clearTimeout(click.current); last.current = o; fireOpen(o, { newTab: true }) }}
       onKeyDown={(e) => rowKey(o, e)} onContextMenu={(e) => { e.preventDefault(); last.current = o; setMenu(o, { x: e.clientX, y: e.clientY }) }}
       onDragOver={(e) => { if (o.Kind === 'table' && e.dataTransfer.types.includes('Files')) { e.preventDefault(); setOver(keyOf(o)) } }} onDragLeave={() => setOver('')} onDrop={(e) => dropFile(o, e)}>
       {withCols(o) && <button className="btn-ghost -ml-2 px-1" aria-label={expanded.has(keyOf(o)) ? 'Hide columns' : 'Show columns'} aria-expanded={expanded.has(keyOf(o))} onClick={(e) => { e.stopPropagation(); toggle(keyOf(o)) }}>{expanded.has(keyOf(o)) ? '▾' : '▸'}</button>}
-      {colors[keyOf(o)] && <span className="w-2 h-2 rounded-full flex-none" style={{ background: colors[keyOf(o)] }} aria-hidden />}<span className="flex-1 truncate" title={`${o.Name} (${o.Kind})`}>{marked.has(keyOf(o)) ? <span className="text-accent">● </span> : ''}{o.Name}</span>
+      {colors[keyOf(o)] && <span className="w-2 h-2 rounded-full flex-none" style={{ background: colors[keyOf(o)] }} aria-hidden />}<span className="flex-1 truncate" title={`${o.Name} (${o.Kind})`}>{marked.has(keyOf(o)) ? <span className="text-accent">● </span> : ''}{qualify && o.Schema && o.Schema !== schema ? <span className="text-ink-3">{o.Schema}.</span> : null}{o.Name}</span>
       {o.Detail && <span className="font-mono text-[11px] leading-[normal] text-ink-3 max-w-[7em] truncate text-right group-hover:hidden group-focus-within:hidden" title={o.Detail}>{o.Detail}</span>}
       <span className="hidden group-hover:flex group-focus-within:flex">
         <button className={`btn-ghost btn-icon ${isPinned(o) ? 'text-accent' : ''}`} title={isPinned(o) ? 'Unpin' : 'Pin'} aria-label={isPinned(o) ? `Unpin ${o.Name}` : `Pin ${o.Name}`} onClick={(e) => { e.stopPropagation(); pin.mutate(o) }}>{isPinned(o) ? '★' : '☆'}</button>
@@ -264,12 +273,12 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
         {empty && <div className="px-3 py-6 text-[12.5px] text-ink-2 font-sans leading-normal">{filter ? <>Nothing matches <b className="font-medium text-ink">{filter}</b>.</> : 'Nothing here yet.'}</div>}
         {marked.size > 0 && <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 text-[12px] text-ink-2 border-b border-rule bg-panel shadow-[inset_3px_0_0_var(--accent)]" role="toolbar" aria-label="Marked items"><span className="flex-1 text-ink"><b className="font-semibold">{marked.size}</b> marked</span>
           <button className="btn-ghost" onClick={() => setMany(marks.filter((o) => o.Kind === 'table'))}>Export…</button><button className="btn-ghost" onClick={() => setAddTo(marks)}>Group…</button>
-          <button className="btn-ghost btn-danger" onClick={() => bulk('truncate')}>Truncate…</button><button className="btn-ghost btn-danger" onClick={() => bulk('drop')}>Drop…</button><button className="btn-ghost" onClick={() => setMarked(new Map())}>Clear</button></div>}
-        {!filter && pinned.length > 0 && <><div className={TITLE}>Pinned</div>{pinned.map(item)}</>}
-        {!filter && sb.ShowRecent !== false && recent.length > 0 && <><div className={TITLE}>Recent</div>{recent.map(item)}</>}
+          {!info.readOnly && <><button className="btn-ghost btn-danger" onClick={() => bulk('truncate')}>Truncate…</button><button className="btn-ghost btn-danger" onClick={() => bulk('drop')}>Drop…</button></>}<button className="btn-ghost" onClick={() => setMarked(new Map())}>Clear</button></div>}
+        {!filter && pinned.length > 0 && <><div className={TITLE}>Pinned</div>{pinned.map((o) => item(o, true))}</>}
+        {!filter && sb.ShowRecent !== false && recent.length > 0 && <><div className={TITLE}>Recent</div>{recent.map((o) => item(o, true))}</>}
         {groups.map((g) => {
           const its = found(g.items.map(lookup).filter((o): o is DbObject => !!o))
-          return its.length ? <div key={g.name}><div className={TITLE}>{g.name}<span className="text-ink-3 text-[11px]">{its.length}</span></div>{its.map(item)}</div> : null
+          return its.length ? <div key={g.name}><div className={TITLE}>{g.name}<span className="text-ink-3 text-[11px]">{its.length}</span></div>{its.map((o) => item(o))}</div> : null
         })}
         {info.caps.Editor === 'redis' && !filter && (() => {
           const rows = flattenKeys(buildKeyTree(all), folders)
@@ -283,7 +292,7 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
         })()}
         {(info.caps.Editor !== 'redis' || filter) && KINDS.filter(([k]) => !hide(k)).map(([k, label]) => {
           const list = found(all.filter((o) => o.Kind === k))
-          return list.length ? <div key={k}><div className={TITLE}>{label}<span className="text-ink-3 text-[11px]">{list.length}</span></div>{list.map(item)}</div> : null
+          return list.length ? <div key={k}><div className={TITLE}>{k === 'table' && info.caps.Editor === 'mongo' ? 'Collections' : label}<span className="text-ink-3 text-[11px]">{list.length}</span></div>{list.map((o) => item(o))}</div> : null
         })}
       </div>
       {tool?.kind === 'export' && <ExportDialog sid={sid} notify={notify} onClose={() => setTool(null)} source={{ mode: 'table', ref: tool.obj, filters: { Filters: [], Or: false }, sort: [], columns: [], limit: 0, offset: 0 }} />}
@@ -294,9 +303,10 @@ export function Sidebar({ open, collapsed, sid, info, meta, onOpen, onQueryText,
         const keys = addTo.map(keyOf), has = groups.some((g) => g.name === name)
         saveGroups(has ? groups.map((g) => (g.name === name ? { ...g, items: [...new Set([...g.items, ...keys])] } : g)) : [...groups, { name, items: keys }]); setAddTo(null)
       }} />}
-      {newTable !== null && <Dialog title={`New table ${newTable}`} onClose={() => setNewTable(null)}>
-        <div className="flex flex-col min-h-0 max-h-[70vh]"><StructureEditor creating sid={sid} caps={info.caps} obj={{ Schema: schema, Name: newTable, Kind: 'table' }} notify={notify} onPlan={(p) => { setNewTable(null); onPlan(p) }} /></div>
+      {newTable !== null && <Dialog title={`New table ${newTable}`} onClose={async () => { if (!newDirty.current || await confirm('Discard the new table?', undefined, 'Discard')) setNewTable(null) }}>
+        <div className="flex flex-col min-h-0 max-h-[70vh]"><StructureEditor creating sid={sid} caps={info.caps} obj={{ Schema: schema, Name: newTable, Kind: 'table' }} notify={notify} onPlan={setCreatePlan} onDirty={(v) => { newDirty.current = v }} /></div>
       </Dialog>}
+      {createPlan && <PlanDialog sid={sid} plan={createPlan} onClose={() => setCreatePlan(null)} onApplied={() => { setCreatePlan(null); setNewTable(null); qc.invalidateQueries({ queryKey: ['objects', sid] }); notify('Changes sent') }} />}
       {many && <MultiExportDialog sid={sid} info={info} initial={many} notify={notify} onClose={() => setMany(null)} />}
       {menuAt && <TabMenu x={menuAt.x} y={menuAt.y} label={menuAt.o.Name} items={objectItems(menuAt.o)} onClose={() => setMenu(null)} />}
       {colorFor && <Dialog title={`Colour of ${colorFor.Name}`} onClose={() => setColorFor(null)}>

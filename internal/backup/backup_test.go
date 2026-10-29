@@ -179,7 +179,7 @@ func TestExtraFilenameCommonOptions(t *testing.T) {
 	if !strings.HasSuffix(cmd.Args[len(cmd.Args)-1], "x.sql.part") || strings.Contains(cmd.Args[len(cmd.Args)-1], "..") {
 		t.Errorf("filename escaped: %v", cmd.Args)
 	}
-	if len(CommonOptions("postgres", false)) != 5 || len(CommonOptions("postgres", true)) != 4 || len(CommonOptions("redis", false)) != 0 ||
+	if len(CommonOptions("postgres", false)) != 5 || len(CommonOptions("postgres", true)) != 5 || len(CommonOptions("redis", false)) != 0 ||
 		CommonOptions("mysql", true)[0].Flag != "--force" || len(CommonOptions("mongodb", true)) != 3 {
 		t.Error("common options")
 	}
@@ -280,19 +280,20 @@ func TestRestoreFlagsFollowTool(t *testing.T) {
 	if _, err := Plan(Options{Conn: mkConn("mysql"), File: "f", Extra: []string{"--single-transaction"}}, true); err == nil {
 		t.Error("mysqldump-only flag accepted for the mysql client")
 	}
-	// plain SQL restore runs psql: pg_restore-only flags are dropped, with a line saying so
-	cmd, err := Plan(Options{Conn: mkConn("postgres"), File: "f.sql", Extra: []string{"--clean", "-j", "4", "--single-transaction"}}, true)
-	if err != nil {
-		t.Fatal(err)
+	// plain SQL restore runs psql: pg_restore-only flags are refused, naming the tool
+	for _, bad := range [][]string{{"--clean"}, {"-j", "4"}, {"--no-owner"}} {
+		if _, err := Plan(Options{Conn: mkConn("postgres"), File: "f.sql", Extra: bad}, true); err == nil || !strings.Contains(err.Error(), bad[0]+"") || !strings.Contains(err.Error(), "not accepted by psql") {
+			t.Errorf("psql restore with %v: %v", bad, err)
+		}
 	}
-	line := strings.Join(cmd.Args, " ")
-	if strings.Contains(line, "--clean") || strings.Contains(line, "-j") || !strings.Contains(line, "--single-transaction") {
-		t.Errorf("psql args: %s", line)
+	cmd, err := Plan(Options{Conn: mkConn("postgres"), File: "f.sql", Extra: []string{"--single-transaction"}}, true)
+	if err != nil || !strings.Contains(strings.Join(cmd.Args, " "), "--single-transaction") {
+		t.Fatalf("psql --single-transaction: %v %v", cmd, err)
 	}
-	var out []string
-	_ = Run(context.Background(), cmd, func(l string) { out = append(out, l) })
-	if len(out) == 0 || !strings.Contains(out[0], "--clean") || !strings.Contains(out[0], "-j 4") {
-		t.Errorf("no dropped-flags note: %v", out)
+	// an archive-looking name runs pg_restore even with Format left at plain
+	cmd, err = Plan(Options{Conn: mkConn("postgres"), File: "f.dump", Extra: []string{"--clean"}}, true)
+	if err != nil || !strings.Contains(strings.Join(cmd.Args, " "), "--clean") || strings.Contains(cmd.Args[0], "psql") {
+		t.Errorf("f.dump: %v %v", cmd, err)
 	}
 	// custom restore keeps them
 	cmd, err = Plan(Options{Conn: mkConn("postgres"), File: "f.dump", Format: "custom", Extra: []string{"--clean"}}, true)
@@ -320,5 +321,54 @@ func TestToolWrittenDumpIs0600(t *testing.T) {
 	st, err := os.Stat(file)
 	if err != nil || st.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v err %v", st.Mode(), err)
+	}
+}
+
+// CF-1: the options a dialog offers are those of the tool that runs, and every one of them plans.
+func TestCommonOptionsForTool(t *testing.T) {
+	fakeTools(t, "pg_restore", "psql", "mysql", "mysqldump")
+	flags := func(o []Option) string {
+		var f []string
+		for _, x := range o {
+			f = append(f, x.Flag)
+		}
+		return strings.Join(f, " ")
+	}
+	if got := flags(CommonOptionsFor("postgres", true, "x.sql")); got != "--single-transaction" {
+		t.Errorf("psql: %q", got)
+	}
+	if got := flags(CommonOptionsFor("postgres", true, "x.sql.gz")); got != "--single-transaction" {
+		t.Errorf("psql gz: %q", got)
+	}
+	for _, f := range []string{"x.dump", "X.TAR", "backup.backup", t.TempDir()} {
+		if got := flags(CommonOptionsFor("postgres", true, f)); got != "--clean --if-exists --no-owner -j 4" {
+			t.Errorf("pg_restore %s: %q", f, got)
+		}
+	}
+	if got := flags(CommonOptionsForFormat("postgres", true, "x.sql", "custom")); strings.Contains(got, "single") || !strings.Contains(got, "--clean") {
+		t.Errorf("custom format: %q", got)
+	}
+	if got := flags(CommonOptionsFor("postgres", true, "")); got != "--clean --if-exists --no-owner -j 4 --single-transaction" {
+		t.Errorf("union: %q", got)
+	}
+	if got := flags(CommonOptions("postgres", true)); got != flags(CommonOptionsFor("postgres", true, "")) {
+		t.Errorf("CommonOptions is not the union: %q", got)
+	}
+	if got := flags(CommonOptionsFor("mysql", true, "x.sql")); got != "--force" {
+		t.Errorf("mysql client: %q", got)
+	}
+	if got := flags(CommonOptionsFor("mysql", false, "x.sql")); !strings.Contains(got, "--routines") {
+		t.Errorf("mysqldump: %q", got)
+	}
+	if got := AllowedExtraFor("postgres", true, "x.sql", ""); len(got) != 1 || got[0] != "--single-transaction" {
+		t.Errorf("psql allowed: %v", got)
+	}
+	// whatever is offered for a file plans with that file
+	for _, file := range []string{"x.sql", "x.dump"} {
+		for _, o := range CommonOptionsFor("postgres", true, file) {
+			if _, err := Plan(Options{Conn: mkConn("postgres"), File: file, Extra: strings.Fields(o.Flag)}, true); err != nil {
+				t.Errorf("%s offered %q but Plan refuses: %v", file, o.Flag, err)
+			}
+		}
 	}
 }

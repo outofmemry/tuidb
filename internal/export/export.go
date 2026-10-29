@@ -2,6 +2,7 @@
 package export
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -81,6 +82,9 @@ func Table(ctx context.Context, sess db.Session, ref db.ObjRef, filters db.Filte
 	for _, c := range cols {
 		if c.PK {
 			sort = append(sort, db.Sort{Column: c.Name})
+		}
+		if e, ok := s.e.(*sqlEnc); ok && o.Dialect == "postgres" && (c.Extra == "serial" || strings.HasSuffix(c.Extra, "AS IDENTITY")) {
+			e.seq = append(e.seq, c.Name)
 		}
 	}
 	if len(sort) == 0 {
@@ -174,6 +178,12 @@ func (s *stream) add(res *db.Result) error {
 		}
 		if err := s.e.head(s.names); err != nil {
 			return err
+		}
+		if je, ok := s.e.(*jsonEnc); ok {
+			je.raw = make([]bool, len(s.names))
+			for i, n := range s.names {
+				je.raw[i] = strings.Contains(strings.ToLower(res.Columns[at[n]].Type), "json")
+			}
 		}
 	}
 	for _, r := range res.Rows {
@@ -325,6 +335,7 @@ func orDef(s, d string) string {
 type jsonEnc struct {
 	w    io.Writer
 	cols []string
+	raw  []bool // json/jsonb columns: their text is written as nested JSON, not as a string
 	n    int
 }
 
@@ -347,6 +358,13 @@ func (e *jsonEnc) row(vals []any) error {
 		k, _ := json.Marshal(e.cols[i])
 		b.Write(k)
 		b.WriteString(": ")
+		if s, ok := v.(string); ok && i < len(e.raw) && e.raw[i] {
+			var c bytes.Buffer
+			if json.Compact(&c, []byte(s)) == nil {
+				b.Write(c.Bytes())
+				continue
+			}
+		}
 		j, err := jsonMarshal(jsonValue(v))
 		if err != nil {
 			return err
@@ -399,6 +417,7 @@ type sqlEnc struct {
 	d   db.Dialect
 	o   Options
 	ins string
+	seq []string // postgres, set by Table: serial/identity columns whose sequence is moved past the data
 }
 
 func (e *sqlEnc) head(cols []string) error {
@@ -454,7 +473,19 @@ func (e *sqlEnc) lit(v any) string {
 	return e.d.Literal(v)
 }
 
-func (e *sqlEnc) close() error { return nil }
+// close moves each serial/identity sequence past the inserted ids (like pg_dump), so the next insert works.
+func (e *sqlEnc) close() error {
+	t := e.d.QualifiedName(db.ObjRef{Schema: e.o.Schema, Name: e.o.Table})
+	lit := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+	for _, c := range e.seq {
+		q := e.d.Quote(c)
+		if _, err := fmt.Fprintf(e.w, "SELECT setval(pg_get_serial_sequence(%s, %s), coalesce(max(%s), 1), max(%s) IS NOT NULL) FROM %s;\n",
+			lit(t), lit(c), q, q, t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // ---- xlsx ----
 

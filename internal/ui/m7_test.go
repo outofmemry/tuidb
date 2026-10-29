@@ -221,7 +221,7 @@ func TestM7BoardsNewRenameDelete(t *testing.T) {
 	h.press("x")
 	setField(t, h, "confirm", "nope")
 	h.press("enter")
-	h.want("type \"revenue\"")
+	h.want("type “revenue”")
 	setField(t, h, "confirm", "revenue")
 	h.press("enter")
 	if bs, _ := board.List(); len(bs) != 0 {

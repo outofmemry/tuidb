@@ -153,7 +153,7 @@ func (w *Workspace) previewExec(stmts []db.Statement, then func(err error) tea.C
 	}
 	var lines []string
 	for _, s := range stmts {
-		lines = append(lines, s.Shown()+";", "")
+		lines = append(append(lines, sqlLines(s.Shown()+";")...), "")
 	}
 	w.a.push(&textViewDlg{title: fmt.Sprintf("Preview: %d statement(s)", len(stmts)), lines: lines, actions: []viewAction{{Key: "enter", Label: "Enter: apply", Do: func() tea.Cmd {
 		return w.execute(stmts, then)
@@ -290,7 +290,7 @@ func (w *Workspace) diagramDropTable(tbls []diagram.Table, reopen func() tea.Cmd
 		})
 		f.validate = func(v map[string]string) error {
 			if v["confirm"] != ref.Name {
-				return fmt.Errorf("type %q to confirm", ref.Name)
+				return fmt.Errorf("type “%s” to confirm", ref.Name)
 			}
 			return nil
 		}

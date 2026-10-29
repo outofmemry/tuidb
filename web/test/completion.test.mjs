@@ -1,7 +1,7 @@
 // Run: node --test test/completion.test.mjs  (ranking and alias rules mirror internal/ui/util.go fuzzy and RankCandidates)
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { aliasesIn, fuzzy, rank, statementAt, tablesRead } from '../src/components/Completion.ts'
+import { aliasesIn, fuzzy, rank, splitRef, statementAt, tablesRead } from '../src/components/Completion.ts'
 
 test('fuzzy is a case-insensitive subsequence match', () => {
   assert.equal(fuzzy('', 'x'), 0)
@@ -15,7 +15,15 @@ test('a prefix match outranks a scattered one', () => {
 })
 
 test('aliases and the tables a statement reads', () => {
-  assert.deepEqual(aliasesIn('select * from public.customers c join orders as o on 1=1 where x'), { customers: 'customers', c: 'customers', orders: 'orders', o: 'orders' })
+  assert.deepEqual(aliasesIn('select * from public.customers c join orders as o on 1=1 where x'), { customers: 'public.customers', c: 'public.customers', orders: 'orders', o: 'orders' })
   assert.deepEqual(tablesRead('update a set x=1; insert into b select * from c'), ['a', 'b', 'c'])
+  assert.deepEqual(tablesRead('select * from "shop".customers'), ['shop.customers'])
+})
+
+test('W-P2-08: alias. on a schema-qualified table keeps the schema', () => {
+  const a = aliasesIn('select * from shop.customers c where c.me')
+  assert.equal(a.c, 'shop.customers')
+  assert.deepEqual(splitRef(a.c), ['shop', 'customers'])
+  assert.deepEqual(splitRef('customers'), ['', 'customers'])
   assert.equal(statementAt('select 1; select 2; select 3', 12).trim(), 'select 2')
 })

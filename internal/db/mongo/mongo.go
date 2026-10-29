@@ -136,9 +136,16 @@ func (driver) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (
 	if v, _ := lookup(bi, "version"); v != nil {
 		s.info = fmt.Sprintf("MongoDB %v", v)
 	}
+	// Without credentials ping and buildInfo succeed even on a server that needs auth (wrong credentials
+	// already fail the ping handshake), so try listCollections, the first command that needs it.
+	if c.User == "" {
+		if _, err := s.runCmd(ctx, s.cur, bson.D{{Key: "listCollections", Value: 1}, {Key: "nameOnly", Value: true}, {Key: "authorizedCollections", Value: true}}); err != nil {
+			return fail(fmt.Errorf("mongodb: %w", err))
+		}
+	}
 	for _, b := range c.Bootstrap {
 		if _, err := s.Exec(ctx, b, 0); err != nil {
-			return fail(fmt.Errorf("bootstrap %q: %w", b, err))
+			return fail(fmt.Errorf("bootstrap (%s): %w", b, err))
 		}
 	}
 	return s, nil

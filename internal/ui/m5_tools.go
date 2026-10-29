@@ -160,9 +160,7 @@ func (w *Workspace) schemaDiff() tea.Cmd {
 			if err != nil {
 				return slow(err)
 			}
-			for i := range b {
-				b[i].Schema = from // the statements run against FROM, so a table is the same table in both
-			}
+			tools.Rebase(b, from) // the statements run against FROM, so a table is the same table in both
 			var quote []func(string) string
 			if d, ok := db.DialectFor(sess.Caps().Dialect); ok {
 				quote = append(quote, d.Quote)
@@ -331,17 +329,18 @@ func (w *Workspace) dataDiff() tea.Cmd {
 	return nil
 }
 
-// previewStatements lists stmts in a text view with `a` to send them through the safe-mode gate.
+// previewStatements lists stmts in a text view with Enter (or `a`) to send them through the safe-mode gate.
 func (w *Workspace) previewStatements(title string, stmts []db.Statement, then func(err error) tea.Cmd) tea.Cmd {
 	if len(stmts) == 0 {
 		return w.a.say("nothing to change: the two sides are the same")
 	}
 	var lines []string
 	for _, s := range stmts {
-		lines = append(lines, s.Shown())
+		lines = append(lines, sqlLines(s.Shown())...)
 	}
+	apply := func() tea.Cmd { return w.confirmBulk(title, stmts, func() tea.Cmd { return w.execute(stmts, then) }) }
 	w.a.push(&textViewDlg{title: fmt.Sprintf("%s (%s)", title, plural(len(stmts), "statement")), lines: lines, actions: []viewAction{
-		{Key: "a", Label: "a: apply", Do: func() tea.Cmd { return w.confirmBulk(title, stmts, func() tea.Cmd { return w.execute(stmts, then) }) }},
+		{Key: "enter", Label: "Enter: apply", Do: apply}, {Key: "a", Do: apply}, // Enter like every other preview; a kept for old habits
 	}})
 	return nil
 }
@@ -387,16 +386,24 @@ func (w *Workspace) confirmBulk(title string, stmts []db.Statement, apply func()
 func (t *tableTab) bulkUpdate() tea.Cmd {
 	applied := t.applied()
 	if len(applied.Active()) == 0 {
-		return t.ws.a.say("filter the rows first: a bulk update changes every row the filter matches")
+		return t.ws.a.fail(fmt.Errorf("filter the rows first: a bulk update changes every row the filter matches"))
 	}
 	if !t.grid.Editable {
-		return t.ws.a.say("%s is read-only", t.ref.Name)
+		return t.ws.a.fail(fmt.Errorf("%s is read-only", t.ref.Name))
 	}
 	d, ok := db.DialectFor(t.ws.caps.Dialect)
 	if !ok {
-		return t.ws.a.say("bulk update is for SQL engines")
+		return t.ws.a.fail(fmt.Errorf("bulk update is for SQL engines"))
 	}
-	f := newForm(fmt.Sprintf("Bulk update %s where %d filter(s) match", t.ref.Name, len(applied.Active())), []formField{
+	match := fmt.Sprintf("where %d filter(s) match", len(applied.Active()))
+	if t.counted { // the grid's count ran with the same (applied) filters
+		n := plural(int(t.count.N), "row")
+		if !t.count.Exact {
+			n = "~" + n
+		}
+		match = n + " match the filter"
+	}
+	f := newForm(fmt.Sprintf("Bulk update %s: %s", t.ref.Name, match), []formField{
 		{Key: "set", Label: "Set", Kind: fText, Hint: "col=value ;; col2=NULL ;; col3==expr"},
 	}, func(v map[string]string) tea.Cmd {
 		set, err := parseAssignments(v["set"])
@@ -411,7 +418,7 @@ func (t *tableTab) bulkUpdate() tea.Cmd {
 		if err != nil {
 			return t.ws.a.fail(err)
 		}
-		return t.ws.previewStatements("Bulk update "+t.ref.Name, []db.Statement{st}, func(err error) tea.Cmd {
+		return t.ws.previewStatements("Bulk update "+t.ref.Name+": "+match, []db.Statement{st}, func(err error) tea.Cmd {
 			if err != nil || t.closed {
 				return nil
 			}

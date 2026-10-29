@@ -192,6 +192,9 @@ func (a *App) init() tea.Cmd {
 	if e := themeError(a.d.Cfg.Theme); e != "" {
 		a.toast, a.toastErr = e, true
 	}
+	if w := a.d.Keys.Warnings(); len(w) > 0 { // T-P2-06: also printed to stderr by main
+		a.toast, a.toastErr = strings.Join(w, "  ·  "), true
+	}
 	if a.startConn != nil {
 		return tea.Batch(a.openConnection(*a.startConn), a.keepAliveTick())
 	}
@@ -408,6 +411,8 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case liveMsg:
 		return a, m.f()
+	case clipMsg:
+		return a, a.clipDone(m)
 	case runActionMsg:
 		return a, a.run(m.action)
 	case keepAliveMsg:
@@ -501,7 +506,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})}
 		return a, tea.Batch(cmds...)
 	case wsMsg:
-		if len(a.overlays) > 0 { // results that would open a dialog over the current one wait until it closes
+		if len(a.overlays) > 0 && !a.passesSlowPrompt(m) { // results that would open a dialog over the current one wait until it closes
 			a.deferred = append(a.deferred, m)
 			return a, nil
 		}
@@ -616,6 +621,9 @@ func (a *App) key(k tea.KeyPressMsg) tea.Cmd {
 		if keymap.FromMsg(k) == a.d.Keys.Prefix { // prefix twice: deliver the raw key
 			return a.forward(k)
 		}
+		if q := boundKey(a.d.Keys, keymap.Global, "quit"); keymap.FromMsg(k) == "ctrl+c" && a.context() != keymap.Editor && q != "" {
+			return tea.Batch(a.forward(k), a.say("Quit with %s", q)) // T-P3-11: Ctrl+C does not quit; say what does
+		}
 		return a.forward(k)
 	}
 	return nil
@@ -664,19 +672,36 @@ func (a *App) run(action string) tea.Cmd {
 	return a.welcome.action(action)
 }
 
-func (a *App) confirmQuit() tea.Cmd {
-	quit := func() tea.Cmd {
-		a.saveSession()
-		for _, w := range a.wss {
-			w.close()
-		}
-		a.quit = true
-		return tea.Quit
+// quitNow saves the session, closes every workspace and ends the program (no questions asked).
+func (a *App) quitNow() tea.Cmd {
+	a.saveSession()
+	for _, w := range a.wss {
+		w.close()
 	}
+	a.quit = true
+	return tea.Quit
+}
+
+func (a *App) confirmQuit() tea.Cmd {
+	quit := a.quitNow
 	for _, w := range a.wss {
 		if w.applying {
 			a.push(&confirmDlg{title: "A commit is still running. Quit anyway?", lines: []string{"Quitting now cuts the running statements off."}, yes: "Quit", danger: true, onYes: quit})
 			return nil
+		}
+	}
+	for _, w := range a.wss { // a modified .sql file asks to be saved, an open transaction says it is rolled back
+		for _, t := range w.tabs {
+			if q, ok := t.(*queryTab); ok && q.fileDirty() {
+				q.askSave(a.confirmQuit)
+				return nil
+			}
+		}
+		for _, t := range w.tabs {
+			if q, ok := t.(*queryTab); ok && q.inTx {
+				a.push(&confirmDlg{title: q.name + " has an open transaction. Quit and roll back?", lines: []string{"Everything since BEGIN is rolled back. COMMIT first to keep it."}, yes: "Roll back and quit", danger: true, onYes: quit})
+				return nil
+			}
 		}
 	}
 	for _, w := range a.wss {
@@ -951,6 +976,18 @@ func (a *App) contextHintPairs() []string {
 	default:
 		if a.ws() == nil {
 			pairs = []string{"↵", "connect", "n", "new"}
+		}
+	}
+	if w := a.ws(); w != nil { // T-P3-14: a read-only view edits nothing; the assistant runs nothing
+		switch t := w.tab().(type) {
+		case *tableTab:
+			if a.context() == keymap.Grid && t.ref.Kind != db.KindTable {
+				pairs = []string{"↵", "quick look", k("filters"), "filter", k("new_query_tab"), "sql"}
+			}
+		case *assistantTab:
+			if a.context() == keymap.Editor {
+				pairs = []string{"↵", "send"}
+			}
 		}
 	}
 	return append(pairs, pre+" ?", "help")

@@ -47,22 +47,67 @@ type Options struct {
 // Option is one common tool flag the UIs offer as a checkbox.
 type Option struct{ Flag, Desc string }
 
-// CommonOptions lists the usual extra flags for driver's dump (restore=false) or restore tool. A restore list
-// holds only flags the restore tool accepts (mysql client, mongorestore; for Postgres pg_restore, since the
-// archive format is not known here: Plan drops what a plain-SQL restore's psql does not take).
+// CommonOptions lists the usual extra flags for driver's dump (restore=false) or restore tool, for callers that
+// have no file yet. A Postgres restore list is the union of pg_restore's and psql's flags; once the file is known
+// use CommonOptionsFor, which lists only what the tool that will really run accepts.
 func CommonOptions(driver string, restore bool) []Option {
+	return CommonOptionsFor(driver, restore, "")
+}
+
+// archiveExt are the file extensions of a pg_dump custom / tar archive, which pg_restore reads (psql cannot).
+var archiveExt = []string{".dump", ".tar", ".backup", ".pgdump", ".custom"}
+
+// pgRestoreTool names the program a Postgres restore of filename runs: "pg_restore" for a custom-format
+// request, an archive-looking name (.dump, .tar, ...) or a directory, "psql" for any other file (.sql, .sql.gz),
+// and "" while there is no file name yet.
+func pgRestoreTool(filename, format string) string {
+	switch name := strings.TrimSuffix(strings.ToLower(filename), ".gz"); {
+	case format == "custom":
+		return "pg_restore"
+	case filename == "":
+		return ""
+	default:
+		for _, e := range archiveExt {
+			if strings.HasSuffix(name, e) {
+				return "pg_restore"
+			}
+		}
+		if st, err := os.Stat(filename); err == nil && st.IsDir() {
+			return "pg_restore"
+		}
+		return "psql"
+	}
+}
+
+// CommonOptionsFor is CommonOptions narrowed to the tool that runs: for a Postgres restore, filename picks psql
+// (a plain .sql / .sql.gz file) or pg_restore (.dump, .tar, a directory); a MySQL restore is the mysql client's
+// flags, not mysqldump's. An empty filename gives the union for Postgres.
+func CommonOptionsFor(driver string, restore bool, filename string) []Option {
+	return CommonOptionsForFormat(driver, restore, filename, "")
+}
+
+// CommonOptionsForFormat is CommonOptionsFor for a dialog that also has the Postgres Format choice: "custom"
+// means pg_restore whatever the file is called.
+func CommonOptionsForFormat(driver string, restore bool, filename, format string) []Option {
 	switch driver {
 	case config.Postgres:
 		if restore {
-			return []Option{{"--clean", "drop objects before recreating them"}, {"--if-exists", "with --clean, ignore missing objects"},
+			pgr := []Option{{"--clean", "drop objects before recreating them"}, {"--if-exists", "with --clean, ignore missing objects"},
 				{"--no-owner", "skip ownership changes"},
 				{"-j 4", "restore with 4 parallel jobs"}}
+			switch pgRestoreTool(filename, format) {
+			case "psql":
+				return []Option{{"--single-transaction", "run the whole file in one transaction"}}
+			case "pg_restore":
+				return pgr
+			}
+			return append(pgr, Option{"--single-transaction", "psql (plain .sql) only: one transaction"})
 		}
 		return []Option{
 			{"--no-owner", "skip ownership commands"}, {"--no-privileges", "skip GRANT/REVOKE"}, {"--clean", "add DROP statements"},
 			{"--if-exists", "with --clean, use IF EXISTS"}, {"--inserts", "INSERT statements instead of COPY"}}
 	case config.MySQL, config.MariaDB:
-		if restore {
+		if restore { // the mysql client, not mysqldump
 			return []Option{{"--force", "continue after SQL errors"}}
 		}
 		return []Option{{"--no-data", "schema only"}, {"--no-create-info", "data only"}, {"--single-transaction", "consistent snapshot (InnoDB)"},
@@ -91,6 +136,29 @@ var safeExtra = map[string][]string{
 
 // psqlExtra are the allowed flags a plain-SQL Postgres restore (psql) really takes; the rest are dropped.
 var psqlExtra = map[string]bool{"--single-transaction": true}
+
+// checkPsqlExtra refuses the (already allow-listed) extras psql does not take, naming the tool.
+func checkPsqlExtra(extra []string) error {
+	for i := 0; i < len(extra); i++ {
+		if psqlExtra[extra[i]] {
+			continue
+		}
+		f := extra[i]
+		if f == "-j" && i+1 < len(extra) {
+			f += " " + extra[i+1]
+		}
+		return fmt.Errorf("%s is not accepted by psql (a plain SQL restore); use the custom format for pg_restore options", f)
+	}
+	return nil
+}
+
+// AllowedExtraFor is AllowedExtra narrowed to the tool that runs, like CommonOptionsForFormat.
+func AllowedExtraFor(driver string, restore bool, filename, format string) []string {
+	if driver == config.Postgres && restore && pgRestoreTool(filename, format) == "psql" {
+		return []string{"--single-transaction"}
+	}
+	return AllowedExtra(driver, restore)
+}
 
 // AllowedExtra is the exact allow-list of Options.Extra tokens for driver's dump or restore tool: the
 // CommonOptions flags plus a few vetted ones, and "-j N" / "--jobs=N" (numeric N) for pg_restore.
@@ -345,36 +413,19 @@ func Plan(o Options, restore bool) (*exec.Cmd, error) {
 		return nil, err
 	}
 	o.File = OutputPath(o)
+	if restore && o.Conn.Driver == config.Postgres && o.Format != "custom" && pgRestoreTool(o.File, "") == "pg_restore" {
+		o.Format = "custom" // a .dump / .tar archive or a directory: psql cannot read it
+	}
+	if restore && o.Conn.Driver == config.Postgres && o.Format != "custom" { // plain SQL goes to psql, which takes few of pg_restore's flags
+		if err := checkPsqlExtra(extra); err != nil {
+			return nil, err
+		}
+	}
 	cmd, err := plan(o, restore)
 	if err != nil || len(extra) == 0 {
 		return cmd, err
 	}
 	psql := restore && o.Conn.Driver == config.Postgres && o.Format != "custom"
-	if psql { // the allow-list is pg_restore's; psql takes few of them
-		var keep, dropped []string
-		for i := 0; i < len(extra); i++ {
-			switch {
-			case psqlExtra[extra[i]]:
-				keep = append(keep, extra[i])
-			case extra[i] == "-j": // takes the next token
-				dropped = append(dropped, extra[i]+" "+extra[i+1])
-				i++
-			default:
-				dropped = append(dropped, extra[i])
-			}
-		}
-		if len(dropped) > 0 {
-			jobsMu.Lock()
-			if jobs[cmd] == nil {
-				jobs[cmd] = &job{}
-			}
-			jobs[cmd].note = "note: psql restores a plain SQL file and does not take " + strings.Join(dropped, " ") + "; left out"
-			jobsMu.Unlock()
-		}
-		if extra = keep; len(extra) == 0 {
-			return cmd, nil
-		}
-	}
 	at := len(cmd.Args)
 	if psql {
 		for i, a := range cmd.Args {

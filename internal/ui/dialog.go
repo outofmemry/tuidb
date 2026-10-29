@@ -109,7 +109,7 @@ func (d *confirmDlg) View(th Theme, maxW, maxH int) string {
 	w := min(maxW-4, 80)
 	var body []string
 	for _, l := range d.lines {
-		wrapped := wrapText(l, w-4)
+		wrapped := wordWrap(l, w-4)
 		if sqlish(l) {
 			// postgres rules: only '…' is a literal, so quoted identifiers do not read as strings
 			for i, k := range lexLines("postgres", wrapped) {
@@ -277,6 +277,12 @@ func newForm(title string, fields []formField, onSubmit func(map[string]string) 
 		f.fields = append(f.fields, &fl)
 	}
 	f.idx = f.firstEditable(0, 1)
+	return f
+}
+
+// checked sets validate: a failing check keeps the form open with the error inline, nothing typed is lost.
+func (f *formDlg) checked(validate func(vals map[string]string) error) *formDlg {
+	f.validate = validate
 	return f
 }
 
@@ -695,14 +701,16 @@ func (t *textViewDlg) View(th Theme, maxW, maxH int) string {
 	w := min(maxW-4, 110)
 	var all []string
 	for _, l := range t.lines {
-		all = append(all, wrapText(l, w-4)...)
+		all = append(all, wordWrap(l, w-4)...)
 	}
 	vis := max(4, maxH-8)
 	t.top = clamp(t.top, 0, max(0, len(all)-vis))
 	body := all[t.top:min(len(all), t.top+vis)]
 	hint := "Esc/q: close   ↑↓ PgUp/PgDn: scroll"
 	for _, a := range t.actions {
-		hint = a.Label + "   " + hint
+		if a.Label != "" { // an unlabeled action is an alias of a labeled one
+			hint = a.Label + "   " + hint
+		}
 	}
 	if len(all) > vis {
 		hint += fmt.Sprintf("   (%d-%d/%d)", t.top+1, t.top+len(body), len(all))

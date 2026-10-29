@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -257,21 +258,31 @@ func text(v any) string {
 
 // Preview parses up to n rows without touching the database. For sql the rows are the statements.
 func Preview(r io.Reader, o Options, n int) (cols []string, rows [][]string, err error) {
+	return PreviewContext(context.Background(), r, o, n)
+}
+
+// PreviewContext is Preview that stops when ctx is cancelled. An sql preview reads only as much of r as it needs
+// for n statements.
+func PreviewContext(ctx context.Context, r io.Reader, o Options, n int) (cols []string, rows [][]string, err error) {
 	if r, err = decode(r, o.Encoding); err != nil {
 		return nil, nil, err
 	}
 	o = defaults(o)
 	if o.Source == "sql" {
-		b, err := io.ReadAll(r)
-		if err != nil {
-			return nil, nil, err
-		}
 		// shortcut: previews split as postgres, the real dialect is only known in Run
-		for _, s := range db.Split("postgres", string(b)) {
-			if len(rows) == n {
-				break
+		stop := errors.New("enough")
+		err := streamSQL(ctx, r, "postgres", func(text string) error {
+			if len(rows) >= n {
+				return stop
 			}
-			rows = append(rows, []string{s.Text})
+			rows = append(rows, []string{text})
+			if len(rows) >= n {
+				return stop
+			}
+			return nil
+		})
+		if err != nil && err != stop {
+			return nil, nil, err
 		}
 		return []string{"statement"}, rows, nil
 	}
@@ -398,22 +409,18 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 	}
 
 	if o.Source == "sql" {
-		b, err := readAll(ctx, r)
-		if err != nil {
-			return err
-		}
 		var stmts []db.Statement
-		for _, s := range db.Split(sess.Caps().Dialect, string(b)) {
-			if err := ctx.Err(); err != nil {
+		err := streamSQL(ctx, r, dialect, func(text string) error {
+			stmts = append(stmts, db.Statement{Text: text})
+			if len(stmts) == batch {
+				err := step(stmts, len(stmts))
+				stmts = nil
 				return err
 			}
-			stmts = append(stmts, db.Statement{Text: s.Text})
-			if len(stmts) == batch {
-				if err := step(stmts, len(stmts)); err != nil {
-					return err
-				}
-				stmts = nil
-			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 		if len(stmts) > 0 {
 			return step(stmts, len(stmts))
@@ -449,6 +456,26 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 		return err
 	}
 	created := false
+	create := func() error {
+		stmts, err := sess.PlanTable(nil, &db.TableDef{Schema: o.Table.Schema, Name: o.Table.Name, Columns: def})
+		if err != nil {
+			return err
+		}
+		if err := step(stmts, 0); err != nil {
+			return err
+		}
+		created = true
+		p.Batches = 0 // creating the table is not a data batch
+		return nil
+	}
+	// MySQL commits DDL implicitly and its pinned session refuses it, so the CREATE runs on the plain session
+	// before the transaction opens; PostgreSQL's CREATE goes inside the transaction and rolls back with the data
+	mysqlish := dialect == "mysql" || o.Driver == config.MySQL || o.Driver == config.MariaDB
+	if o.CreateTable && mysqlish {
+		if err := create(); err != nil {
+			return err
+		}
+	}
 	// the transaction opens before the CREATE, so a failure in the data takes the new table with it
 	if o.Source != "sql" && sess.Caps().Transactions {
 		if pn, ok := sess.(db.Pinner); ok {
@@ -478,16 +505,10 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 		}
 	}
 
-	if o.CreateTable {
-		stmts, err := sess.PlanTable(nil, &db.TableDef{Schema: o.Table.Schema, Name: o.Table.Name, Columns: def})
-		if err != nil {
+	if o.CreateTable && !mysqlish {
+		if err := create(); err != nil {
 			return err
 		}
-		if err := step(stmts, 0); err != nil {
-			return err
-		}
-		created = true
-		p.Batches = 0 // creating the table is not a data batch
 	}
 
 	var pk, setCols []string
@@ -497,24 +518,28 @@ func Run(ctx context.Context, sess db.Session, r io.Reader, o Options, progress 
 		}
 	}
 	if o.OnConflict == "update" || o.OnConflict == "replace" {
-		if dialect == "postgres" { // ON CONFLICT needs the key columns as its target
+		if dialect == "postgres" || mysqlish { // ON CONFLICT needs the key columns as its target; ON DUPLICATE KEY needs them to fire
 			cols, err := sess.Columns(ctx, o.Table)
 			if err != nil {
 				return err
 			}
+			var key []string
 			for _, c := range cols {
 				if c.PK {
-					pk = append(pk, c.Name)
+					key = append(key, c.Name)
 				}
 			}
-			if len(pk) == 0 {
+			if len(key) == 0 && !mysqlish {
 				return fmt.Errorf("on conflict %q: %s has no primary key", o.OnConflict, o.Table.Name)
 			}
 			// the conflict only fires for a row that carries the whole key; otherwise every row just inserts
-			for _, k := range pk {
+			for _, k := range key {
 				if !slices.Contains(setCols, k) {
 					return fmt.Errorf("on conflict %q: primary key column %q is not among the imported columns, so no row could ever conflict", o.OnConflict, k)
 				}
+			}
+			if !mysqlish {
+				pk = key
 			}
 		}
 	}
@@ -609,21 +634,47 @@ func (g *guarded) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// readAll reads r in chunks, checking ctx between them so a cancel is not ignored while a big file loads.
-func readAll(ctx context.Context, r io.Reader) ([]byte, error) {
-	var out []byte
-	buf := make([]byte, 1<<20)
+// sqlChunk is how much of a .sql file is read at a time (a variable so tests can use small chunks).
+var sqlChunk = 1 << 20
+
+// streamSQL reads r chunk by chunk and calls fn for every statement in order, without holding the whole file.
+// The last statement in the buffer may be cut off by the chunk boundary, so it is carried into the next chunk and
+// only run once more text shows it is complete (or at EOF). ctx is checked per statement and per read.
+// shortcut: the splitter restarts at the carried statement, so a MySQL DELIMITER set in an earlier chunk is forgotten.
+func streamSQL(ctx context.Context, r io.Reader, dialect string, fn func(text string) error) error {
+	buf := make([]byte, sqlChunk)
+	carry := ""
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
-		n, err := r.Read(buf)
-		out = append(out, buf[:n]...)
-		if err == io.EOF {
-			return out, nil
+		n, rerr := io.ReadFull(r, buf)
+		eof := rerr == io.EOF || rerr == io.ErrUnexpectedEOF
+		if rerr != nil && !eof {
+			return rerr
 		}
-		if err != nil {
-			return nil, err
+		text := carry + string(buf[:n])
+		stmts := db.Split(dialect, text)
+		run := stmts
+		carry = text
+		if !eof && len(stmts) > 0 {
+			run = stmts[:len(stmts)-1]
+			carry = text[stmts[len(stmts)-1].Start:]
+		} else if !eof {
+			run = nil
+		} else {
+			carry = ""
+		}
+		for _, s := range run {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := fn(s.Text); err != nil {
+				return err
+			}
+		}
+		if eof {
+			return nil
 		}
 	}
 }

@@ -159,6 +159,22 @@ func TestBuildSelectCount(t *testing.T) {
 	}
 }
 
+// T-P2-01: with no sort the pages follow the primary key, so an updated row stays on its page.
+func TestBuildSelectOrdersByKey(t *testing.T) {
+	q := RowQuery{ObjRef: ObjRef{Schema: "shop", Name: "items"}, Limit: 300, Offset: 300, Key: []string{"order_id", "line"}}
+	if sql, _, _ := BuildSelect(PG, q, nil); sql != `SELECT * FROM "shop"."items" ORDER BY "order_id", "line" LIMIT 300 OFFSET 300` {
+		t.Errorf("%s", sql)
+	}
+	q.Sort = []Sort{{Column: "total", Desc: true}} // the user's sort wins
+	if sql, _, _ := BuildSelect(PG, q, nil); sql != `SELECT * FROM "shop"."items" ORDER BY "total" DESC LIMIT 300 OFFSET 300` {
+		t.Errorf("%s", sql)
+	}
+	q.Sort, q.Key = nil, nil // no key: unordered as before
+	if sql, _, _ := BuildSelect(PG, q, nil); sql != `SELECT * FROM "shop"."items" LIMIT 300 OFFSET 300` {
+		t.Errorf("%s", sql)
+	}
+}
+
 func TestPlanSQL(t *testing.T) {
 	ref := ObjRef{Schema: "public", Name: "customers", Kind: KindTable}
 	ch := []Change{

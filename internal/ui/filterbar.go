@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -126,22 +127,17 @@ func (t *tableTab) filterInput(msg tea.Msg) tea.Cmd {
 		fb.focus, t.showFilters = false, false
 		t.saveState()
 		return nil
-	case "enter":
-		switch fb.field {
-		case ffColumn:
-			t.columnPicker(func(c string) { f.Column = c })
-		case ffOp:
-			t.operatorPicker(func(o string) { f.Op = o })
-		default:
-			return t.applyFilters()
+	case "enter": // applies from any field; Space opens the column / operator picker
+		return t.applyFilters()
+	case "tab", "shift+tab":
+		step := 1
+		if ks == "shift+tab" {
+			step = 3
 		}
-	case "tab":
-		fb.field = (fb.field + 1) % 4
-		if fb.field == ffValue {
-			t.syncEdit()
+		fb.field = (fb.field + step) % 4
+		if fb.field == ffOp && f.Column == db.RawColumn { // Raw SQL has no operator
+			fb.field = (fb.field + step) % 4
 		}
-	case "shift+tab":
-		fb.field = (fb.field + 3) % 4
 		if fb.field == ffValue {
 			t.syncEdit()
 		}
@@ -183,7 +179,17 @@ func (t *tableTab) filterInput(msg tea.Msg) tea.Cmd {
 			}
 		}
 	}
+	if fb.field == ffOp && fb.sel < len(*fs) && (*fs)[fb.sel].Column == db.RawColumn { // moved onto a Raw SQL row
+		fb.field = ffValue
+		t.syncEdit()
+	}
 	return nil
+}
+
+// filtersEdited is true when the bar holds edits the rows were not loaded with.
+func (t *tableTab) filtersEdited() bool {
+	a := t.applied()
+	return a.Or != t.filters.Or || !slices.Equal(a.Filters, t.filters.Filters)
 }
 
 // inlineArgs substitutes placeholders left to right, so "?" dialects keep their argument order.
@@ -228,11 +234,7 @@ func (t *tableTab) clearFilters() tea.Cmd {
 
 // exportFiltered is filter_export: the export dialog for this table with the applied filters.
 func (t *tableTab) exportFiltered() tea.Cmd {
-	// the filters on the bar, as the web does (no filter = the whole table); exportAction reads the applied set
-	was, had := t.appliedSet, t.hasApplied
-	t.markApplied()
-	defer func() { t.appliedSet, t.hasApplied = was, had }()
-	return t.ws.exportAction()
+	return t.ws.exportAction() // exportAction reads the applied set: the rows on screen (no filter = the whole table)
 }
 
 func (t *tableTab) showFilterSQL() tea.Cmd {
@@ -244,7 +246,7 @@ func (t *tableTab) showFilterSQL() tea.Cmd {
 	for _, c := range t.cols {
 		names = append(names, c.Name)
 	}
-	sql, err := db.WhereText(d, t.filters, names)
+	sql, err := db.WhereText(d, t.applied(), names) // the WHERE the rows on screen came from
 	if err != nil {
 		return t.ws.a.fail(err)
 	}
@@ -252,7 +254,10 @@ func (t *tableTab) showFilterSQL() tea.Cmd {
 	if sql == "" {
 		lines = []string{"(no active filters)"}
 	}
-	t.ws.a.push(&textViewDlg{title: "Filter SQL", lines: lines, actions: []viewAction{{Key: "c", Label: "c: copy", Do: func() tea.Cmd { return setClip(strings.Join(lines, "\n")) }}}})
+	if t.filtersEdited() {
+		lines = append(lines, "", "-- the filter bar has changes that are not applied (↵ in the bar applies them)")
+	}
+	t.ws.a.push(&textViewDlg{title: "Filter SQL", lines: lines, actions: []viewAction{{Key: "c", Label: "c: copy", Do: func() tea.Cmd { return setClip(lines[0]) }}}})
 	return nil
 }
 
@@ -264,7 +269,7 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 	if t.filters.Or {
 		join = "OR"
 	}
-	head := " " + th.Section.Render("Filters ("+join+")") + "   " + th.chips("↵", "apply", "Tab", "field", "M-n", "add", "M-d", "remove", "M-o", "and/or", "M-c", "clear", "M-e", "export", "M-s", "sql", "Esc", "hide")
+	head := " " + th.Section.Render("Filters ("+join+")") + "   " + th.chips("↵", "apply", "Tab", "field", "Space", "pick", "M-n", "add", "M-d", "remove", "M-o", "and/or", "M-c", "clear", "M-e", "export", "M-s", "sql", "Esc", "hide")
 	lines := []string{fit(head, W)}
 	fs := t.filters.Filters
 	start := 0
@@ -284,14 +289,18 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 		if f.Enabled {
 			chk = " ✓ "
 		}
-		focus := func(field int, s string) string { // dropdowns look like buttons, the focused one selected
+		focus := func(field int, s string) string { // dropdowns look like buttons, the focused one selected and bracketed (visible without colour)
 			if t.fb.focus && i == t.fb.sel && t.fb.field == field {
-				return th.SelCell.Render(s)
+				return th.SelCell.Render("[" + s[1:len(s)-1] + "]")
 			}
 			return th.TabIdle.Render(s)
 		}
+		op := " " + focus(ffOp, " "+f.Op+" ▾ ")
+		if f.Column == db.RawColumn { // the operator means nothing for raw SQL
+			op = ""
+		}
 		val := f.Value
-		valW := max(8, W-width(col)-width(f.Op)-16)
+		valW := max(8, W-width(col)-width(op)-11)
 		var valStr string
 		switch {
 		case t.fb.focus && i == t.fb.sel && t.fb.field == ffValue:
@@ -310,7 +319,7 @@ func (t *tableTab) filterView(th Theme, W int) []string {
 		if i == t.fb.sel && t.fb.focus {
 			mark = th.Accent.Render("▸") + " "
 		}
-		line := mark + focus(ffCheck, chk) + " " + focus(ffColumn, " "+col+" ▾ ") + " " + focus(ffOp, " "+f.Op+" ▾ ") + " " + valStr
+		line := mark + focus(ffCheck, chk) + " " + focus(ffColumn, " "+col+" ▾ ") + op + " " + valStr
 		lines = append(lines, fit(line, W))
 	}
 	return lines
@@ -396,6 +405,7 @@ func (t *tableTab) followFK() tea.Cmd {
 		nt := newTableTab(t.ws, t.ws.newID(), ref)
 		nt.filters = db.FilterSet{Filters: []db.Filter{{Column: fk.RefColumns[min(idx, len(fk.RefColumns)-1)], Op: "=", Value: plain(v), Enabled: true}}}
 		nt.showFilters = true
+		nt.markApplied() // load() reads the applied set: without this the tab shows every row under an `id = N` bar
 		return t.ws.addTab(nt)
 	}
 	return t.ws.a.say("%s is not a foreign key", name)

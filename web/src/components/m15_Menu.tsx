@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { MenuItem } from '../utils/m15_menus'
+import { Layer, MENU, atPoint } from './Layer'
 
 export type Entry = MenuItem & { disabled?: boolean }
 
@@ -27,10 +28,8 @@ export function ItemMenu({ x, y, items, label, onPick, onClose }: { x: number; y
     l.forEach((b, j) => { b.tabIndex = j === n ? 0 : -1 }); l[n]?.focus()
   }
   return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} aria-hidden />
-      <div ref={box} className="popover motion-safe:animate-pop fixed z-[41] min-w-[220px] max-h-[80vh] overflow-auto p-1.5 font-mono text-[12.5px]" role="menu" aria-label={label} onKeyDown={key}
-        style={{ left: Math.max(4, Math.min(x, window.innerWidth - 260)), top: Math.max(4, Math.min(y, window.innerHeight - Math.min(window.innerHeight * 0.8, 30 * items.length + 16) - 4)) }}>
+    <Layer onClose={onClose}>
+      <div ref={box} className={`${MENU} min-w-[220px]`} role="menu" aria-label={label} onKeyDown={key} style={atPoint(x, y, { width: 260, height: 30 * items.length + 16 })}>
         {items.map((it, i) => (
           <button key={it.action + it.label} role="menuitem" tabIndex={i === 0 ? 0 : -1} aria-disabled={it.disabled || undefined} title={it.disabled ? it.why : undefined}
             className={`menu-item ${it.disabled ? 'opacity-50 cursor-not-allowed' : ''} ${/^(Delete|Drop|Truncate)/.test(it.label) ? 'btn-danger' : ''}`}
@@ -38,6 +37,6 @@ export function ItemMenu({ x, y, items, label, onPick, onClose }: { x: number; y
             onClick={() => { if (it.disabled) return; onClose(); onPick(it) }}>{it.label}</button>
         ))}
       </div>
-    </>
+    </Layer>
   )
 }

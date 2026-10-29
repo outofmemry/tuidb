@@ -149,16 +149,7 @@ func (s *Server) schemaDiff(ss *session, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, bad("%v", err)
 	}
-	for i := range to {
-		to[i].Schema = req.From // the statements run against `from`, so a table is the same table in both
-		fks := append([]db.ForeignKey(nil), to[i].ForeignKeys...)
-		for k := range fks {
-			if fks[k].RefSchema == req.To {
-				fks[k].RefSchema = req.From
-			}
-		}
-		to[i].ForeignKeys = fks
-	}
+	tools.Rebase(to, req.From) // the statements run against `from`, so a table is the same table in both
 	var quote []func(string) string
 	if d, ok := db.DialectFor(sess.Caps().Dialect); ok {
 		quote = append(quote, d.Quote)

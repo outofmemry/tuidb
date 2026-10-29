@@ -19,7 +19,7 @@ export const listOf = (menus: Record<string, MenuItem[]> | undefined, name: 'gri
 // the header tooltip (M15.6): type, nullability, default and key, from the table definition
 export function columnTip(c: Pick<Column, 'Name' | 'Type' | 'Nullable' | 'Default' | 'HasDef' | 'PK'> & { FK?: Column['FK'] }): string {
   const key = c.PK ? 'primary key' : c.FK ? `foreign key to ${c.FK.RefTable}(${c.FK.RefColumns.join(', ')})` : 'no key'
-  return `${c.Name}\n${c.Type} · ${c.Nullable ? 'nullable' : 'not null'} · ${c.HasDef ? 'default ' + c.Default : 'no default'} · ${key}`
+  return `${c.Name}\n${c.Type}, ${c.Nullable ? 'nullable' : 'not null'}, ${c.HasDef ? 'default ' + c.Default : 'no default'}, ${key}`
 }
 // "Copy column definition": the column as it would sit in a CREATE TABLE
 export function columnDef(c: Pick<Column, 'Name' | 'Type' | 'Nullable' | 'Default' | 'HasDef' | 'PK'>): string {

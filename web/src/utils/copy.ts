@@ -21,7 +21,8 @@ export function formatRows(fmt: CopyFormat, cols: ResultCol[], rows: Cells, csv:
   const nl = csv.LineBreak || '\n'
   switch (fmt) {
     case 'Plain': return rows.map((r) => r.map((v) => v ?? 'NULL').join('\t')).join('\n')
-    case 'JSON': return JSON.stringify(rows.map((r) => Object.fromEntries(names.map((n, i) => [n, r[i]]))), null, 2)
+    // written by hand: an object would move integer-like column names ("2024") to the front
+    case 'JSON': return rows.length ? `[\n${rows.map((r) => `  {\n${names.map((n, i) => `    ${JSON.stringify(n)}: ${JSON.stringify(r[i] ?? null)}`).join(',\n')}\n  }`).join(',\n')}\n]` : '[]'
     case 'HTML': return `<table>\n<tr>${names.map((n) => `<th>${esc(n)}</th>`).join('')}</tr>\n${rows.map((r) => `<tr>${r.map((v) => `<td>${v === null ? '' : esc(v)}</td>`).join('')}</tr>`).join('\n')}\n</table>`
     case 'Markdown Table': return [`| ${names.map(md).join(' | ')} |`, `| ${names.map(() => '---').join(' | ')} |`, ...rows.map((r) => `| ${r.map(md).join(' | ')} |`)].join('\n')
     case 'CSV': return rows.map((r) => csvLine(r, csv)).join(nl)
@@ -35,4 +36,6 @@ export function formatRows(fmt: CopyFormat, cols: ResultCol[], rows: Cells, csv:
   }
 }
 
-export const copyText = (t: string) => navigator.clipboard.writeText(t)
+// a refused write (no permission, no secure context) says what to do instead of the browser's DOM text
+const NO_COPY = 'Could not copy to the clipboard. Select the text and copy it yourself.'
+export const copyText = (t: string) => (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => { throw Object.assign(new Error(NO_COPY), { toString: () => NO_COPY }) }) // callers show String(e) or e.message

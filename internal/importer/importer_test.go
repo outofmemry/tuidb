@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -538,6 +540,122 @@ func TestMySQLCreateTableRollbackMessage(t *testing.T) { // P2-46
 		stays := strings.Contains(err.Error(), "the new table stays")
 		if stays != create || (!create && !strings.Contains(err.Error(), "no rows were imported")) {
 			t.Errorf("create=%v: %v", create, err)
+		}
+	}
+}
+
+// mysqlGuard mimics the real MySQL pinned session: Apply refuses DDL, as internal/db/mysql/pin.go does.
+type mysqlGuard struct {
+	*fake
+	log *[]string
+}
+
+func (m mysqlGuard) Caps() db.Capabilities {
+	return db.Capabilities{Dialect: "mysql", Transactions: true}
+}
+func (m mysqlGuard) Pin(context.Context) (db.Session, error) { return mysqlGuardPin{m}, nil }
+func (m mysqlGuard) Apply(_ context.Context, s []db.Statement) error {
+	*m.log = append(*m.log, "plain:"+s[0].Text)
+	return nil
+}
+
+type mysqlGuardPin struct{ mysqlGuard }
+
+func (p mysqlGuardPin) Exec(_ context.Context, stmt string, _ int) (*db.Result, error) {
+	*p.log = append(*p.log, stmt)
+	return &db.Result{}, nil
+}
+func (p mysqlGuardPin) Close() error { return nil }
+func (p mysqlGuardPin) Apply(_ context.Context, s []db.Statement) error {
+	if strings.HasPrefix(s[0].Text, "CREATE") {
+		return errors.New("structure changes are DDL, which MySQL commits implicitly together with your open transaction: release the pin first")
+	}
+	*p.log = append(*p.log, "pin:"+strings.Fields(s[0].Text)[0])
+	return nil
+}
+
+func TestMySQLCreateTableRunsBeforePin(t *testing.T) { // NEW-1
+	log := []string{}
+	f := mysqlGuard{fake: &fake{}, log: &log}
+	if err := runCSV(f, "a\n1\n", Options{Header: true, CreateTable: true, Driver: config.MySQL}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(log, "|"); got != "plain:CREATE TABLE t|BEGIN|pin:INSERT|COMMIT" {
+		t.Errorf("%s", got)
+	}
+}
+
+// countReader counts the bytes handed out.
+type countReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+func TestSQLImportStreams(t *testing.T) { // IO-7
+	old := sqlChunk
+	sqlChunk = 16
+	defer func() { sqlChunk = old }()
+	var want []string
+	var sb strings.Builder
+	for i := 0; i < 50; i++ {
+		s := fmt.Sprintf("insert into t values ('a;%d')", i)
+		want = append(want, s)
+		sb.WriteString(s + ";\n")
+	}
+	f := &fake{dialect: "postgres"}
+	if err := Run(context.Background(), f, strings.NewReader(sb.String()), Options{Source: "sql", Batch: 7}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, b := range f.applied {
+		for _, s := range b {
+			got = append(got, s.Text)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %d statements, want %d: %q", len(got), len(want), got)
+	}
+	// preview stops reading once it has its rows
+	cr := &countReader{r: strings.NewReader(sb.String())}
+	_, rows, err := Preview(cr, Options{Source: "sql"}, 2)
+	if err != nil || len(rows) != 2 || rows[1][0] != want[1] || cr.n >= sb.Len()/2 {
+		t.Errorf("preview: %v %v read %d of %d", err, rows, cr.n, sb.Len())
+	}
+	// a cancel in the middle of the file stops the import
+	ctx, cancel := context.WithCancel(context.Background())
+	cf := &cancelFake{fake: &fake{dialect: "postgres"}, cancel: cancel}
+	err = Run(ctx, cf, strings.NewReader(sb.String()), Options{Source: "sql", Batch: 1}, nil)
+	if !errors.Is(err, context.Canceled) || len(cf.applied) != 1 {
+		t.Errorf("%v %d", err, len(cf.applied))
+	}
+	if _, _, err := PreviewContext(ctx, strings.NewReader(sb.String()), Options{Source: "sql"}, 5); !errors.Is(err, context.Canceled) {
+		t.Errorf("preview cancel: %v", err)
+	}
+}
+
+type cancelFake struct {
+	*fake
+	cancel func()
+}
+
+func (c *cancelFake) Apply(ctx context.Context, s []db.Statement) error {
+	err := c.fake.Apply(ctx, s)
+	c.cancel()
+	return err
+}
+
+func TestMySQLOnConflictNeedsKeyColumn(t *testing.T) { // IO-9
+	for _, mode := range []string{"update", "replace"} {
+		f := &fake{dialect: "mysql"}
+		err := runCSV(f, "v\na\n", Options{Header: true, OnConflict: mode, Driver: config.MySQL})
+		if err == nil || !strings.Contains(err.Error(), `"id"`) || len(f.applied) != 0 {
+			t.Errorf("%s: %v", mode, err)
 		}
 	}
 }

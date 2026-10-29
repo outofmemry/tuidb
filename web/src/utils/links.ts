@@ -32,3 +32,17 @@ export function parseFilter(raw: unknown): Filters | undefined {
     return fs.length ? { Filters: fs, Or: !!v.Or } : undefined
   } catch { return undefined }
 }
+
+// Token hand-off to a window this tab opens (WU-5): the token goes through storage, never the address bar or history.
+// The storage is any Storage-like object (localStorage in the browser, a Map in tests); the entry lives 15 seconds.
+export const HANDOFF_KEY = 'webtuidb-handoff'
+type StorageLike = { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
+export function handoffPut(st: StorageLike, token: string, now = Date.now()): void {
+  if (token) st.setItem(HANDOFF_KEY, JSON.stringify({ t: token, at: now }))
+}
+export function handoffTake(st: StorageLike, now = Date.now()): string {
+  const raw = st.getItem(HANDOFF_KEY)
+  if (raw === null) return ''
+  st.removeItem(HANDOFF_KEY)
+  try { const v = JSON.parse(raw); return v && typeof v.t === 'string' && now - Number(v.at) < 15_000 ? v.t : '' } catch { return '' }
+}

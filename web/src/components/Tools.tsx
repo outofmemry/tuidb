@@ -7,6 +7,7 @@ import { filterMenu, whyNot, type MenuItem } from '../utils/menus'
 import { enterSubmits, previewLength, sortProcs, type ProcRow } from '../utils/m13'
 import { CellEditor } from './CellEditor'
 import { Dialog, GateFields, ask, confirm } from './Dialogs'
+import { TabMenu } from './Extras'
 import { Select } from './Select'
 import { askNotify, desktopNotify } from '../utils/theme'
 
@@ -318,7 +319,7 @@ export function ProcessDialog({ sid, info, onClose, notify }: { sid: string; inf
   const COLS = ['id', 'user', 'db', 'state', 'elapsed_ms', 'query'].map((name) => ({ name, type: 'text' }))
   const copyRows = (f: CopyFormat) => { setCopyAs(false); copyText(formatRows(f, COLS, rowsOf(chosen), meta?.config.csv ?? { Delimiter: ',', Quote: '"', LineBreak: '\n', Decimal: '.' }, info.caps.Dialect, 'processes')).then(() => notify(`Copied ${chosen.length} processes as ${f}`), (e) => notify(msg(e))) }
   const exportPage = () => saveBlob(new Blob([formatRows('CSV with Header', COLS, rowsOf(chosen), meta?.config.csv ?? { Delimiter: ',', Quote: '"', LineBreak: '\n', Decimal: '.' }, info.caps.Dialect) + '\n'], { type: 'text/csv;charset=utf-8' }), 'processes.csv')
-  const askKill = async (ids: string[]) => { if (ids.length && await confirm(ids.length === 1 ? `Kill process ${ids[0]}?` : `Kill ${ids.length} processes?`)) send(ids, true) }
+  const askKill = async (ids: string[]) => { if (ids.length && await confirm(ids.length === 1 ? `Kill process ${ids[0]}?` : `Kill ${ids.length} processes?`, undefined, 'Kill')) send(ids, true) }
   const killSelected = () => (sel.size ? askKill([...sel]) : notify('Tick the processes to kill first'))
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const run = (a: string, id?: string) => {
@@ -357,11 +358,7 @@ export function ProcessDialog({ sid, info, onClose, notify }: { sid: string; inf
       {err && <div className="text-del mt-2" role="alert">{err}</div>}
       {look !== null && <CellEditor col="Query" readOnly value={look} onDone={() => setLook(null)} />}
       {copyAs && <CopyAsDialog onPick={copyRows} onClose={() => setCopyAs(false)} />}
-      {ctx && <>
-        <div className="fixed inset-0 z-[60]" onMouseDown={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null) }} />
-        <div className="popover fixed z-[61] min-w-[170px] py-1 flex flex-col motion-safe:animate-pop" style={{ left: Math.min(ctx.x, window.innerWidth - 190), top: Math.min(ctx.y, window.innerHeight - 40 - menu.length * 26) }} role="menu" aria-label="Process" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setCtx(null) } }}>
-          {menu.map((it, k) => <button key={it.action} className="menu-item" role="menuitem" autoFocus={k === 0} disabled={!!whyNot(it)} title={whyNot(it)} onClick={() => run(it.action, ctx.id)}>{it.label}</button>)}
-        </div></>}
+      {ctx && <TabMenu x={ctx.x} y={ctx.y} label="Process" onClose={() => setCtx(null)} items={menu.map((it): [string, () => void, string?] => [it.label, () => run(it.action, ctx.id), whyNot(it)])} />}
       <div className={ACTIONS}>
         <button onClick={() => q.refetch()}>Refresh</button>
         {procs.length > 0 && <>

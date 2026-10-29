@@ -17,7 +17,7 @@ var Dialogs = []Dialog{
 	{"Quick filter modes", "func (t *tableTab) quickFilter(", "function quickFilter("},
 	{"Page settings (limit and offset)", "func (t *tableTab) pageSettings(", "export function PageDialog("},
 	{"Count rows exactly", "func (t *tableTab) loadCountExact(", "count_exact: () => setExact("},
-	{"Clone with content", "func (s *sidebar) cloneDialog(", "Duplicate the content too?"},
+	{"Clone with content", "func (s *sidebar) cloneDialog(", "Copy the rows too, or only the structure?"},
 	{"Truncate options (Cascade, Restart identity)", "Restart identity", "Restart identity"},
 	{"Delete / drop with the typed name", "Type its name", "Type its name to confirm"},
 	{"Safe-mode gate with statements and password", "func (w *Workspace) gate(", "export function PlanDialog("},

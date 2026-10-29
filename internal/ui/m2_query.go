@@ -107,7 +107,31 @@ func (t *queryTab) editVars() tea.Cmd {
 	if len(t.paramNamesAs(stmts, format)) == 0 {
 		return t.ws.a.say("no parameters in the editor (format: %s)", t.paramFormat())
 	}
-	return t.askVars(stmts, format, func(map[string]string, string) tea.Cmd { return t.ws.a.say("variables saved") })
+	// Enter saves the values and runs with them bound, also with [editor] query_params off: the user filled the dialog
+	return t.askVars(stmts, format, func(vals map[string]string, f string) tea.Cmd {
+		run := stmts
+		if t.ws.a.d.Cfg.Editor.RunDefault != "all" {
+			run = t.currentStmts()
+		}
+		if len(run) == 0 {
+			return t.ws.a.say("variables saved (nothing to run at the cursor)")
+		}
+		if t.running {
+			return t.ws.a.say("variables saved; a query is already running")
+		}
+		return t.runBound(t.bindAs(run, vals, f))
+	})
+}
+
+// paramsOffHint: with [editor] query_params off, a run whose statements use variables the Variables dialog knows
+// says how to bind them, instead of only failing on the ":".
+func (t *queryTab) paramsOffHint(stmts []db.Stmt) tea.Cmd {
+	for _, n := range t.paramNames(stmts) {
+		if _, ok := t.ws.vars[n]; ok {
+			return t.ws.a.say("Parameters are off: set [editor] query_params = true to bind :name on every run")
+		}
+	}
+	return nil
 }
 
 // ---- beautify / find --------------------------------------------------------------------
@@ -173,6 +197,8 @@ func (t *queryTab) resultOnly(name string) tea.Cmd {
 	tbl := "result"
 	if rv.ref != nil {
 		tbl = rv.ref.Name
+	} else if _, table, ok := editableTable(rv.stmt, t.ws.caps.Dialect); ok { // a single-table SELECT without its key (T-P3-19)
+		tbl = table
 	}
 	switch name {
 	case "chart":

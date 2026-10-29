@@ -556,7 +556,7 @@ func (s *Server) importPreview(ss *session, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	cols, rows, err := importer.Preview(in, o, 100)
+	cols, rows, err := importer.PreviewContext(r.Context(), in, o, 100) // IO-7: a closed request stops the read
 	if err != nil {
 		return nil, bad("%v", err)
 	}

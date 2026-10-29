@@ -65,6 +65,7 @@ type Workspace struct {
 	jobCancel    context.CancelFunc // the running export / import / search, nil when none
 	jobs         []*jobEntry        // the jobs centre: running and finished jobs until dismissed (m15_jobs.go)
 	jobFile      string             // the file the next job writes, for "Open folder"
+	lastImport   map[string]string  // the import dialog's last answers: reopening after a failure keeps them
 	nextJob      int
 	focusConsole bool // the console pane has the keyboard (focus_down)
 	zen          bool // toggle_panels: sidebar, console, row detail and status line hidden
@@ -241,6 +242,9 @@ func (w *Workspace) asyncCancel(tab int, f func(ctx context.Context, sess db.Ses
 func (w *Workspace) handle(m wsMsg) tea.Cmd {
 	if _, apply := m.msg.(applyDoneMsg); !apply && m.gen != w.gen {
 		if qd, ok := m.msg.(queryDoneMsg); ok { // the run it belonged to is gone: free the tab instead of leaving it "running"
+			if qd.pinned != nil {
+				go qd.pinned.Close()
+			}
 			for _, t := range w.tabs {
 				if q, ok := t.(*queryTab); ok && q.ID() == m.tab && q.batch == qd.batch {
 					return q.Cancel()
@@ -259,6 +263,9 @@ func (w *Workspace) handle(m wsMsg) tea.Cmd {
 		if t.ID() == m.tab {
 			return t.Handle(m.msg)
 		}
+	}
+	if qd, ok := m.msg.(queryDoneMsg); ok && qd.pinned != nil {
+		go qd.pinned.Close()
 	}
 	return nil // tab closed meanwhile
 }
@@ -655,9 +662,7 @@ func (w *Workspace) action(name string) tea.Cmd {
 		return w.newQueryTab("")
 	case "close_tab":
 		if t := w.tab(); t != nil && t.Dirty() {
-			i := w.cur
-			w.a.push(&confirmDlg{title: "Close " + t.Title() + " with unsaved changes?", lines: []string{"Pending edits in this tab will be lost."}, yes: "Close", danger: true,
-				onYes: func() tea.Cmd { w.closeTab(i); return nil }})
+			w.askClose(t, func() tea.Cmd { w.closeTab(indexOf(w.tabs, t)); return nil })
 			return nil
 		}
 		w.closeTab(w.cur)
@@ -791,7 +796,7 @@ func (w *Workspace) preview() tea.Cmd {
 	}
 	var lines []string
 	for _, s := range stmts {
-		lines = append(lines, s.Shown()+";", "")
+		lines = append(append(lines, sqlLines(s.Shown()+";")...), "")
 	}
 	w.a.push(&textViewDlg{title: fmt.Sprintf("Preview: %d statement(s)", len(stmts)), lines: lines,
 		actions: []viewAction{{Key: "enter", Label: "Enter: commit", Do: w.commit}}})
@@ -930,6 +935,20 @@ func (w *Workspace) switchDatabase(name string) tea.Cmd {
 type dbSwitchedMsg struct {
 	name string
 	err  error
+}
+
+// useSchema shows name in the sidebar and makes it the session's current schema (db.SchemaSetter), so the SQL
+// editor, search in database, completion and the schema diff work in the schema on screen.
+func (w *Workspace) useSchema(name string) tea.Cmd {
+	if set, ok := w.sess.(db.SchemaSetter); ok && name != w.sess.CurrentSchema() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := set.SetSchema(ctx, name); err != nil {
+			return w.a.fail(err)
+		}
+	}
+	w.sb.schema, w.sb.sel, w.sb.top = name, 0, 0
+	return w.sb.load()
 }
 
 // ---- Open Anything ----------------------------------------------------------------------
@@ -1195,6 +1214,9 @@ func (w *Workspace) tabLabels(g int) []tabLabel {
 		if _, ok := t.(*queryTab); ok {
 			icon = "≡"
 		}
+		if tt, ok := t.(*tableTab); ok { // a view gets the sidebar's view icon (T-P3-14)
+			icon = objIcon(tt.ref.Kind)
+		}
 		title := w.tabTitle(t)
 		if t.Dirty() {
 			title += " ●"
@@ -1229,9 +1251,13 @@ func (w *Workspace) emptyView(th Theme, W, H int) string {
 	pre := keymap.Display(w.a.d.Keys.Prefix)
 	k := func(action string) string { return pre + " " + keymap.Display(firstKey(w.a.d.Keys, action)) }
 	var lines []string
+	objs := th.Dim.Render(fmt.Sprintf("%d objects", len(w.sb.objs)))
+	if w.sb.err != "" { // the list failed: "0 objects" would read as an empty database (T-P3-20)
+		objs = th.Err.Render("Could not load objects")
+	}
 	lines = append(lines, "",
 		"   "+th.Title.Render(w.conn.Name)+"  "+th.DriverStyle(w.conn.Driver).Render(w.conn.Driver)+th.Dim.Render("  "+w.sess.ServerInfo()),
-		"   "+th.Dim.Render(w.sess.CurrentDatabase()+"  ·  "+fmt.Sprintf("%d objects", len(w.sb.objs))),
+		"   "+th.Dim.Render(w.sess.CurrentDatabase()+"  ·  ")+objs,
 		"",
 		"   "+th.Section.Render("Get started"),
 		"   "+th.Hints("↵", "open the highlighted table in the sidebar"),

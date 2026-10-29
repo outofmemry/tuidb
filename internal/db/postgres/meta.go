@@ -281,9 +281,21 @@ func (s *session) tableDDL(ctx context.Context, ref db.ObjRef, qn string) (strin
 	if len(cols) == 0 {
 		return "", fmt.Errorf("table %s not found", ref.Name)
 	}
-	var parts []string
+	var parts, pre, post []string
 	for _, c := range cols {
 		parts = append(parts, "  "+columnSQL(c))
+		if c.Extra != "serial" {
+			continue
+		}
+		// the serial's own sequence: created first (dropping the table drops it), owned by the column after, like pg_dump
+		seq, err := s.strings(ctx, `SELECT pg_get_serial_sequence($1, $2)`, qn, c.Name)
+		if err != nil {
+			return "", err
+		}
+		for _, sq := range seq {
+			pre = append(pre, "CREATE SEQUENCE IF NOT EXISTS "+sq+";")
+			post = append(post, "ALTER SEQUENCE "+sq+" OWNED BY "+qn+"."+ident(c.Name)+";")
+		}
 	}
 	cons, err := s.strings(ctx, `SELECT 'CONSTRAINT ' || quote_ident(con.conname) || ' ' || pg_get_constraintdef(con.oid)
 		FROM pg_constraint con JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -308,7 +320,7 @@ func (s *session) tableDDL(ctx context.Context, ref db.ObjRef, qn string) (strin
 	if err != nil {
 		return "", err
 	}
-	return strings.Join(append([]string{ddl + ";"}, idx...), "\n"), nil
+	return strings.Join(append(append(pre, ddl+";"), append(idx, post...)...), "\n"), nil
 }
 
 func (s *session) sequenceDDL(ctx context.Context, ref db.ObjRef, qn string) (string, error) {

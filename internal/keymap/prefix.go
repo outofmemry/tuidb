@@ -10,6 +10,7 @@ import (
 type Map struct {
 	Prefix   string
 	bindings []Binding
+	warnings []string
 }
 
 // Build merges user overrides onto the defaults. prefix and overrides use the
@@ -75,25 +76,24 @@ func Build(prefix string, overrides map[string][]string, extra ...Binding) (*Map
 	// A key the user binds wins over defaults: a global user binding frees that key in every
 	// context, a context binding frees it in that context. Otherwise a default such as grid "x"
 	// would silently shadow commit="x".
+	var lost []Binding         // defaults whose key a user binding took
+	by := map[string]Binding{} // lost action -> the user binding that took its key
 	taken := func(d Binding) bool {
 		for _, u := range user {
 			if u.Key == d.Key && u.NoPrefix == d.NoPrefix && (u.Context == Global || u.Context == d.Context) {
+				lost, by[d.Action] = append(lost, d), u
 				return true
 			}
 		}
 		return false
 	}
-	for _, b := range DefaultBindings() {
-		if _, over := overrides[b.Action]; !over && !taken(b) {
-			m.bindings = append(m.bindings, b)
-		}
-	}
-	for _, b := range extra {
+	for _, b := range append(DefaultBindings(), extra...) {
 		if _, over := overrides[b.Action]; !over && !taken(b) {
 			m.bindings = append(m.bindings, b)
 		}
 	}
 	m.bindings = append(m.bindings, user...)
+	m.warnings = lostWarnings(m.bindings, lost, by)
 	if err := m.validate(); err != nil {
 		return nil, err
 	}
@@ -118,6 +118,12 @@ func BuildChecked(prefix string, overrides map[string][]string, extra ...Binding
 	var ok []Binding
 	for _, b := range extra {
 		cand := append(append([]Binding(nil), ok...), b)
+		// the other extras with a [keys] override must be known too, or their override is "unknown action" (P1-05)
+		for _, k := range known {
+			if k.Action != b.Action && !hasAction(cand, k.Action) {
+				cand = append(cand, k)
+			}
+		}
 		nm, e := Build(prefix, overrides, cand...)
 		if e == nil {
 			found := false
@@ -137,6 +143,44 @@ func BuildChecked(prefix string, overrides map[string][]string, extra ...Binding
 		ok, m = cand, nm
 	}
 	return m, conflicts, nil
+}
+
+// lostWarnings says, per action, which [keys] entry took its key (T-P2-06): the settings dialog refuses such an
+// edit (TakenFrom); a hand-written config.toml gets this warning at start and in `webtuidb -keys`.
+func lostWarnings(bindings, lost []Binding, by map[string]Binding) []string {
+	var out, order []string
+	ctxs := map[string][]string{}
+	for _, b := range lost {
+		if ctxs[b.Action] == nil {
+			order = append(order, b.Action)
+		}
+		ctxs[b.Action] = append(ctxs[b.Action], b.Context)
+	}
+	for _, a := range order {
+		u, where := by[a], strings.Join(ctxs[a], ", ")
+		k := Display(u.Key)
+		if u.NoPrefix {
+			k = "-n " + k
+		}
+		msg := fmt.Sprintf("[keys] %s = %q takes the key from %s (%s); %s is now unbound", u.Action, k, a, where, a)
+		if hasAction(bindings, a) {
+			msg += " in " + where
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// Warnings are the actions a [keys] override left without a key, one line each.
+func (m *Map) Warnings() []string { return m.warnings }
+
+func hasAction(bs []Binding, action string) bool {
+	for _, x := range bs {
+		if x.Action == action {
+			return true
+		}
+	}
+	return false
 }
 
 func descOf(action string) string {

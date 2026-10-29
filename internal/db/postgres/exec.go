@@ -28,7 +28,28 @@ func (s *session) Exec(ctx context.Context, stmt string, limit int) (*db.Result,
 		s.cols = map[string][]string{}
 		s.colMu.Unlock()
 	}
-	return res, err
+	return res, withPosition(err, stmt, stmt)
+}
+
+// withPosition adds where in stmt the server found the error ("at line 2, column 15"): PostgreSQL reports a 1-based
+// character offset into sent, which may wrap stmt (a paged SELECT).
+func withPosition(err error, sent, stmt string) error {
+	var pe *pgconn.PgError
+	if !errors.As(err, &pe) || pe.Position <= 0 {
+		return err
+	}
+	pos := int(pe.Position) - 1
+	if i := strings.Index(sent, stmt); i > 0 {
+		pos -= len([]rune(sent[:i]))
+	}
+	r := []rune(stmt)
+	if pos < 0 || pos > len(r) {
+		return err
+	}
+	before := string(r[:pos])
+	line := strings.Count(before, "\n") + 1
+	col := len([]rune(before[strings.LastIndexByte(before, '\n')+1:])) + 1
+	return fmt.Errorf("%w at line %d, column %d", err, line, col)
 }
 
 func (s *session) run(ctx context.Context, stmt string, args []any, limit int, dirty bool) (*db.Result, error) {
@@ -257,11 +278,46 @@ func searchable(typ string) bool {
 	return true
 }
 
+// pkey returns the primary key columns in key order (cached with the filter columns, so DDL clears it).
+// A catalog without pg_constraint (Vertica) just gives no key: the browse stays unordered.
+func (s *session) pkey(ctx context.Context, ref db.ObjRef) []string {
+	key := "pk\x00" + ref.Schema + "." + ref.Name
+	s.colMu.Lock()
+	pk, ok := s.cols[key]
+	s.colMu.Unlock()
+	if ok {
+		return pk
+	}
+	pk = []string{}
+	err := s.query(ctx, `SELECT a.attname::text FROM pg_constraint k JOIN pg_class c ON c.oid = k.conrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY (k.conkey)
+		WHERE k.contype = 'p' AND n.nspname = $1 AND c.relname = $2 ORDER BY array_position(k.conkey, a.attnum)`,
+		[]any{ref.Schema, ref.Name}, func(r pgx.Rows) error {
+			var n string
+			err := r.Scan(&n)
+			pk = append(pk, n)
+			return err
+		})
+	if err != nil {
+		if ctx.Err() != nil { // cancelled: the browse fails anyway, do not remember "no key"
+			return nil
+		}
+		pk = []string{}
+	}
+	s.colMu.Lock()
+	s.cols[key] = pk
+	s.colMu.Unlock()
+	return pk
+}
+
 func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 	q.ObjRef = s.ref(q.ObjRef)
 	cols, err := s.filterCols(ctx, q)
 	if err != nil {
 		return nil, err
+	}
+	if len(q.Sort) == 0 && q.Key == nil {
+		q.Key = s.pkey(ctx, q.ObjRef)
 	}
 	sql, args, err := db.BuildSelect(db.PG, q, cols)
 	if err != nil {
@@ -360,7 +416,7 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 					tx.Rollback(rctx)
 					cancel()
 				}
-				return fmt.Errorf("apply %q: %w", firstLine(st.Shown()), err)
+				return fmt.Errorf("%w\nStatement: %s", err, firstLine(st.Shown()))
 			}
 		}
 		if tx != nil {

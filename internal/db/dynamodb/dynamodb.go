@@ -239,7 +239,7 @@ func (drv) Open(ctx context.Context, c config.Connection, dial db.DialFunc) (db.
 	}
 	for _, b := range c.Bootstrap {
 		if _, err := s.Exec(ctx, b, 0); err != nil {
-			return nil, fmt.Errorf("bootstrap %q: %w", b, err)
+			return nil, fmt.Errorf("bootstrap (%s): %w", b, err)
 		}
 	}
 	return s, nil

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -153,6 +155,17 @@ func (s *Queries) save(folder, name string, keywords []string, sql string, overw
 	}
 	if strings.ContainsAny(name+strings.Join(keywords, ","), "\r\n") { // a newline would end the "-- name:" comment and leave live SQL
 		return Query{}, errors.New("a query name and its keywords cannot contain a line break")
+	}
+	// "reports/by status" saves "by status" in the folder reports (below folder, if one is given)
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		dir, base := name[:i], name[i+1:]
+		if strings.HasPrefix(name, "/") || slices.Contains(strings.Split(dir, "/"), "..") {
+			return Query{}, fmt.Errorf("invalid query folder %q", dir)
+		}
+		if strings.TrimSpace(base) == "" {
+			return Query{}, errors.New("a saved query needs a name")
+		}
+		folder, name = path.Join(folder, dir), base
 	}
 	rel := filepath.Join(filepath.FromSlash(folder), fileName(name))
 	p, err := s.abs(rel)

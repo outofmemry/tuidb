@@ -1,5 +1,6 @@
 // Milestone 3 tabs: ER diagram, metrics board, AI assistant.
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Layer, MENU, at as place } from './Layer'
 import { useQuery } from '@tanstack/react-query'
 import { api, download, saveBlob, watchJob, type BoardInfo, type BoardPanel, type Chat, type ChatSummary, type Meta, type DiagramTable, type ObjRef, type PanelOut, type Plan, type SessionInfo } from '../utils/api'
 import { copyText } from '../utils/copy'
@@ -91,6 +92,7 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
   const [err, setErr] = useState('')
   const [ranAt, setRanAt] = useState<Date | null>(null) // M15.13 status: when the board last refreshed and which panels failed
   const [errsOpen, setErrsOpen] = useState(false)
+  const errsBtn = useRef<HTMLButtonElement>(null)
   const [opts, setOpts] = useState<Record<string, string[]>>({}) // query-loaded dropdown options by panel title
   const [fmts, setFmts] = useState<Record<string, string>>({})
   const [layout, setLayoutState] = useState<Layout>({ order: [], span: {}, h: {} })
@@ -192,11 +194,11 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
         <button onClick={() => { run(); loadOpts() }} disabled={!board}>Refresh</button>
         {ranAt && <span className="text-ink-2 text-[12px]" role="status">Updated {ranAt.toLocaleTimeString()}</span>}
         {failed.length > 0 && <span className="relative">
-          <button className="btn-danger" aria-expanded={errsOpen} aria-haspopup="true" onClick={() => setErrsOpen(!errsOpen)}>{failed.length} error{failed.length === 1 ? '' : 's'}</button>
-          {errsOpen && <div className="popover absolute left-0 top-full mt-1 z-30 w-[min(420px,90vw)] max-h-[40vh] overflow-auto p-2 text-[12px] motion-safe:animate-pop" role="dialog" aria-label="Panel errors" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setErrsOpen(false) } }}>
+          <button ref={errsBtn} className="btn-danger" aria-expanded={errsOpen} aria-haspopup="true" onClick={() => setErrsOpen(!errsOpen)}>{failed.length} error{failed.length === 1 ? '' : 's'}</button>
+          {errsOpen && <Layer onClose={() => setErrsOpen(false)}><div className={`${MENU} w-[min(420px,90vw)] p-2 text-[12px]`} style={errsBtn.current ? place(errsBtn.current.getBoundingClientRect(), { width: 420, height: 300 }) : undefined} role="dialog" aria-label="Panel errors" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setErrsOpen(false) } }}>
             {failed.map((p) => <div key={p.title} className="mb-1.5"><b className="font-medium">{p.title}</b><div className="text-del whitespace-pre-wrap">{p.error}</div></div>)}
             <button className="btn-ghost" autoFocus onClick={() => setErrsOpen(false)}>Close</button>
-          </div>}
+          </div></Layer>}
         </span>}
         {actions.map((a) => a.Kind === 'button'
           ? <button key={a.Title} className="btn-primary" onClick={() => runPanel(a.Target ?? '')} title={`Runs the panel ${a.Target}`}>{a.Title}</button>
@@ -379,7 +381,7 @@ export function AssistantTab({ sid, onRun, notify }: { sid: string; onRun: (sql:
   }
   const run = async (m: Msg, sql: string) => {
     const b = m.blocks?.find((x) => x.sql === sql)
-    if (!b?.readOnly && !(await confirm('This statement changes data or structure. Open it in a query tab and run it?'))) return
+    if (!b?.readOnly && !(await confirm('This statement changes data or structure. Open it in a query tab and run it?', undefined, 'Open and run'))) return
     onRun(sql)
   }
   return (
@@ -440,11 +442,12 @@ function ChatHistory({ base, current, onOpen, onClose, onDeleted }: { base: stri
     return () => clearTimeout(t)
   }, [q, base])
   const del = async (c: ChatSummary) => {
-    if (!(await confirm(`Delete the chat "${c.Title || 'untitled'}"?`))) return
+    if (!(await confirm(`Delete the chat "${c.Title || 'untitled'}"?`, undefined, 'Delete'))) return
     try { await api('DELETE', `${base}/${encodeURIComponent(c.ID)}`); setList((l) => l && l.filter((x) => x.ID !== c.ID)); onDeleted(c.ID) } catch (e) { setErr(msg(e)) }
   }
   return (
     <aside className="absolute right-0 top-0 bottom-0 w-[min(360px,100%)] z-20 bg-panel border-l border-rule flex flex-col motion-safe:animate-pop" role="dialog" aria-label="Chat history" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}>
+      <h2 className="m-0 px-2.5 pt-2.5 text-[14px] font-medium">Chat history</h2>
       <div className="flex items-center gap-2 p-2.5 border-b border-rule">
         <input autoFocus className="flex-1 min-w-0" type="search" aria-label="Search chats" placeholder="Search chats" value={q} onChange={(e) => setQ(e.target.value)} />
         <button className="btn-ghost btn-icon" onClick={onClose} aria-label="Close history" title="Close (Esc)">✕</button>

@@ -41,7 +41,8 @@ export function SettingsDialog({ onClose, notify }: { onClose: () => void; notif
     try {
       const r = await api<{ restart?: boolean; restartRequired?: boolean; warning?: string }>('PUT', '/settings', { values: Object.fromEntries(changed.map((f) => [f.Key, edits[f.Key]])) })
       setEdits({}); await q.refetch(); qc.invalidateQueries({ queryKey: ['meta'] })
-      if (r?.restart || r?.restartRequired) setRestart(true); else notify('Settings saved')
+      // the theme is applied to the page at once; other settings may need the restart the server asks for
+      if ((r?.restart || r?.restartRequired) && changed.some((f) => !f.Key.startsWith('theme.'))) setRestart(true); else notify('Settings saved')
       if (r?.warning) notify(r.warning)
     } catch (e) {
       const text = msg(e), body = e instanceof ApiError ? e.body : {}

@@ -130,6 +130,22 @@ func table(m map[string]any, name string) map[string]any {
 // ApplyValues sets "section.key" -> text values (as Schema renders them) in the file at path. Nothing is written
 // when a value does not fit its type or the resulting config does not load.
 func ApplyValues(path string, values map[string]string) error {
+	before, _ := os.ReadFile(path) // put back if the result does not load (NEW-3)
+	if err := applyValues(path, values); err != nil {
+		return err
+	}
+	if _, err := Load(path); err != nil {
+		if before != nil {
+			_ = os.WriteFile(path, before, 0o600)
+		} else {
+			_ = os.Remove(path)
+		}
+		return fmt.Errorf("not saved: %w", err)
+	}
+	return nil
+}
+
+func applyValues(path string, values map[string]string) error {
 	types := map[string]Field{}
 	for _, f := range Schema(Defaults()) {
 		types[f.Key] = f

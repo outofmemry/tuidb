@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type Meta, type Column, type DbObject, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
 import { draftOf, dirty, FK_ACTIONS, newDef, oldDef, type Draft, type DraftCol, type DraftFk, type DraftIdx, type TableDef } from '../utils/tabledef'
-import { planMoveColumn } from './Wave'
 import { Select } from './Select'
 import { CopyAsDialog } from './Tools'
 import { formatRows, copyText, type CopyFormat } from '../utils/copy'
 import { filterMenu, whyNot, type MenuItem } from '../utils/menus'
+import { TabMenu } from './Extras'
 
 // Handle the owner uses to answer the Structure-context keys (add_row, delete_rows, set_value) for whichever row has the focus.
 export type StructureCtl = { current: { add: () => void; del: () => void; toggle: () => void } | null }
@@ -47,10 +47,12 @@ export function StructureEditor({ sid, caps, obj, notify, onPlan, columns = [], 
   [creating, obj.Name, columns, idxQ.data, fkQ.data])
   const [d, setD] = useState<Draft>(base)
   const seen = useRef<Draft | null>(null)
-  useEffect(() => { if (loaded && seen.current !== base) { seen.current = base; setD(base) } }, [loaded, base])
+  // a new table's draft is set once: its base is rebuilt on every render (the columns prop defaults to a fresh []), and resetting it would undo each edit
+  useEffect(() => { if (loaded && seen.current !== base && !(creating && seen.current)) { seen.current = base; setD(base) } }, [loaded, base])
 
   const changed = creating || dirty(d, base)
   useEffect(() => { onDirty?.(!!changed && !creating) }, [changed]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (creating) onDirty?.(!!seen.current && dirty(d, seen.current)) }, [d]) // eslint-disable-line react-hooks/exhaustive-deps -- a new table: edited past its one-column start
   useEffect(() => () => onDirty?.(false), []) // eslint-disable-line react-hooks/exhaustive-deps -- leaving the view drops the draft, so the tab is clean again
   const [err, setErr] = useState(''), [busy, setBusy] = useState(false)
   const cur = useRef<{ sec: Sec; i: number }>({ sec: 'columns', i: 0 })
@@ -99,7 +101,13 @@ export function StructureEditor({ sid, caps, obj, notify, onPlan, columns = [], 
     setCopyAs(false)
     copyText(formatRows(fmt, cols, rows, meta?.config.csv ?? { Delimiter: ',', Quote: '"', LineBreak: '\n', Decimal: '.' }, caps.Dialect, obj.Name)).then(() => notify(`Copied ${rows.length} columns as ${fmt}`), (e) => notify(msg(e)))
   }
-  const move = async (name: string, to: number) => { try { onPlan(await planMoveColumn(sid, obj, name, to)) } catch (e) { notify(msg(e)) } }
+  // a move reorders the draft, so several moves (and other edits) are planned together on Preview; the planner emits FIRST / AFTER where the order changed
+  const move = (from: number, to: number) => setD((x) => {
+    if (from === to || to < 0 || to >= x.cols.length) return x
+    const cols = [...x.cols], [c] = cols.splice(from, 1)
+    cols.splice(to, 0, c)
+    return { ...x, cols }
+  })
   useEffect(() => { if (section) document.getElementById('sec-' + section)?.scrollIntoView({ block: 'start' }) }, [section, idxQ.data, trgQ.data])
 
   // the structure menu comes from the shared list (menus.Structure); menu ids are the keymap actions
@@ -110,7 +118,7 @@ export function StructureEditor({ sid, caps, obj, notify, onPlan, columns = [], 
     if (a === 'add_row') ops.add()
     else if (a === 'delete_rows') ops.del()
     else if (a === 'set_value') ops.toggle()
-    else if ((a === 'move_up' || a === 'move_down') && c?.orig && cur.current.sec === 'columns') { if (changed) notify('Send or discard the edits first'); else move(c.orig, a === 'move_up' ? i - 1 : i + 1) }
+    else if ((a === 'move_up' || a === 'move_down') && c && cur.current.sec === 'columns') { const to = a === 'move_up' ? i - 1 : i + 1; move(i, to); cur.current = { sec: 'columns', i: Math.max(0, Math.min(d.cols.length - 1, to)) } }
     else if (a === 'copy_rows_as') setCopyAs(true)
   }
   const struck = (g?: boolean) => (g ? 'opacity-60 line-through decoration-1' : '')
@@ -139,12 +147,12 @@ export function StructureEditor({ sid, caps, obj, notify, onPlan, columns = [], 
       <table><thead><tr>{reorder && <th aria-label="Order" colSpan={2} />}<th>Name</th><th>Type</th><th>Null</th><th>Default</th><th>PK</th><th>Extra</th><th aria-label="Actions" /></tr></thead><tbody>
         {d.cols.map((c, i) => (
           <tr key={i} aria-selected={selected === c.orig && !!c.orig} className={`${struck(c.gone)} ${selected === c.orig && c.orig ? 'bg-raised' : ''} ${dragFrom >= 0 && dragFrom !== i ? 'outline-dashed outline-1 outline-rule-2 -outline-offset-1' : ''}`}
-            onDragOver={(e) => { if (dragFrom >= 0) e.preventDefault() }} onDrop={(e) => { e.preventDefault(); const from = dragFrom; setDragFrom(-1); if (from >= 0 && from !== i && d.cols[from]?.orig) move(d.cols[from].orig, i) }} onFocusCapture={() => { focus('columns', i)(); if (c.orig) onSelect?.(c.orig) }}>
-            {reorder && <td className={`px-0 ${changed || !c.orig ? 'opacity-40' : 'cursor-grab'}`}>
-              <span draggable={!changed && !!c.orig} role="img" aria-label={`Drag ${c.name} to reorder`} title={changed ? 'Send or discard the edits first' : 'Drag to move the column'} onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.orig); setDragFrom(i) }} onDragEnd={() => setDragFrom(-1)}>⠿</span></td>}
+            onDragOver={(e) => { if (dragFrom >= 0) e.preventDefault() }} onDrop={(e) => { e.preventDefault(); const from = dragFrom; setDragFrom(-1); if (from >= 0) move(from, i) }} onFocusCapture={() => { focus('columns', i)(); if (c.orig) onSelect?.(c.orig) }}>
+            {reorder && <td className="px-0 cursor-grab">
+              <span draggable role="img" aria-label={`Drag ${c.name} to reorder`} title="Drag to move the column" onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.name); setDragFrom(i) }} onDragEnd={() => setDragFrom(-1)}>⠿</span></td>}
             {reorder && <td className="whitespace-nowrap">
-              <button className="btn-ghost px-1" disabled={changed || i === 0 || !c.orig} aria-label={`Move ${c.name} up`} title={changed ? 'Send or discard the edits first' : undefined} onClick={() => move(c.orig, i - 1)}>▲</button>
-              <button className="btn-ghost px-1" disabled={changed || i === d.cols.length - 1 || !c.orig} aria-label={`Move ${c.name} down`} title={changed ? 'Send or discard the edits first' : undefined} onClick={() => move(c.orig, i + 1)}>▼</button></td>}
+              <button className="btn-ghost px-1" disabled={i === 0} aria-label={`Move ${c.name} up`} onClick={() => move(i, i - 1)}>▲</button>
+              <button className="btn-ghost px-1" disabled={i === d.cols.length - 1} aria-label={`Move ${c.name} down`} onClick={() => move(i, i + 1)}>▼</button></td>}
             <td><input className={IN} aria-label={`Column ${i + 1} name`} value={c.name} disabled={c.gone} onChange={(e) => setCol(i, { name: e.target.value })} /></td>
             <td><input className={IN} aria-label={`Column ${i + 1} type`} list={`types-${sid}`} value={c.type} disabled={c.gone} onChange={(e) => setCol(i, { type: e.target.value })} /></td>
             <td><input type="checkbox" aria-label={`Column ${i + 1} allows NULL`} checked={c.nullable} disabled={c.gone} onChange={(e) => setCol(i, { nullable: e.target.checked })} /></td>
@@ -187,11 +195,7 @@ export function StructureEditor({ sid, caps, obj, notify, onPlan, columns = [], 
         <button onClick={addFk}>Add foreign key</button>
       </>}
       {copyAs && <CopyAsDialog onPick={copyRows} onClose={() => setCopyAs(false)} />}
-      {menu && <>
-        <div className="fixed inset-0 z-40" onMouseDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null) }} />
-        <div className="popover fixed z-50 min-w-[170px] py-1 flex flex-col motion-safe:animate-pop" style={{ left: Math.min(menu.x, window.innerWidth - 190), top: Math.min(menu.y, window.innerHeight - 40 - items.length * 26) }} role="menu" aria-label="Structure" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setMenu(null) } }}>
-          {items.map((it: MenuItem, k) => <button key={it.action} className="menu-item" role="menuitem" autoFocus={k === 0} disabled={!!whyNot(it)} title={whyNot(it)} onClick={() => act(it.action)}>{it.label}</button>)}
-        </div></>}
+      {menu && <TabMenu x={menu.x} y={menu.y} label="Structure" onClose={() => setMenu(null)} items={items.map((it: MenuItem): [string, () => void, string?] => [it.label, () => act(it.action), whyNot(it)])} />}
       {!creating && caps.Triggers && <><h4 id="sec-triggers">Triggers</h4><table><tbody>{(trgQ.data ?? []).map((t) => <tr key={t.Name}><td>{t.Name}</td><td>{t.Timing} {t.Event}</td></tr>)}</tbody></table></>}
     </div>
   )

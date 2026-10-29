@@ -149,7 +149,7 @@ func (w *Workspace) deleteBoard(b board.Board, done func()) tea.Cmd {
 	})
 	f.validate = func(v map[string]string) error {
 		if v["confirm"] != b.Name {
-			return fmt.Errorf("type %q to confirm", b.Name)
+			return fmt.Errorf("type “%s” to confirm", b.Name)
 		}
 		return nil
 	}

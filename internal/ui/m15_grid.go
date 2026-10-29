@@ -177,7 +177,7 @@ func (g *Grid) SortLocal(name string, dir int) {
 			}
 			g.Rows = out
 		}
-		g.SortCol, g.SortDesc, g.unsorted = "", false, nil
+		g.SortCol, g.SortDesc, g.unsorted, g.Sorts = "", false, nil, nil
 		return
 	}
 	if g.unsorted == nil {
@@ -191,7 +191,7 @@ func (g *Grid) SortLocal(name string, dir int) {
 		}
 		return c < 0
 	})
-	g.SortCol, g.SortDesc = name, dir < 0
+	g.SortCol, g.SortDesc, g.Sorts = name, dir < 0, nil
 	for i, r := range g.Rows { // the cursor stays on the same row
 		if r == cur {
 			g.row = i

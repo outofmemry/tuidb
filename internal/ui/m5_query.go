@@ -2,7 +2,9 @@ package ui
 
 import (
 	"context"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -75,20 +77,28 @@ var notAlias = map[string]bool{"where": true, "on": true, "using": true, "join":
 	"cross": true, "natural": true, "group": true, "order": true, "limit": true, "having": true, "union": true, "except": true, "intersect": true, "offset": true,
 	"window": true, "set": true, "select": true, "for": true, "returning": true, "lateral": true}
 
-// aliasesIn maps each alias (and bare table name) in the FROM / JOIN clauses of sql to its lower-case table name.
+// aliasesIn maps each alias in the FROM / JOIN clauses of sql to its lower-case table name, schema-qualified as
+// written (shop.customers), so c. completes the columns of the table the statement names.
 // shortcut: comma-separated table lists ("from a x, b y") only resolve their first table.
 func aliasesIn(sql string) map[string]string {
 	out := map[string]string{}
 	for _, m := range aliasRe.FindAllStringSubmatch(sql, -1) {
-		tbl := strings.ToLower(strings.Trim(m[1], `"`))
-		if i := strings.LastIndex(tbl, "."); i >= 0 {
-			tbl = strings.Trim(tbl[i+1:], `"`)
-		}
 		if m[2] != "" && !notAlias[strings.ToLower(m[2])] {
-			out[strings.ToLower(m[2])] = tbl
+			out[strings.ToLower(m[2])] = refKey(m[1])
 		}
 	}
 	return out
+}
+
+// refKey is the lower-case, unquoted spelling of a table reference: "Shop"."Orders" -> shop.orders.
+func refKey(ref string) string { return strings.ToLower(strings.ReplaceAll(ref, `"`, "")) }
+
+// splitRefKey splits a refKey into schema ("" when unqualified) and table.
+func splitRefKey(key string) (string, string) {
+	if i := strings.LastIndex(key, "."); i >= 0 {
+		return key[:i], key[i+1:]
+	}
+	return "", key
 }
 
 // aliasAtCursor resolves qual through the aliases of the statement under the cursor.
@@ -178,9 +188,14 @@ func (t *queryTab) togglePin() tea.Cmd {
 	if t.running {
 		return t.ws.a.say("wait for the running query before pinning or releasing the connection")
 	}
+	if t.pin != nil && t.inTx {
+		t.ws.a.push(&confirmDlg{title: "This tab has an open transaction. Release the connection and roll back?", lines: []string{"Everything since BEGIN is rolled back. COMMIT first to keep it."},
+			yes: "Roll back and release", danger: true, onYes: func() tea.Cmd { t.inTx = false; return t.togglePin() }})
+		return nil
+	}
 	if t.pin != nil {
 		old := t.pin
-		t.pin, t.pinning = nil, true
+		t.pin, t.pinning, t.autoPin = nil, true, false
 		return liveCmd(func() func() tea.Cmd {
 			old.Close() // waits on the pool; keep it off the UI loop
 			return func() tea.Cmd {
@@ -215,6 +230,113 @@ func (t *queryTab) togglePin() tea.Cmd {
 			return t.ws.a.say("this tab now keeps one connection: BEGIN and SET carry over (pin again to release it)")
 		}
 	})
+}
+
+// ---- the "taking too long" prompt, transactions and file tabs on close -------------------------
+
+// removeOverlay takes o off the dialog stack wherever it is, and replays the results that waited behind it.
+func (a *App) removeOverlay(o Overlay) tea.Cmd {
+	i := slices.Index(a.overlays, o)
+	if i < 0 {
+		return nil
+	}
+	a.overlays = slices.Delete(a.overlays, i, i+1)
+	if len(a.overlays) > 0 || len(a.deferred) == 0 {
+		return nil
+	}
+	q := a.deferred
+	a.deferred = nil
+	var cmds []tea.Cmd
+	for _, m := range q {
+		cmds = append(cmds, func() tea.Msg { return m })
+	}
+	return tea.Batch(cmds...)
+}
+
+// closeSlowPrompt closes the tab's "taking too long" prompt: the batch finished or was cancelled.
+func (t *queryTab) closeSlowPrompt() tea.Cmd {
+	if t.slowDlg == nil {
+		return nil
+	}
+	d := t.slowDlg
+	t.slowDlg = nil
+	return t.ws.a.removeOverlay(d)
+}
+
+// passesSlowPrompt: a statement result for the tab whose "taking too long" prompt is on top is handled at once
+// instead of waiting behind the prompt, so the batch goes on, the time is the statement's own and the prompt
+// closes when the batch is done.
+func (a *App) passesSlowPrompt(m wsMsg) bool {
+	if _, ok := m.msg.(queryDoneMsg); !ok || len(a.overlays) == 0 {
+		return false
+	}
+	top, ok := a.overlays[len(a.overlays)-1].(*pickerDlg)
+	w := a.wsByID(m.ws)
+	if !ok || w == nil {
+		return false
+	}
+	for _, t := range w.tabs {
+		if q, ok := t.(*queryTab); ok && q.ID() == m.tab {
+			return q.slowDlg == top
+		}
+	}
+	return false
+}
+
+// fileDirty: the tab was opened from a .sql file and its text differs from the file.
+// shortcut: with split_down the file is compared with the focused editor only.
+func (t *queryTab) fileDirty() bool { return t.file != "" && t.ed.Text() != t.fileText }
+
+// writeBack saves the editor to the file the tab came from.
+func (t *queryTab) writeBack() error {
+	text := t.ed.Text()
+	if err := writeFile(t.file, text); err != nil {
+		return err
+	}
+	t.fileText = text
+	return nil
+}
+
+// askClose asks before a tab with something to lose closes: a modified file offers to save, an open transaction
+// warns that it is rolled back, anything else is the generic unsaved-changes question. done closes the tab.
+func (w *Workspace) askClose(t tabber, done func() tea.Cmd) {
+	q, _ := t.(*queryTab)
+	if q != nil && q.fileDirty() {
+		q.askSave(func() tea.Cmd {
+			if q.inTx {
+				w.askClose(t, done)
+				return nil
+			}
+			return done()
+		})
+		return
+	}
+	if q != nil && q.inTx {
+		w.a.push(&confirmDlg{title: "This tab has an open transaction. Close it and roll back?", lines: []string{"Everything since BEGIN is rolled back. COMMIT first to keep it."},
+			yes: "Roll back and close", danger: true, onYes: done})
+		return
+	}
+	w.a.push(&confirmDlg{title: "Close " + t.Title() + " with unsaved changes?", lines: []string{"Pending edits in this tab will be lost."}, yes: "Close", danger: true, onYes: done})
+}
+
+// askSave offers Save / Don't save / Cancel for a modified file tab; then runs after Save or Don't save.
+func (t *queryTab) askSave(then func() tea.Cmd) {
+	name := filepath.Base(t.file)
+	t.ws.a.push(&pickerDlg{title: "Save changes to " + name + "?", hint: "Enter: choose   Esc: cancel",
+		items: []pickItem{{Label: "Save", Value: "save"}, {Label: "Don't save", Value: "discard"}, {Label: "Cancel", Value: "cancel"}},
+		onPick: func(it pickItem, _ bool) tea.Cmd {
+			switch it.Value.(string) {
+			case "save":
+				if err := t.writeBack(); err != nil {
+					return t.ws.a.fail(err)
+				}
+			case "discard":
+				t.fileText = t.ed.Text() // asked once: quitting does not ask again
+			default:
+				return nil
+			}
+			return then()
+		}})
 }
 
 // m5Action runs the actions that belong to no tab: palette entries and the ones with a hint.

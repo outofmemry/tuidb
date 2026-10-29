@@ -139,6 +139,20 @@ func TestFakeRowsRespectIntegerRange(t *testing.T) {
 	}
 }
 
+// T-P2-13: FROM public, TO shop: a table created in public must reference public's tables, not shop's.
+func TestRebaseForeignKeys(t *testing.T) {
+	fks := []db.ForeignKey{{RefSchema: "shop", RefTable: "orders"}, {RefSchema: "common", RefTable: "currencies"}}
+	to := []db.TableDef{{Schema: "shop", Name: "order_items", ForeignKeys: fks}}
+	Rebase(to, "public")
+	got := to[0].ForeignKeys
+	if to[0].Schema != "public" || got[0].RefSchema != "public" || got[1].RefSchema != "common" {
+		t.Errorf("rebased %+v", to[0])
+	}
+	if fks[0].RefSchema != "shop" {
+		t.Error("the caller's foreign keys must not change")
+	}
+}
+
 func TestSchemaDiffDependencyOrder(t *testing.T) {
 	parent := db.TableDef{Name: "parent"}
 	child := db.TableDef{Name: "child", ForeignKeys: []db.ForeignKey{{RefTable: "parent"}}}

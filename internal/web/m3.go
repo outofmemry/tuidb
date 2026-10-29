@@ -94,10 +94,12 @@ func (s *Server) restore(ss *session, r *http.Request) (any, error) {
 }
 
 // backupOptions lists the flags the backup (or, with ?restore=1, restore) dialog may offer for this driver:
-// the common ones with a description, and every extra flag the server accepts.
+// the common ones with a description, and every extra flag the server accepts. With ?file=<name> (and optional
+// &format=custom) a Postgres restore lists only the flags of the tool that file runs (psql or pg_restore).
 func (s *Server) backupOptions(ss *session, r *http.Request) (any, error) {
-	restore := r.URL.Query().Get("restore") == "1"
-	return map[string]any{"options": nonNil(backup.CommonOptions(ss.conn.Driver, restore)), "extra": nonNil(backup.AllowedExtra(ss.conn.Driver, restore))}, nil
+	q := r.URL.Query()
+	restore, file, format := q.Get("restore") == "1", q.Get("file"), q.Get("format") // file and format are optional: without them a Postgres restore gets the union
+	return map[string]any{"options": nonNil(backup.CommonOptionsForFormat(ss.conn.Driver, restore, file, format)), "extra": nonNil(backup.AllowedExtraFor(ss.conn.Driver, restore, file, format))}, nil
 }
 
 // backupFile confines a backup/restore file to <DataDir>/backups: no subdirectories, no "..", no symlinks.

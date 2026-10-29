@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { clip, type ResultCol, type Sort, type Val } from '../utils/api'
@@ -35,6 +35,7 @@ type Props = {
   onCellMenu?: (x: number, y: number) => void // right-click on a cell, Shift+F10 or the ContextMenu key
   onAddRow?: () => void // double-click in the empty space below the last row
   onAddColumn?: () => void // double-click in the empty space beside the last column header
+  empty?: ReactNode // shown under the headers when there are no rows
 }
 
 // A rectangle of cells, as indexes into rows and columns (inclusive).
@@ -97,7 +98,7 @@ export const show = (v: Val | undefined, server: string | null): string | null =
 const specialOf = (v: Val | undefined, shown: string | null, isNew: boolean): '' | 'null' | 'empty' | 'default' =>
   shown === null ? 'null' : v !== undefined && typeof v === 'object' && v !== null && '$' in v ? (v.$ === 'default' ? 'default' : v.$ === 'empty' ? 'empty' : '') : isNew && v === undefined ? 'default' : shown === '' && !isNew ? 'empty' : ''
 
-export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, selected, onSelect, onSpace, ctx = 'grid', colRef, onHeaderMenu, pretty, widths, onResize, focusCell, onCursor, onFind, zebra, spatial, colTips, onCellMenu, onAddRow, onAddColumn }: Props) {
+export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, selected, onSelect, onSpace, ctx = 'grid', colRef, onHeaderMenu, pretty, widths, onResize, focusCell, onCursor, onFind, zebra, spatial, colTips, onCellMenu, onAddRow, onAddColumn, empty }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [col, setColState] = useState(0) // the cursor column; the cursor row is `selected`
   const setCol = (c: number) => { setColState(c); if (colRef) colRef.current = c }
@@ -249,6 +250,7 @@ export function Grid({ columns, rows, sort, onSort, edited, editable, onOpen, se
           )
         })}
       </div>
+      {!rows.length && empty}
       <div data-fill="1" style={{ height: 40, width }} aria-hidden />
     </div>
   )

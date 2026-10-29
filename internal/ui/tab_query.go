@@ -1,9 +1,11 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -55,7 +57,9 @@ type queryTab struct {
 	limit   int
 	status  string
 
-	cols     map[string][]string // lowercased table name -> column names (autocomplete)
+	cols       map[string][]string    // refKey (schema.table as written) -> column names (autocomplete)
+	schemaObjs map[string][]db.Object // lower-case schema -> its objects, for shop.<table> outside the sidebar's schema
+
 	loading  map[string]bool
 	savedAs  string // path of the saved query this tab edits (auto-save)
 	lastAuto string
@@ -67,12 +71,18 @@ type queryTab struct {
 	unbound  map[string]string // bound statement text -> the text as typed: history and the console never see variable values
 	pinning  bool              // a pin or unpin is in flight
 	pin      db.Session        // a dedicated connection (db.Pinner): every statement of this tab runs on it
+	pinWant  bool              // the batch starts with BEGIN on an unpinned tab: its first statement pins (see next)
+	autoPin  bool              // BEGIN made the pin: it is released again when the transaction is over
+	inTx     bool              // a transaction is open on pin (the server's answer, db.InTx, else a guess from the statements)
+	slowDlg  *pickerDlg        // the open "taking too long" prompt
+	file     string            // the .sql file this tab was opened from (open_file), "" = none
+	fileText string            // the file's text as last read or written: the tab is modified when the editor differs
 	sum      *batchSummary     // a run of more than summaryOver statements keeps one summary instead of a result tab each
 }
 
 func newQueryTab(ws *Workspace, id int) *queryTab {
 	c := ws.a.d.Cfg.Editor
-	t := &queryTab{ws: ws, id: id, name: fmt.Sprintf("SQL %d", id), cols: map[string][]string{}, loading: map[string]bool{},
+	t := &queryTab{ws: ws, id: id, name: fmt.Sprintf("SQL %d", id), cols: map[string][]string{}, schemaObjs: map[string][]db.Object{}, loading: map[string]bool{},
 		limit: ws.a.d.State.RowLimit(ws.conn.Name, 1000)}
 	t.ed = NewEditor(ws.caps.Dialect, EditorOpts{
 		TabWidth: c.IndentWidth, UseTabs: c.Indent == "tabs", CloseBraces: c.CloseBraces, Uppercase: c.UppercaseKeywords,
@@ -94,8 +104,14 @@ func (t *queryTab) foldKey() string {
 func (t *queryTab) ID() int { return t.id }
 func (t *queryTab) Title() string {
 	pin := ""
+	if t.fileDirty() {
+		pin = " ●"
+	}
 	if t.pin != nil {
-		pin = " [pinned]"
+		pin += " [pinned]"
+	}
+	if t.inTx {
+		pin += " [tx]"
 	}
 	return t.name + pin + t.ed.vimBadge() + t.ed.blockBadge()
 }
@@ -119,8 +135,8 @@ func (t *queryTab) complete(prefix string) []Candidate {
 	qual := ""
 	word := prefix
 	if i := strings.LastIndex(prefix, "."); i >= 0 {
-		qual, word = strings.ToLower(strings.Trim(prefix[:i], `"`)), prefix[i+1:]
-		qual = t.aliasAtCursor(qual) // "c." where c is an alias of customers
+		qual, word = refKey(prefix[:i]), strings.Trim(prefix[i+1:], `"`)
+		qual = t.aliasAtCursor(qual) // "c." where c is an alias of shop.customers
 	}
 	if qual != "" {
 		if t.ws.caps.Dialect == "mongo" {
@@ -131,7 +147,11 @@ func (t *queryTab) complete(prefix string) []Candidate {
 		for _, c := range t.cols[qual] {
 			all = append(all, Candidate{Text: c, Kind: "column"})
 		}
-		for _, o := range t.ws.sb.objs { // schema.table
+		objs := t.ws.sb.objs
+		if so, ok := t.schemaObjs[qual]; ok { // another schema's objects, loaded by prefetch
+			objs = so
+		}
+		for _, o := range objs { // schema.table
 			if strings.EqualFold(o.Schema, qual) {
 				all = append(all, Candidate{Text: o.Name, Kind: string(o.Kind)})
 			}
@@ -158,11 +178,7 @@ func (t *queryTab) complete(prefix string) []Candidate {
 		}
 	}
 	for _, m := range refRe.FindAllStringSubmatch(t.ed.Text(), -1) {
-		name := strings.ToLower(strings.Trim(m[1], `"`))
-		if i := strings.LastIndex(name, "."); i >= 0 {
-			name = name[i+1:]
-		}
-		for _, c := range t.cols[name] {
+		for _, c := range t.cols[refKey(m[1])] {
 			add(c, "column")
 		}
 	}
@@ -201,22 +217,40 @@ type colsLoadedMsg struct {
 	cols []string
 }
 
-// prefetch loads columns for tables the buffer mentions, so t.col / bare column completion works.
+type schemaObjsMsg struct {
+	schema string
+	objs   []db.Object
+}
+
+var qualRe = regexp.MustCompile(`\b(\w+)\.`)
+
+// prefetch loads columns for tables the buffer mentions, so t.col / bare column completion works, and the objects
+// of another schema the buffer qualifies with (shop.), so schema.table completes outside the sidebar's schema.
 func (t *queryTab) prefetch() tea.Cmd {
 	var cmds []tea.Cmd
-	for _, m := range refRe.FindAllStringSubmatch(t.ed.Text(), -1) {
-		name := strings.Trim(m[1], `"`)
-		short := name
-		if i := strings.LastIndex(name, "."); i >= 0 {
-			short = name[i+1:]
+	text := t.ed.Text()
+	for _, m := range qualRe.FindAllStringSubmatch(text, -1) {
+		sc := strings.ToLower(m[1])
+		if _, ok := t.schemaObjs[sc]; ok || t.loading["schema:"+sc] || strings.EqualFold(sc, t.ws.sb.schema) || len(cmds) >= 3 ||
+			!slices.ContainsFunc(t.ws.sb.schemas, func(s string) bool { return strings.EqualFold(s, sc) }) {
+			continue
 		}
-		key := strings.ToLower(short)
+		t.loading["schema:"+sc] = true
+		cmds = append(cmds, t.ws.async(t.id, func(ctx context.Context, sess db.Session) tea.Msg {
+			objs, _ := sess.Objects(ctx, sc)
+			return schemaObjsMsg{schema: sc, objs: objs}
+		}))
+	}
+	cur := t.ws.sess.CurrentSchema()
+	for _, m := range refRe.FindAllStringSubmatch(text, -1) {
+		key := refKey(m[1])
+		schema, short := splitRefKey(key)
 		if _, ok := t.cols[key]; ok || t.loading[key] || len(cmds) >= 3 {
 			continue
 		}
 		cachedHit := false
 		for ref, cols := range t.ws.meta { // reuse what table tabs or the sidebar already fetched
-			if strings.EqualFold(ref.Name, short) {
+			if strings.EqualFold(ref.Name, short) && strings.EqualFold(ref.Schema, cmp.Or(schema, cur)) {
 				names := make([]string, len(cols))
 				for i, c := range cols {
 					names[i] = c.Name
@@ -230,11 +264,14 @@ func (t *queryTab) prefetch() tea.Cmd {
 		}
 		var ref *db.ObjRef
 		for _, o := range t.ws.sb.objs {
-			if strings.EqualFold(o.Name, short) && (o.Kind == db.KindTable || o.Kind == db.KindView || o.Kind == db.KindMatView) {
+			if strings.EqualFold(o.Name, short) && (schema == "" || strings.EqualFold(o.Schema, schema)) && (o.Kind == db.KindTable || o.Kind == db.KindView || o.Kind == db.KindMatView) {
 				r := o.ObjRef
 				ref = &r
 				break
 			}
+		}
+		if ref == nil && schema != "" && t.ws.caps.Schemas { // a table of another schema: ask for it by name
+			ref = &db.ObjRef{Schema: schema, Name: short, Kind: db.KindTable}
 		}
 		if ref == nil {
 			continue
@@ -273,22 +310,31 @@ func (t *queryTab) timeoutTick() tea.Cmd {
 }
 
 type queryDoneMsg struct {
-	batch int
-	stmt  db.Stmt
-	res   *db.Result
-	err   error
-	took  time.Duration
+	batch  int
+	stmt   db.Stmt
+	res    *db.Result
+	err    error
+	took   time.Duration
+	pinned db.Session // BEGIN pinned a connection for this statement (adoptPin takes it)
 }
 
 func (t *queryTab) runCurrent() tea.Cmd {
-	if sel := t.ed.Selection(); strings.TrimSpace(sel) != "" {
-		return t.run(db.Split(t.ws.caps.Dialect, sel))
-	}
-	s, ok := t.ed.CurrentStatement()
-	if !ok {
+	stmts := t.currentStmts()
+	if stmts == nil {
 		return t.ws.a.say("nothing to run")
 	}
-	return t.run([]db.Stmt{s})
+	return t.run(stmts)
+}
+
+// currentStmts is what run_current runs: the selection's statements, else the statement under the cursor (nil: none).
+func (t *queryTab) currentStmts() []db.Stmt {
+	if sel := t.ed.Selection(); strings.TrimSpace(sel) != "" {
+		return db.Split(t.ws.caps.Dialect, sel)
+	}
+	if s, ok := t.ed.CurrentStatement(); ok {
+		return []db.Stmt{s}
+	}
+	return nil
 }
 
 func (t *queryTab) runAll() tea.Cmd {
@@ -307,7 +353,7 @@ func (t *queryTab) run(stmts []db.Stmt) tea.Cmd {
 			return t.askVars(stmts, t.paramFormat(), func(vals map[string]string, format string) tea.Cmd { return t.runBound(t.bindAs(stmts, vals, format)) })
 		}
 	}
-	return t.runBound(stmts)
+	return tea.Batch(t.runBound(stmts), t.paramsOffHint(stmts))
 }
 
 func (t *queryTab) runBound(stmts []db.Stmt) tea.Cmd {
@@ -351,6 +397,9 @@ func (t *queryTab) start(stmts []db.Stmt) tea.Cmd {
 	}
 	t.running, t.queue, t.res, t.rc, t.status, t.firstErr = true, stmts, keep, max(0, len(keep)-1), "", -1
 	t.override = 0
+	_, pinnable := t.ws.sess.(db.Pinner)
+	// BEGIN on the pool would end with this statement: the tab gets its own connection until COMMIT / ROLLBACK
+	t.pinWant = t.pin == nil && pinnable && db.TxVerb(t.ws.caps.Dialect, stmts[0].Text) == 1
 	t.batch++
 	t.started = time.Now()
 	t.focusResults = false
@@ -363,7 +412,7 @@ func (t *queryTab) next() tea.Cmd {
 		if t.cancel != nil {
 			t.cancel()
 		}
-		return nil
+		return tea.Batch(t.releaseAutoPin(), t.closeSlowPrompt())
 	}
 	s := t.queue[0]
 	t.queue = t.queue[1:]
@@ -373,19 +422,68 @@ func (t *queryTab) next() tea.Cmd {
 	if t.override > 0 {
 		limit = t.override
 	}
-	return func() tea.Msg {
-		start := time.Now()
-		res, err := sess.Exec(ctx, s.Text, limit)
-		return wsMsg{ws: ws.id, tab: tab, gen: gen, msg: queryDoneMsg{batch: batch, stmt: s, res: res, err: err, took: time.Since(start)}}
+	var pinner db.Pinner
+	if t.pinWant {
+		pinner, _ = t.ws.sess.(db.Pinner)
+		t.pinWant = false
 	}
+	return func() tea.Msg {
+		done := queryDoneMsg{batch: batch, stmt: s}
+		if pinner != nil {
+			p, err := pinner.Pin(ctx)
+			if err != nil {
+				done.err = fmt.Errorf("keep one connection for BEGIN: %w", err)
+				return wsMsg{ws: ws.id, tab: tab, gen: gen, msg: done}
+			}
+			sess, done.pinned = p, p
+		}
+		start := time.Now()
+		done.res, done.err = sess.Exec(ctx, s.Text, limit)
+		done.took = time.Since(start)
+		return wsMsg{ws: ws.id, tab: tab, gen: gen, msg: done}
+	}
+}
+
+// releaseAutoPin gives back the connection BEGIN pinned once the batch is over and no transaction is open.
+func (t *queryTab) releaseAutoPin() tea.Cmd {
+	if !t.autoPin || t.inTx || t.pin == nil {
+		return nil
+	}
+	old := t.pin
+	t.pin, t.autoPin = nil, false
+	return liveCmd(func() func() tea.Cmd {
+		old.Close() // waits on the pool; keep it off the UI loop
+		return func() tea.Cmd { return nil }
+	})
+}
+
+// adoptPin takes the connection a BEGIN run pinned (see next) and tracks the transaction state after each statement.
+func (t *queryTab) adoptPin(m queryDoneMsg) tea.Cmd {
+	var cmd tea.Cmd
+	if m.pinned != nil {
+		if m.batch != t.batch || t.closed || t.pin != nil { // cancelled meanwhile: closing it rolls the BEGIN back
+			go m.pinned.Close()
+			return nil
+		}
+		t.pin, t.autoPin, t.inTx = m.pinned, true, false
+		cmd = t.ws.a.say("This tab now keeps one connection until COMMIT or ROLLBACK")
+	}
+	if t.pin != nil && m.batch == t.batch {
+		guess := t.inTx
+		if m.err == nil {
+			guess = db.TxAfter(t.ws.caps.Dialect, guess, []string{m.stmt.Text})
+		}
+		t.inTx = db.InTx(t.pin, guess)
+	}
+	return cmd
 }
 
 // Close cancels a running statement when the tab goes away.
 func (t *queryTab) Close() {
 	t.closed = true
 	if t.pin != nil {
-		t.pin.Close()
-		t.pin = nil
+		t.pin.Close() // ends an open transaction: the close paths asked first (askClose)
+		t.pin, t.inTx = nil, false
 	}
 	if t.cancel != nil {
 		t.cancel()
@@ -406,7 +504,7 @@ func (t *queryTab) Cancel() tea.Cmd {
 	t.running = false
 	t.override, t.replace = 0, -1
 	t.status = "cancelled"
-	return t.ws.a.say("query cancelled")
+	return tea.Batch(t.closeSlowPrompt(), t.ws.a.say("query cancelled"))
 }
 
 func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
@@ -416,14 +514,20 @@ func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		secs := t.ws.a.d.Cfg.General.QueryTimeoutSecs
-		t.ws.a.push(&pickerDlg{title: fmt.Sprintf("The server is taking too long (over %ds)", secs), hint: "Enter: choose   Esc: keep waiting",
+		// the prompt closes by itself when the batch finishes (passesSlowPrompt lets its results through)
+		t.slowDlg = &pickerDlg{title: fmt.Sprintf("The server is taking too long (over %ds)", secs), hint: "Enter: choose   Esc: keep waiting",
 			items: []pickItem{{Label: "Keep waiting", Value: "wait"}, {Label: "Cancel the query", Value: "cancel"}},
 			onPick: func(it pickItem, _ bool) tea.Cmd {
+				t.slowDlg = nil
+				if !t.running {
+					return t.ws.a.say("The statement had already finished")
+				}
 				if it.Value.(string) == "cancel" {
 					return t.Cancel()
 				}
 				return t.timeoutTick()
-			}})
+			}}
+		t.ws.a.push(t.slowDlg)
 		return nil
 	case explainMsg:
 		return t.showExplain(m)
@@ -432,54 +536,66 @@ func (t *queryTab) Handle(msg tea.Msg) tea.Cmd {
 	case colsLoadedMsg:
 		t.cols[m.name] = m.cols
 		delete(t.loading, m.name)
+	case schemaObjsMsg:
+		if t.schemaObjs == nil {
+			t.schemaObjs = map[string][]db.Object{}
+		}
+		t.schemaObjs[m.schema] = m.objs
+		delete(t.loading, "schema:"+m.schema)
 	case queryDoneMsg:
+		pinNote := t.adoptPin(m)
 		if m.batch != t.batch {
 			return nil
 		}
-		t.ws.record(t.typed(m.stmt.Text), "editor", m.took, m.err)
-		if m.res != nil {
-			for _, l := range strings.Split(m.res.Message, "\n") {
-				if noticeRe.MatchString(l) {
-					t.ws.log("-- "+l, 0, nil) // RAISE NOTICE lines belong in the console too
-				}
-			}
-		}
-		if t.sum != nil && t.replace < 0 {
-			return t.summaryStep(m)
-		}
-		rv := t.toResult(m)
-		if t.replace >= 0 && t.replace < len(t.res) { // a committed result is refreshed in place
-			old := t.res[t.replace]
-			rv.title, rv.pinned, rv.chart, rv.find, rv.msgView = old.title, old.pinned, old.chart, old.find, old.msgView
-			rv.limit, t.override = t.override, 0
-			t.res[t.replace] = rv
-			t.running, t.queue, t.rc, t.replace = false, nil, t.replace, -1
-			t.focusResults = true
-			return t.makeEditable(t.rc)
-		}
-		t.res = append(t.res, rv)
-		if m.err != nil && t.firstErr < 0 {
-			t.firstErr = len(t.res) - 1
-		}
-		t.rc = len(t.res) - 1
-		if t.firstErr >= 0 {
-			t.rc = t.firstErr // show the failure, not whatever ran after it
-		}
-		if m.err != nil && t.ws.a.d.Cfg.Editor.ReturnOnError {
-			t.queue = nil
-		}
-		t.status = tookStr(time.Since(t.started)) // the run bar adds the statement and failure counts
-		cmd := tea.Batch(t.next(), t.makeEditable(len(t.res)-1))
-		if !t.running && m.err != nil && len(t.res) == 1 {
-			return tea.Batch(cmd, t.ws.a.fail(m.err))
-		}
-		return cmd
+		return tea.Batch(pinNote, t.statementDone(m))
 	default:
 		if cmd, ok := t.ws.handleGlobal(msg); ok {
 			return cmd
 		}
 	}
 	return nil
+}
+
+// statementDone shows one statement's result and starts the next statement of the batch.
+func (t *queryTab) statementDone(m queryDoneMsg) tea.Cmd {
+	t.ws.record(t.typed(m.stmt.Text), "editor", m.took, m.err)
+	if m.res != nil {
+		for _, l := range strings.Split(m.res.Message, "\n") {
+			if noticeRe.MatchString(l) {
+				t.ws.log("-- "+l, 0, nil) // RAISE NOTICE lines belong in the console too
+			}
+		}
+	}
+	if t.sum != nil && t.replace < 0 {
+		return t.summaryStep(m)
+	}
+	rv := t.toResult(m)
+	if t.replace >= 0 && t.replace < len(t.res) { // a committed result is refreshed in place
+		old := t.res[t.replace]
+		rv.title, rv.pinned, rv.chart, rv.find, rv.msgView = old.title, old.pinned, old.chart, old.find, old.msgView
+		rv.limit, t.override = t.override, 0
+		t.res[t.replace] = rv
+		t.running, t.queue, t.rc, t.replace = false, nil, t.replace, -1
+		t.focusResults = true
+		return tea.Batch(t.makeEditable(t.rc), t.closeSlowPrompt())
+	}
+	t.res = append(t.res, rv)
+	if m.err != nil && t.firstErr < 0 {
+		t.firstErr = len(t.res) - 1
+	}
+	t.rc = len(t.res) - 1
+	if t.firstErr >= 0 {
+		t.rc = t.firstErr // show the failure, not whatever ran after it
+	}
+	if m.err != nil && t.ws.a.d.Cfg.Editor.ReturnOnError {
+		t.queue = nil
+	}
+	t.status = tookStr(time.Since(t.started)) // the run bar adds the statement and failure counts
+	cmd := tea.Batch(t.next(), t.makeEditable(len(t.res)-1))
+	if !t.running && m.err != nil && len(t.res) == 1 {
+		return tea.Batch(cmd, t.ws.a.fail(m.err))
+	}
+	return cmd
 }
 
 func (t *queryTab) toResult(m queryDoneMsg) *resultView {
@@ -897,12 +1013,12 @@ func (t *queryTab) addToQueries() tea.Cmd {
 			}
 			return t.ws.a.say("saved %s", q.Name)
 		})
-	}))
+	}).checked(savedQueryName))
 	return nil
 }
 
 func (t *queryTab) saveAs() tea.Cmd {
-	t.ws.a.push(newForm("Save SQL to file", []formField{{Key: "path", Label: "File", Kind: fText, Value: "query.sql"}}, func(v map[string]string) tea.Cmd {
+	t.ws.a.push(newForm("Save SQL to file", []formField{{Key: "path", Label: "File", Kind: fText, Value: cmp.Or(t.file, "query.sql")}}, func(v map[string]string) tea.Cmd {
 		path := strings.TrimSpace(v["path"])
 		if path == "" {
 			return t.ws.a.fail(fmt.Errorf("file name required"))
@@ -911,6 +1027,9 @@ func (t *queryTab) saveAs() tea.Cmd {
 		return t.ws.a.ifFree(func() tea.Cmd {
 			if err := writeFile(path, text); err != nil {
 				return t.ws.a.fail(err)
+			}
+			if t.file != "" && path == t.file {
+				t.fileText = text
 			}
 			return t.ws.a.say("saved %s", path)
 		}, path)

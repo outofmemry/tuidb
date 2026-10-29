@@ -26,6 +26,7 @@ const ENCODINGS = ['utf-8', 'iso-8859-1', 'windows-1252', 'utf-16le', 'utf-16be'
 // Text / Hex switches the view (hex is editable); "View using encoding" decodes the same bytes with another charset.
 // move: the Tab key saved the cell and wants the editor on the next (1) or previous (-1) cell
 export function CellEditor({ col, value, readOnly, onDone, imagePreview = true, decodeSpatial = true }: { col: string; value: string | null; readOnly?: boolean; onDone: (v: Val | undefined, move?: 1 | -1) => void; imagePreview?: boolean; decodeSpatial?: boolean }) {
+  const [imgBad, setImgBad] = useState(false) // the bytes look like an image (magic number) but the browser cannot decode them
   const [forceBin, setForceBin] = useState(false) // a binary file was loaded into a cell that held text
   const origBin = isBin(value), bin = origBin || forceBin
   const orig = value === null ? new Uint8Array() : origBin ? bytesOf(value!.slice(2))! : new TextEncoder().encode(value)
@@ -90,13 +91,13 @@ export function CellEditor({ col, value, readOnly, onDone, imagePreview = true, 
         </div>
         {media?.kind === 'pdf' && <button onClick={openPdf}>Open in viewer</button>}
         {mode === 'text' && isJson && !readOnly && <div role="group" aria-label="JSON" className="flex gap-1">
-          <button onClick={() => setText(pretty(text))}>PRETTY</button><button onClick={() => setText(minify(text))}>MINIFY</button></div>}
+          <button onClick={() => setText(pretty(text))}>Pretty</button><button onClick={() => setText(minify(text))}>Minify</button></div>}
         {mode === 'text' && <><span className="text-ink-2">View using encoding</span><Select aria-label="Encoding" value={enc} onChange={setEnc} options={ENCODINGS} /></>}
       </div>
       {mode === 'tree'
         ? <div className="min-h-[40vh] max-h-[60vh] overflow-auto bg-canvas border border-rule px-3 py-2.5 text-[12.5px]"><Tree docs={[text]} /></div>
         : mode === 'image' && imgUrl
-          ? <div className="min-h-[40vh] max-h-[60vh] overflow-auto bg-canvas border border-rule p-3 grid place-items-center"><img src={imgUrl} alt={`${col} (${media?.mime})`} className="max-w-full max-h-[56vh] object-contain" /></div>
+          ? <div className="min-h-[40vh] max-h-[60vh] overflow-auto bg-canvas border border-rule p-3 grid place-items-center">{imgBad ? <p className="m-0 text-ink-2">This value is not an image the browser can show.</p> : <img src={imgUrl} alt={`${col} (${media?.mime})`} className="max-w-full max-h-[56vh] object-contain" onError={() => setImgBad(true)} />}</div>
           : mode === 'map' && drawing
             ? <div className="min-h-[40vh] max-h-[60vh] bg-canvas border border-rule p-3 grid place-items-center">
               <svg role="img" aria-label={`Map of ${col}`} viewBox={drawing.viewBox} className="w-full h-[52vh]" preserveAspectRatio="xMidYMid meet">
@@ -117,7 +118,7 @@ export function CellEditor({ col, value, readOnly, onDone, imagePreview = true, 
         <button className="mr-auto" onClick={() => openInWindow(col, mode === 'tree' ? text : shown)} title="Show this value in a window of its own">Open in window</button>
         {!readOnly && <label className="inline-flex"><input type="file" className="sr-only peer" aria-label="Load from file" onChange={(e) => { load(e.target.files?.[0]); e.target.value = '' }} /><span className="border border-rule-2 rounded-[2px] px-[11px] py-1 leading-5 cursor-pointer hover:bg-raised peer-focus-visible:outline">Load from file…</span></label>}
         {!readOnly && <>
-          <span className="flex-1 min-w-0 text-left text-ink-2">{mode === 'hex' ? `${hexBytes?.length ?? 0} bytes` : `${text.length} characters`}</span>
+          <span className="flex-1 min-w-0 text-left text-ink-2">{mode === 'hex' ? `${hexBytes?.length ?? 0} bytes` : `${shown.length} characters`}</span>
           <button onClick={() => onDone({ $: 'null' })}>Set NULL</button>
           <button onClick={() => onDone({ $: 'default' })}>Set DEFAULT</button>
           <button onClick={() => onDone({ $: 'empty' })}>Set empty</button>

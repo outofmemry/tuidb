@@ -63,9 +63,10 @@ type Grid struct {
 	undo, redo           []gridSnapshot
 	SortCol              string
 	SortDesc             bool
-	RowOffset            int  // first row number shown in the gutter (paging)
-	NoStripes            bool // table.alternating_rows = false
-	DecodeSpatial        bool // table.decode_spatial: geometry bytes show as WKT
+	Sorts                []db.Sort // server-side sort keys: with more than one the header numbers them (▲1 ▼2)
+	RowOffset            int       // first row number shown in the gutter (paging)
+	NoStripes            bool      // table.alternating_rows = false
+	DecodeSpatial        bool      // table.decode_spatial: geometry bytes show as WKT
 	wktCache             map[wktKey]wktEntry
 	unsorted             []*gridRow // loaded order, kept while SortLocal has the rows sorted
 }
@@ -97,7 +98,7 @@ func (g *Grid) SetData(cols []gridCol, rows [][]any) {
 	g.top = clamp(g.top, 0, g.row)
 	g.edit, g.selecting = nil, false
 	g.undo, g.redo = nil, nil
-	g.wktCache, g.unsorted, g.SortCol, g.SortDesc = nil, nil, "", false
+	g.wktCache, g.unsorted, g.SortCol, g.SortDesc, g.Sorts = nil, nil, "", false, nil
 }
 
 func sameNames(old map[string]int, cols []gridCol) bool {
@@ -639,21 +640,30 @@ func (g *Grid) FormatRect(r0, c0, r1, c1 int, f CopyFormat, table string) string
 			}
 			b.WriteString(csvJoin(rec))
 		}
-	case FmtJSON:
-		var docs []map[string]any
-		for r := r0; r <= r1; r++ {
-			d := map[string]any{}
-			for c := c0; c <= c1; c++ {
-				d[g.Cols[c].Name] = jsonValue(cell(r, c))
-			}
-			docs = append(docs, d)
+	case FmtJSON: // written object by object so the keys keep the column order (a map is sorted: T-P3-19)
+		enc := func(v any, ind string) string {
+			var buf bytes.Buffer
+			e := json.NewEncoder(&buf)
+			e.SetIndent(ind, "  ")
+			e.SetEscapeHTML(false)
+			e.Encode(v)
+			return strings.TrimRight(buf.String(), "\n")
 		}
-		var buf bytes.Buffer
-		enc := json.NewEncoder(&buf)
-		enc.SetIndent("", "  ")
-		enc.SetEscapeHTML(false)
-		enc.Encode(docs)
-		return strings.TrimRight(buf.String(), "\n")
+		b.WriteString("[")
+		for r := r0; r <= r1; r++ {
+			if r > r0 {
+				b.WriteString(",")
+			}
+			b.WriteString("\n  {")
+			for c := c0; c <= c1; c++ {
+				if c > c0 {
+					b.WriteString(",")
+				}
+				b.WriteString("\n    " + enc(g.Cols[c].Name, "") + ": " + enc(jsonValue(cell(r, c)), "    "))
+			}
+			b.WriteString("\n  }")
+		}
+		b.WriteString("\n]")
 	case FmtHTML:
 		b.WriteString("<table>\n<tr>")
 		for _, n := range names {
@@ -759,17 +769,25 @@ func (g *Grid) View(th Theme, focused bool) string {
 	var hdr strings.Builder
 	hdr.WriteString(th.HeaderCell.Render(fit("", gw)))
 	hsep := th.HeaderCell.Foreground(lipgloss.Color(th.pal["grid_line"])).Render("│")
+	arrow := map[bool]string{false: "▲", true: "▼"}
 	for i, used := g.left, gw; i < len(g.Cols) && used < g.W; i++ {
 		c := g.Cols[i]
 		used += c.Width + 1
 		name, st := c.Name, th.HeaderCell
-		if g.SortCol == c.Name { // the sorted column is the one the eye looks for
-			st = st.Foreground(lipgloss.Color(th.pal["accent"]))
-			if g.SortDesc {
-				name += " ▼"
-			} else {
-				name += " ▲"
+		mark := ""
+		if g.SortCol == c.Name {
+			mark = arrow[g.SortDesc]
+		}
+		if len(g.Sorts) > 1 { // several sort keys: every one is marked with its order
+			for k, s := range g.Sorts {
+				if s.Column == c.Name {
+					mark = arrow[s.Desc] + strconv.Itoa(k+1)
+				}
 			}
+		}
+		if mark != "" { // the sorted column is the one the eye looks for
+			st = st.Foreground(lipgloss.Color(th.pal["accent"]))
+			name += " " + mark
 		}
 		cell := st.Render(fit(name, c.Width))
 		if c.PK {

@@ -6,7 +6,7 @@ import { EditorSelection, EditorState, Prec } from '@codemirror/state'
 import { LanguageSupport, foldEffect, foldedRanges, unfoldEffect } from '@codemirror/language'
 import { EditorView as View, crosshairCursor, highlightWhitespace, keymap, rectangularSelection, type EditorView } from '@codemirror/view'
 import { SearchQuery, findNext, findPrevious, getSearchQuery, openSearchPanel, selectNextOccurrence, selectSelectionMatches, setSearchQuery } from '@codemirror/search'
-import { autocompletion, startCompletion } from '@codemirror/autocomplete'
+import { autocompletion, closeCompletion, startCompletion } from '@codemirror/autocomplete'
 import { selectAll, toggleBlockComment, toggleComment } from '@codemirror/commands'
 import { Vim, vim } from '@replit/codemirror-vim'
 import { api, ApiError, beacon, download, postQuery, qs, saveBlob, stream, type Column, type DbObject, type ExecItem, type Gate, type Meta, type Plan, type SessionInfo, type Sort, type Val } from '../utils/api'
@@ -29,6 +29,7 @@ import { CellEditor, type CellTarget } from './CellEditor'
 import { ExplainDialog } from './Wave'
 import { completionKeys, completionSource, type Env } from './Completion'
 import { cmTheme } from './cmtheme'
+import { normItem, stmtAt } from '../utils/results'
 
 // parameter values are remembered per session, so running a statement again pre-fills the dialog
 const savedVars: Record<string, Record<string, string>> = {}
@@ -52,7 +53,7 @@ function defineVimEx() {
 const flag = (k: string) => { try { return localStorage.getItem(k) === '1' } catch { return false } }
 const setFlag = (k: string, v: boolean) => { try { localStorage.setItem(k, v ? '1' : '0') } catch { /* private mode */ } }
 
-export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tabKey, savedName, onText, onCancel, onDirty, onClose }: { sid: string; info: SessionInfo; meta: Meta; initial: string; tabKey: string; notify: (m: string) => void; shown?: boolean; autorun?: boolean; savedName?: string; onText?: (t: string) => void; onCancel?: () => void; onDirty?: (dirty: boolean) => void; onClose?: () => void }) {
+export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tabKey, savedName, onText, onCancel, onDirty, onTx, onClose, onSaved }: { sid: string; info: SessionInfo; meta: Meta; initial: string; tabKey: string; notify: (m: string) => void; shown?: boolean; autorun?: boolean; savedName?: string; onText?: (t: string) => void; onCancel?: () => void; onDirty?: (dirty: boolean) => void; onTx?: (open: boolean) => void; onClose?: () => void; onSaved?: (name: string) => void }) {
   const [vimOn, setVimOn] = useState(() => flag('webtuidb-vim'))
   const [invis, setInvis] = useState(() => flag('webtuidb-invisibles'))
   const ed = meta.config.editor
@@ -111,6 +112,15 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   const pinId = tabKey.replace(/[^A-Za-z0-9_-]/g, '_')
   const [pinned, setPinned] = useState(false) // this tab keeps one dedicated connection (BEGIN, SET and temp tables carry over)
   const pinnedRef = useRef(false); pinnedRef.current = pinned
+  const [inTx, setInTx] = useState(false) // a transaction is open on the pinned connection (the server says, after each run)
+  useEffect(() => { onTx?.(inTx) }, [inTx]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onTx?.(false), []) // eslint-disable-line react-hooks/exhaustive-deps
+  // the server pins a tab whose run starts with BEGIN and releases that pin at COMMIT / ROLLBACK (session.autoPin)
+  const txState = (d: { pinned?: boolean; inTx?: boolean; autoPinned?: boolean }) => {
+    if (d.pinned === undefined) return
+    if (d.autoPinned && !pinnedRef.current) notify('This tab now keeps one connection until COMMIT or ROLLBACK')
+    setPinned(!!d.pinned); setInTx(!!d.inTx)
+  }
   useEffect(() => {
     const gone = () => { if (pinnedRef.current) beacon(`/sessions/${sid}/pin/${pinId}`) } // the server also sweeps pins idle for 10 minutes
     window.addEventListener('pagehide', gone)
@@ -133,16 +143,20 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
 
   const send = async (body: Record<string, unknown>) => {
     if (running) return
-    if (pendingTotal > 0 && !(await confirm('Discard pending changes in the result tabs?'))) return
+    if (pendingTotal > 0 && !(await confirm('Discard pending changes in the result tabs?', undefined, 'Discard'))) return
     setPends({}); hist.current = []
+    // like the terminal: with [editor] query_params off, variables the Variables dialog knows are sent unbound, so say how to bind them
+    if (!ed.QueryParams && body.vars === undefined && Object.keys(savedVars[sid] ?? {}).some((k) => new RegExp(`:${k.replace(/\W/g, '')}\\b`).test(String(body.text ?? '')))) notify('Parameters are off: set [editor] query_params = true to bind :name on every run')
     const mine = ctrl.current = new AbortController()
     setRunning(true); setError(''); setGate(null)
     const t0 = performance.now()
     try {
       const keep = meta.config.editor.ResultMode === 'append' ? results : results.filter((r) => r.pinned) // append: earlier result tabs stay; a pinned one always does
-      const req = { ...body, limit, pin: pinned ? pinId : undefined, syntax: info.caps.Editor === 'mongo' ? syntax : undefined }
+      const req = { ...body, limit, pin: pinned ? pinId : undefined, tab: info.pinnable ? pinId : undefined, syntax: info.caps.Editor === 'mongo' ? syntax : undefined }
       // a big result streams in, so the first rows show while the rest arrives; small ones keep the one-shot path
-      const items = (limit < 0 || (limit || info.rowLimit || -1) > 1000) ? await runStream(req, mine.signal, keep) : (await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, req, mine.signal)).results
+      let items: ExecItem[]
+      if (limit < 0 || (limit || info.rowLimit || -1) > 1000) items = await runStream(req, mine.signal, keep)
+      else { const r = await api<{ results: ExecItem[]; pinned?: boolean; inTx?: boolean; autoPinned?: boolean }>('POST', `/sessions/${sid}/exec`, req, mine.signal); txState(r); items = r.results.map(normItem) }
       const at = items.findIndex((x) => x.error)
       setResults([...keep, ...items]); setJson(false); setChart(false); setFind(null); setFocusCell(null); setActive(keep.length + Math.max(0, at)); setPassword('')
       if (!items.length) setError('Nothing ran. Type a statement first.')
@@ -162,13 +176,13 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
     const show = (force = false) => { if (force || performance.now() - last > 120) { last = performance.now(); setResults([...keep, ...items.map((x) => ({ ...x }))]) } }
     try {
       await stream('POST', `/sessions/${sid}/exec/stream`, req, (ev, d) => {
-        if (ev === 'columns') { items[d.i] = { stmt: d.stmt, label: d.label || undefined, columns: d.columns, cells: [], affected: 0, hasRows: true, durationMs: 0, truncated: false, editable: false }; if (d.i === 0) setActive(keep.length); show(true) }
+        if (ev === 'columns') { items[d.i] = { stmt: d.stmt, label: d.label || undefined, columns: d.columns ?? [], cells: [], affected: 0, hasRows: true, durationMs: 0, truncated: false, editable: false }; if (d.i === 0) setActive(keep.length); show(true) }
         else if (ev === 'rows') { items[d.i].cells.push(...d.cells); show() }
         else if (ev === 'done') {
           const it = items[d.i] ?? { stmt: d.stmt, columns: [], cells: [], affected: 0, hasRows: false, durationMs: 0, truncated: false, editable: false }
           items[d.i] = { ...it, label: d.label || it.label, error: d.error || undefined, affected: d.affected, message: d.message, noticeId: d.noticeId || undefined, durationMs: d.durationMs, truncated: d.truncated, hasRows: d.hasRows, docs: d.docs ?? undefined, editable: !!d.editable, table: d.table ?? undefined, resultId: d.resultId || undefined }
           show(true)
-        }
+        } else if (ev === 'end') txState(d)
       }, signal)
     } catch (e) { show(true); throw e }
     return items
@@ -181,10 +195,11 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   }, [running, timeoutSecs, slowTick])
   const cancel = () => { if (running) { ctrl.current?.abort(); onCancel?.() } }
   const togglePin = async () => {
+    if (pinned && inTx && !(await confirm('This tab has an open transaction. Release the connection and roll back?', 'Everything since BEGIN is rolled back. COMMIT first to keep it.', 'Roll back and release'))) return
     try {
       if (pinned) await api('DELETE', `/sessions/${sid}/pin/${pinId}`)
       else await api('POST', `/sessions/${sid}/pin/${pinId}`)
-      setPinned(!pinned); notify(pinned ? 'Connection released' : 'This tab now keeps one connection: BEGIN and SET carry over. Pin again to release it.')
+      setPinned(!pinned); setInTx(false); notify(pinned ? 'Connection released' : 'This tab now keeps one connection: BEGIN and SET carry over. Pin again to release it.')
     } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
   }
   useEffect(() => () => ctrl.current?.abort(), [])
@@ -342,10 +357,21 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
     const v = view.current!, sel = v.state.selection.main
     return sel.empty ? { from: 0, to: v.state.doc.length } : { from: sel.from, to: sel.to }
   }
+  // beautify / uglify: the selection, else the statement under the cursor (trimmed), else the whole text, like the terminal's reformat
+  const stmtTarget = async (v: EditorView) => {
+    const sel = v.state.selection.main, doc = v.state.doc.toString()
+    if (!sel.empty) return { from: sel.from, to: sel.to }
+    const r = stmtAt(await api<[number, number][]>('POST', '/split', { text: doc, dialect: info.caps.Dialect }), sel.head)
+    if (r) {
+      const s = doc.slice(r[0], r[1]), from = r[0] + s.length - s.trimStart().length, to = from + s.trim().length
+      if (to > from) return { from, to }
+    }
+    return { from: 0, to: v.state.doc.length }
+  }
   const reformat = async (mode: 'beautify' | 'uglify') => {
     const v = view.current; if (!v) return
-    const { from, to } = target()
     try {
+      const { from, to } = await stmtTarget(v)
       const r = await api<{ text: string }>('POST', '/format', { text: v.state.sliceDoc(from, to), mode, dialect: info.caps.Dialect, IndentType: ed.IndentType })
       v.dispatch({ changes: { from, to, insert: r.text } })
     } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
@@ -373,7 +399,7 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   const loadMore = async () => {
     if (!cur?.truncated) return notify('Nothing more to load')
     if (loadingMore.current) return
-    if (cur.editable && pendCount(P) > 0 && !(await confirm('Loading more rows discards the pending changes in this result. Continue?'))) return
+    if (cur.editable && pendCount(P) > 0 && !(await confirm('Loading more rows discards the pending changes in this result. Continue?', undefined, 'Discard and load'))) return
     loadingMore.current = true
     if (cur.resultId) setPends((m) => { const { [cur.resultId!]: _g, ...rest } = m; return rest })
     try {
@@ -382,17 +408,17 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
       if (p.supported && p.result) {
         const add = p.result
         // shortcut: the server snapshot behind resultId holds the first page only, so a result that grew by Load more is no longer editable
-        return setResults((all) => all.map((x, i) => (i === active ? { ...x, editable: false, cells: [...x.cells, ...add.cells], truncated: !!p.more, pageSize: size, durationMs: x.durationMs + add.durationMs } : x)))
+        return setResults((all) => all.map((x, i) => (i === active ? { ...x, editable: false, cells: [...x.cells, ...(add.cells ?? [])], truncated: !!p.more, pageSize: size, durationMs: x.durationMs + add.durationMs } : x)))
       }
       const r = await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, { text: cur.stmt, limit: cur.cells.length * 2, vars: {}, pin: pinned ? pinId : undefined })
       if (r.results[0]?.error) return notify(r.results[0].error)
-      setResults((all) => all.map((x, i) => (i === active ? r.results[0] : x)))
+      setResults((all) => all.map((x, i) => (i === active ? normItem(r.results[0]) : x)))
     } catch (e) { notify(e instanceof ApiError && e.status === 409 ? 'This statement needs confirmation, so it cannot be re-run to load more' : e instanceof Error ? e.message : String(e)) } finally { loadingMore.current = false }
   }
   const copyRows = (f: CopyFormat) => {
     if (!cur?.hasRows) return
     const idx = sel && sel[0] === 'r' ? [Number(sel.slice(1))] : cur.cells.map((_, i) => i)
-    copyText(formatRows(f, cur.columns, idx.map((i) => cur.cells[i]), meta.config.csv, info.caps.Dialect)).then(() => notify(`Copied ${idx.length} row${idx.length === 1 ? '' : 's'}`), (e) => notify(String(e)))
+    copyText(formatRows(f, cur.columns, idx.map((i) => cur.cells[i]), meta.config.csv, info.caps.Dialect, cur.table?.name)).then(() => notify(`Copied ${idx.length} row${idx.length === 1 ? '' : 's'}`), (e) => notify(String(e)))
   }
   const copyCell = () => {
     if (!cur?.hasRows || !sel || sel[0] !== 'r') return notify('Select a row first')
@@ -459,7 +485,7 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   const writeAs = async (name: string): Promise<boolean> => {
     try {
       await (savedAs.current === name ? api('POST', '/queries', { Name: name, SQL: text, Overwrite: true }) : postQuery('/queries', { Name: name, SQL: text }))
-      savedAs.current = name; lastSaved.current = text; return true
+      savedAs.current = name; lastSaved.current = text; onSaved?.(name); return true
     } catch (e) { notify(String(e)); return false }
   }
   const save = async () => {
@@ -486,7 +512,8 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
     objects: objs.data ?? [], saved: saved.data ?? [], keywords: info.caps.Editor === 'sql' ? (d.spec.keywords ?? '').split(/\s+/).filter(Boolean) : [],
     opts: { tables: ed.CompleteTables !== false, functions: ed.CompleteFunctions !== false, keywords: ed.CompleteKeywords !== false, prefixSchema: !!ed.PrefixSchema, addSpace: !!ed.AddSpace, upper: !!ed.UppercaseKeywords },
     colsOf: (schema, table) => {
-      const o = (objs.data ?? []).find((x) => x.Name.toLowerCase() === table && (!schema || x.Schema.toLowerCase() === schema) && ['table', 'view', 'matview'].includes(x.Kind))
+      // a table of another schema (shop.customers c) is not in objs: ask for it by name
+      const o = (objs.data ?? []).find((x) => x.Name.toLowerCase() === table && (!schema || x.Schema.toLowerCase() === schema) && ['table', 'view', 'matview'].includes(x.Kind)) ?? (schema ? { Schema: schema, Name: table, Kind: 'table' } : null)
       if (!o) return Promise.resolve([])
       const k = (o.Schema ?? '') + '.' + o.Name
       if (!colCache.current.has(k)) colCache.current.set(k, api<Column[]>('GET', `/sessions/${sid}/object/columns` + qs({ schema: o.Schema, name: o.Name, kind: o.Kind })).then((l) => l.map((c) => c.Name), () => { colCache.current.delete(k); return [] }))
@@ -502,38 +529,44 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
     return [
       autocompletion({ defaultKeymap: false, activateOnTyping: cfg<boolean>(meta, 'editor', 'autocomplete', true) !== false }),
       completionKeys(String(cfg(meta, 'editor', 'completeKey', 'enter_or_tab'))),
+      // closeOnBlur skips a completion still loading (async objects), which then opened over Run's result or a dialog;
+      // closeCompletion also drops the pending query. A click into the popup itself keeps it.
+      View.domEventHandlers({ blur: (e, v) => { if (!(e.relatedTarget instanceof Element && e.relatedTarget.closest('.cm-tooltip-autocomplete'))) closeCompletion(v); return false } }),
       info.caps.Editor === 'sql' ? new LanguageSupport(d.language, [d.language.data.of({ autocomplete: src })]) : EditorState.languageData.of(() => [{ autocomplete: src }]),
     ]
   }, [d, info.caps.Editor, meta])
-  const ext = [
+  // the extension list is memoised: a new array makes the editor reconfigure itself, which on every keystroke is what made typing lag
+  const blockStepRef = useRef(blockStep); blockStepRef.current = blockStep
+  const ext = useMemo(() => [
     ...(vimOn ? (defineVimEx(), [Prec.high(vim())]) : []),
     EditorState.allowMultipleSelections.of(true), // select_next_occurrence adds carets
     ...(invis ? [highlightWhitespace()] : []),
     Prec.highest(keymap.of([
       { key: 'Mod-Enter', run: () => { runRef.current(false); return true } },
       { key: 'Mod-Shift-Enter', run: () => { runRef.current(true); return true } },
-      { key: 'Shift-Alt-ArrowUp', run: () => blockStep(-1, 0) }, { key: 'Shift-Alt-ArrowDown', run: () => blockStep(1, 0) },
-      { key: 'Shift-Alt-ArrowLeft', run: () => blockStep(0, -1) }, { key: 'Shift-Alt-ArrowRight', run: () => blockStep(0, 1) },
-      { key: 'ArrowUp', run: () => blockOnRef.current && blockStep(-1, 0) }, { key: 'ArrowDown', run: () => blockOnRef.current && blockStep(1, 0) },
-      { key: 'ArrowLeft', run: () => blockOnRef.current && blockStep(0, -1) }, { key: 'ArrowRight', run: () => blockOnRef.current && blockStep(0, 1) },
+      { key: 'Shift-Alt-ArrowUp', run: () => blockStepRef.current(-1, 0) }, { key: 'Shift-Alt-ArrowDown', run: () => blockStepRef.current(1, 0) },
+      { key: 'Shift-Alt-ArrowLeft', run: () => blockStepRef.current(0, -1) }, { key: 'Shift-Alt-ArrowRight', run: () => blockStepRef.current(0, 1) },
+      { key: 'ArrowUp', run: () => blockOnRef.current && blockStepRef.current(-1, 0) }, { key: 'ArrowDown', run: () => blockOnRef.current && blockStepRef.current(1, 0) },
+      { key: 'ArrowLeft', run: () => blockOnRef.current && blockStepRef.current(0, -1) }, { key: 'ArrowRight', run: () => blockOnRef.current && blockStepRef.current(0, 1) },
       { key: 'Escape', run: (v) => { if (!blockOnRef.current) return false; setBlockOn(false); blk.current = null; v.dispatch({ selection: EditorSelection.cursor(v.state.selection.main.head) }); return true } },
     ])),
     rectangularSelection(), crosshairCursor(), // Alt-drag with the mouse
     ...(wrap ? [View.lineWrapping] : []),
     completion,
-  ]
+  ], [vimOn, invis, wrap, completion]) // eslint-disable-line react-hooks/exhaustive-deps
+  const setup = useMemo(() => ({ lineNumbers: true, foldGutter: true, autocompletion: false, closeBrackets: cfg<boolean>(meta, 'editor', 'closeBraces', true) !== false, highlightActiveLine: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false, highlightActiveLineGutter: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false }), [meta])
   const cur = results[active]
   // ---- editable results (M12.2): a single-table SELECT with its whole primary key. Edits go through POST .../plan like a table tab's.
   const canEdit = !!(cur?.editable && cur.resultId && !cur.error && cur.hasRows && !running)
   const rid = cur?.resultId ?? ''
   const P: Pend = pends[rid] ?? emptyPend()
-  const curCols = useMemo(() => (cur?.table ? cur.columns.map((c) => ({ ...c, pk: cur.table!.pk.includes(c.name) })) : cur?.columns ?? []), [cur?.columns, cur?.table]) // eslint-disable-line react-hooks/exhaustive-deps
+  const curCols = useMemo(() => (cur?.table ? (cur.columns ?? []).map((c) => ({ ...c, pk: cur.table!.pk.includes(c.name) })) : cur?.columns ?? []), [cur?.columns, cur?.table]) // eslint-disable-line react-hooks/exhaustive-deps
   const edited = useMemo(() => editedMap(P), [pends, rid]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setRsort([]) }, [active])
   // header menu sort: the loaded rows are sorted here (NULL first, numbers by value); keys stay 'r<original index>', so pending changes keep their rows
   const sortedRows = useMemo((): GridRow[] => {
     if (!cur) return []
-    const rows = cur.cells.map((cells, i): GridRow => ({ key: 'r' + i, cells, state: P.deletes.has('r' + i) ? 'deleted' : 'clean' }))
+    const rows = (cur.cells ?? []).map((cells, i): GridRow => ({ key: 'r' + i, cells, state: P.deletes.has('r' + i) ? 'deleted' : 'clean' }))
     if (!rsort.length) return rows
     const idx = rsort.map((x) => ({ i: cur.columns.findIndex((c) => c.name === x.Column), desc: x.Desc })).filter((x) => x.i >= 0)
     const num = idx.map((x) => isNumeric(cur.columns[x.i].type))
@@ -545,7 +578,7 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
       }
       return 0
     })
-  }, [cur?.cells, cur?.cells.length, cur?.columns, rsort, P.deletes]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cur?.cells, cur?.cells?.length, cur?.columns, rsort, P.deletes]) // eslint-disable-line react-hooks/exhaustive-deps
   const gridRows: GridRow[] = !cur ? [] : [
     ...sortedRows,
     ...P.inserts.map((n): GridRow => ({ key: 'n' + n.id, cells: cur.columns.map(() => ''), state: 'new' })),
@@ -577,7 +610,7 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
   const refresh = async (idx: number, item: ExecItem) => {
     try {
       const r = await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, { text: item.stmt, limit: Math.max(item.cells.length, 1), vars: {}, pin: pinned ? pinId : undefined })
-      if (r.results[0] && !r.results[0].error) setResults((all) => all.map((x, i) => (i === idx ? { ...r.results[0], pinned: x.pinned } : x)))
+      if (r.results[0] && !r.results[0].error) setResults((all) => all.map((x, i) => (i === idx ? { ...normItem(r.results[0]), pinned: x.pinned } : x)))
       else notify(r.results[0]?.error ?? 'Could not reload the result')
     } catch (e) { notify(e instanceof Error ? e.message : String(e)) }
   }
@@ -659,23 +692,25 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
         {info.caps.Editor === 'mongo' && <Select className="bg-raised border-transparent" title="What the editor holds" aria-label="Mongo syntax" value={syntax} onChange={setSyntax} options={[{ value: 'shell', label: 'Shell JavaScript' }, { value: 'command', label: 'Command document' }]} />}
         {info.caps.Editor === 'sql' && <button onClick={explainNow} title="Explain the statement at the cursor (or the selection) as a tree">Explain</button>}
         {info.pinnable && <button className={pinned ? 'btn-on' : ''} aria-pressed={pinned} onClick={togglePin} title="Keep one connection for this tab, so BEGIN, SET and temp tables carry over">{pinned ? 'Pinned' : 'Pin'}</button>}
+        {inTx && <span className="chip self-center" role="status" title="BEGIN without COMMIT or ROLLBACK yet: closing or unpinning the tab rolls it back">transaction open</span>}
         <Select ref={limitBox} className="bg-raised border-transparent" title="row limit" aria-label="Row limit" value={String(limit)} onChange={(v) => setLimit(Number(v))}
-          options={[{ value: '0', label: `Limit ${info.rowLimit}` }, '100', '1000', '10000', { value: '-1', label: 'No limit' }]} />
+          options={info.rowLimit > 0 // the server caps every run at [general] row_limit, so larger choices would not take effect
+            ? [{ value: '0', label: `Limit ${info.rowLimit} (the configured limit)` }, ...['100', '1000', '10000'].filter((n) => Number(n) < info.rowLimit)]
+            : [{ value: '0', label: 'No limit' }, '100', '1000', '10000']} />
         <span className="flex-1 min-w-0" />
-        <button onClick={() => reformat('beautify')} title="Beautify SQL (selection or all)">Beautify</button>
-        <button onClick={() => reformat('uglify')} title="Uglify SQL (selection or all)">Uglify</button>
+        <button onClick={() => reformat('beautify')} title="Beautify SQL (the selection, else the statement at the cursor)">Beautify</button>
+        <button onClick={() => reformat('uglify')} title="Uglify SQL (the selection, else the statement at the cursor)">Uglify</button>
         {blockOn && <span className="px-2 border border-rule-2 rounded-[2px] text-[11.5px] text-ink-2" title="Block selection: the arrows grow the rectangle, Esc leaves">block</span>}
         <button onClick={toggleSecond} className={second !== null ? 'btn-on' : ''} aria-pressed={second !== null} title="Stack a second editor under this one">Split down</button>
         <button onClick={save} disabled={!text.trim()}>Save query</button>
       </div>
       <div className={`relative border-b border-rule ${second === null && pane === 0 ? '' : ''}`} data-ctx="editor" onFocusCapture={() => { if (views.current[0]) { view.current = views.current[0]; setPane(0) } }}>
-        <CodeMirror value={text} height={second === null ? `${edH}px` : `${Math.max(100, Math.round(edH * 0.64))}px`} theme={cmTheme} extensions={ext} onChange={(t) => { setText(t); syncFolds() }} onCreateEditor={(v) => { views.current[0] = v; view.current = v; restoreFolds(v) }}
-          basicSetup={{ lineNumbers: true, foldGutter: true, autocompletion: false, closeBrackets: cfg<boolean>(meta, 'editor', 'closeBraces', true) !== false, highlightActiveLine: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false, highlightActiveLineGutter: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false }} />
+        <CodeMirror value={text} height={second === null ? `${edH}px` : `${Math.max(100, Math.round(edH * 0.64))}px`} theme={cmTheme} extensions={ext} onChange={(t) => { setText(t); syncFolds() }} onCreateEditor={(v) => { views.current[0] = v; view.current = v; restoreFolds(v) }} basicSetup={setup} />
         {second === null && <div role="separator" aria-orientation="horizontal" aria-label="Resize the editor" title="Drag to resize the editor" className="absolute left-0 right-0 -bottom-[3px] h-[6px] z-[3] cursor-row-resize hover:bg-accent/40 active:bg-accent/60" onMouseDown={dragH} onDoubleClick={() => { setEdH(220); try { localStorage.removeItem('webtuidb-editor-h') } catch { /* private mode */ } }} />}
       </div>
       {second !== null && (
         <div className="border-b border-rule" data-ctx="editor" onFocusCapture={() => { if (views.current[1]) { view.current = views.current[1]; setPane(1) } }}>
-          <CodeMirror value={second} height={`${Math.max(100, Math.round(edH * 0.64))}px`} theme={cmTheme} extensions={ext} onChange={setSecond} onCreateEditor={(v) => { views.current[1] = v }} basicSetup={{ lineNumbers: true, foldGutter: true, autocompletion: false, closeBrackets: cfg<boolean>(meta, 'editor', 'closeBraces', true) !== false, highlightActiveLine: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false, highlightActiveLineGutter: cfg<boolean>(meta, 'editor', 'highlightCurrent', true) !== false }} />
+          <CodeMirror value={second} height={`${Math.max(100, Math.round(edH * 0.64))}px`} theme={cmTheme} extensions={ext} onChange={setSecond} onCreateEditor={(v) => { views.current[1] = v }} basicSetup={setup} />
         </div>
       )}
       {showRes && <>
@@ -695,7 +730,7 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
           <button className="btn-ghost" onClick={undo} disabled={!hist.current.some((h) => h.id === rid)}>Undo</button>
           <button className="btn-ghost" onClick={preview} disabled={!pendCount(P)}>Preview SQL</button>
           <button className="btn-ghost" onClick={discard} disabled={!pendCount(P)}>Discard</button>
-          <button className={pendCount(P) ? 'btn-primary' : 'btn-ghost'} onClick={commit} disabled={!pendCount(P)}>Commit{pendCount(P) ? ` (${pendCount(P)} pending)` : ''}</button>
+          <button className={pendCount(P) ? 'btn-primary' : 'btn-ghost'} onClick={commit} disabled={!pendCount(P)}>Send changes{pendCount(P) ? ` (${pendCount(P)} pending)` : ''}</button>
         </>}
         {cur?.docs?.length ? <button className="btn-ghost" aria-pressed={json} onClick={() => setJson(!json)}>{json ? 'Rows' : 'JSON'}</button> : null}
         {cur && !cur.error && <button className={`btn-ghost ${msgView ? 'btn-on' : ''}`} aria-pressed={msgView} onClick={() => setMsgView(!msgView)}>Message</button>}
@@ -758,7 +793,7 @@ function MessageView({ sid, item, notify }: { sid: string; item: ExecItem; notif
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <pre className="flex-1 overflow-auto m-0 px-4 py-3 text-[12px] whitespace-pre-wrap" data-ctx="results">{text}</pre>
-      <div className="toolbar bg-canvas"><button onClick={() => saveBlob(new Blob([text + '\n'], { type: 'text/plain;charset=utf-8' }), 'message.txt')}>Save as text</button><button onClick={() => navigator.clipboard.writeText(text).then(() => notify('Copied the message'), (e) => notify(String(e)))}>Copy</button></div>
+      <div className="toolbar bg-canvas"><button onClick={() => saveBlob(new Blob([text + '\n'], { type: 'text/plain;charset=utf-8' }), 'message.txt')}>Save as text</button><button onClick={() => copyText(text).then(() => notify('Copied the message'), (e) => notify(String(e)))}>Copy</button></div>
     </div>
   )
 }

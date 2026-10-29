@@ -263,6 +263,27 @@ func (s *session) UseDatabase(ctx context.Context, name string) error {
 	return nil
 }
 
+// SetSchema makes name the schema unqualified names resolve in: the search_path becomes name, then public,
+// on every pooled connection and on pinned ones at their next statement. Back on the schema the session
+// connected with, the server's default path applies again.
+func (s *session) SetSchema(_ context.Context, name string) error {
+	p := s.p()
+	path := ""
+	if name != p.schema {
+		path = ident(name)
+		if name != "public" {
+			path += ", public" // extensions usually live there
+		}
+	}
+	p.mu.Lock()
+	p.path = path
+	p.mu.Unlock()
+	s.mu.Lock()
+	s.schema = name
+	s.mu.Unlock()
+	return nil
+}
+
 // pool is a minimal connection pool: at most maxConns open, idle ones reused.
 type pool struct {
 	cfg                   *pgx.ConnConfig
@@ -276,6 +297,7 @@ type pool struct {
 	mu     sync.Mutex
 	idle   []*conn
 	closed bool
+	path   string // search_path every connection runs with (SetSchema), "" = the server's default
 }
 
 // conn is one pooled connection plus the server notices it collected during the current call.
@@ -283,10 +305,11 @@ type conn struct {
 	*pgx.Conn
 	nmu     sync.Mutex
 	notices []string
-	bad     bool // must not be reused
-	reused  bool // taken from the idle list, so the server may have dropped it meanwhile
-	dirty   bool // ran user SQL (SET, temp tables, ...): reset the session before reuse
-	pinned  bool // lent out by Pin: holds the user's transaction, so a statement is never cancelled
+	bad     bool   // must not be reused
+	reused  bool   // taken from the idle list, so the server may have dropped it meanwhile
+	dirty   bool   // ran user SQL (SET, temp tables, ...): reset the session before reuse
+	pinned  bool   // lent out by Pin: holds the user's transaction, so a statement is never cancelled
+	path    string // the pool's search_path as last applied to this connection
 }
 
 func (c *conn) addNotice(_ *pgconn.PgConn, n *pgconn.Notice) {
@@ -357,7 +380,7 @@ func (p *pool) dial(ctx context.Context) (*conn, error) {
 	for _, b := range p.bootstrap {
 		if _, err := pc.Exec(ctx, b); err != nil {
 			closeConn(c)
-			return nil, fmt.Errorf("bootstrap %q: %w", b, err)
+			return nil, fmt.Errorf("bootstrap (%s): %w", b, err)
 		}
 	}
 	c.takeNotices()
@@ -395,8 +418,32 @@ func (p *pool) reset(c *conn) bool {
 			return false
 		}
 	}
+	if p.resetSQL != "" {
+		c.path = "" // DISCARD / RESET ALL dropped the search_path: syncPath sets it again
+	}
 	c.dirty = false
 	return true
+}
+
+// syncPath gives c the pool's current search_path when SetSchema changed it since c last ran.
+func (p *pool) syncPath(ctx context.Context, c *conn) error {
+	p.mu.Lock()
+	want := p.path
+	p.mu.Unlock()
+	if c.path == want {
+		return nil
+	}
+	qs := []string{"SET search_path TO " + want}
+	if want == "" { // the bootstrap may set its own search_path: replay it after the default
+		qs = append([]string{"SET search_path TO DEFAULT"}, p.bootstrap...)
+	}
+	for _, q := range qs {
+		if _, err := c.Exec(ctx, q); err != nil {
+			return fmt.Errorf("set schema: %w", err)
+		}
+	}
+	c.path = want
+	return nil
 }
 
 // use runs f on a pooled connection. If a connection that sat idle turns out to have been dropped
@@ -406,6 +453,13 @@ func (p *pool) reset(c *conn) bool {
 // (pgconn.SafeToRetry) or that the server terminated at once (see retryable): an EOF after the write may
 // mean the server committed, and Apply would run twice.
 func (p *pool) use(ctx context.Context, f func(*conn) error) error {
+	inner := f
+	f = func(c *conn) error {
+		if err := p.syncPath(ctx, c); err != nil {
+			return err
+		}
+		return inner(c)
+	}
 	c, err := p.get(ctx)
 	if err != nil {
 		return err

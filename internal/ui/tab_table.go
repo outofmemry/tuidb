@@ -133,7 +133,7 @@ func (t *tableTab) saveState() {
 	for h := range t.hidden {
 		hidden = append(hidden, h)
 	}
-	t.ws.a.d.State.SetTable(t.stateKey(), store.TableState{Hidden: hidden, Filters: t.filters, ShowBar: t.showFilters, Sort: t.sort, ColWidths: t.ws.a.d.State.Table(t.stateKey()).ColWidths})
+	t.ws.a.d.State.SetTable(t.stateKey(), store.TableState{Hidden: hidden, Filters: t.applied(), ShowBar: t.showFilters, Sort: t.sort, ColWidths: t.ws.a.d.State.Table(t.stateKey()).ColWidths})
 }
 
 func (t *tableTab) ID() int       { return t.id }
@@ -495,7 +495,7 @@ func (t *tableTab) fill(res *db.Result) {
 		t.toTop = false
 	}
 	t.grid.RowOffset = t.offset
-	t.grid.SortCol, t.grid.SortDesc = "", false
+	t.grid.SortCol, t.grid.SortDesc, t.grid.Sorts = "", false, t.sort
 	if len(t.sort) > 0 {
 		t.grid.SortCol, t.grid.SortDesc = t.sort[0].Column, t.sort[0].Desc
 	}
@@ -578,7 +578,7 @@ func (t *tableTab) Input(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		if !done {
-			return t.ws.a.say("nothing pasted: the clipboard is empty or %s is read-only", t.ref.Name)
+			return t.ws.a.fail(fmt.Errorf("nothing pasted: the clipboard is empty or %s is read-only", t.ref.Name))
 		}
 		return t.ws.a.say("pasted %d row(s)", len(data))
 	}
@@ -754,7 +754,7 @@ func (t *tableTab) Action(name string) (bool, tea.Cmd) {
 	switch name {
 	case "add_row":
 		if !g.AddRow() {
-			return true, t.ws.a.say("%s is read-only", t.ref.Name)
+			return true, t.ws.a.fail(fmt.Errorf("%s is read-only", t.ref.Name))
 		}
 	case "duplicate_rows":
 		g.DuplicateRows()
@@ -776,7 +776,7 @@ func (t *tableTab) Action(name string) (bool, tea.Cmd) {
 		return true, t.setValueMenu()
 	case "paste_rows", "paste_cells":
 		if !g.Editable {
-			return true, t.ws.a.say("%s is read-only", t.ref.Name)
+			return true, t.ws.a.fail(fmt.Errorf("%s is read-only", t.ref.Name))
 		}
 		t.paste = strings.TrimPrefix(name, "paste_")
 		return true, tea.ReadClipboard
@@ -860,15 +860,19 @@ func (t *tableTab) pageSettings() tea.Cmd {
 		{Key: "limit", Label: "Limit", Kind: fText, Value: strconv.Itoa(t.limit)},
 		{Key: "offset", Label: "Offset", Kind: fText, Value: strconv.Itoa(t.offset)},
 	}, func(v map[string]string) tea.Cmd {
-		lim, err1 := strconv.Atoi(strings.TrimSpace(v["limit"]))
-		off, err2 := strconv.Atoi(strings.TrimSpace(v["offset"]))
-		if err1 != nil || err2 != nil || lim < 1 || off < 0 {
-			return t.ws.a.fail(fmt.Errorf("limit must be 1 or more, offset 0 or more"))
-		}
+		lim, _ := strconv.Atoi(strings.TrimSpace(v["limit"]))
+		off, _ := strconv.Atoi(strings.TrimSpace(v["offset"]))
 		return t.guard(func() tea.Cmd {
 			t.limit, t.offset, t.toTop = lim, off, true
 			return t.load()
 		})
+	}).checked(func(v map[string]string) error {
+		lim, err1 := strconv.Atoi(strings.TrimSpace(v["limit"]))
+		off, err2 := strconv.Atoi(strings.TrimSpace(v["offset"]))
+		if err1 != nil || err2 != nil || lim < 1 || off < 0 {
+			return fmt.Errorf("limit must be 1 or more, offset 0 or more")
+		}
+		return nil
 	}))
 	return nil
 }
@@ -882,7 +886,7 @@ func (t *tableTab) copy(text, what string) tea.Cmd {
 
 func (t *tableTab) setValueMenu() tea.Cmd {
 	if !t.grid.Editable {
-		return t.ws.a.say("%s is read-only", t.ref.Name)
+		return t.ws.a.fail(fmt.Errorf("%s is read-only", t.ref.Name))
 	}
 	items := []pickItem{{Label: "NULL", Value: db.Null}, {Label: "DEFAULT", Value: db.Default}, {Label: "EMPTY", Value: db.Empty}, {Label: "NOW()", Value: db.Expr("NOW()")}}
 	if t.ws.caps.Dialect == "clickhouse" {
@@ -1032,7 +1036,7 @@ func (t *tableTab) DetailKey(key string) tea.Cmd {
 		return editFieldInPopover(t.ws, g)
 	case "p", "m": // PRETTY / MINIFY the JSON field in every selected row
 		if !g.Editable {
-			return t.ws.a.say("read-only: PRETTY / MINIFY stage an edit")
+			return t.ws.a.fail(fmt.Errorf("read-only: PRETTY / MINIFY stage an edit"))
 		}
 		n := g.MapColumn(func(v any) (any, bool) { return reformatJSON(v, key == "p") })
 		if n == 0 {
@@ -1094,7 +1098,7 @@ func (t *tableTab) Detail() []string {
 
 func (t *tableTab) setView(v int) tea.Cmd {
 	if (v == viewJSON || v == viewTree) && !t.ws.caps.Document {
-		return t.ws.a.say("Json and Tree views are for document engines (MongoDB, Redis)")
+		return t.ws.a.fail(fmt.Errorf("Json and Tree views are for document engines (MongoDB, Redis)"))
 	}
 	t.view = v
 	if v >= viewJSON {
@@ -1142,14 +1146,14 @@ func (t *tableTab) bodyView(th Theme, W, H int) string {
 		return t.structView(th, W, H)
 	}
 	bar := t.filterView(th, W)
-	if !t.showFilters && len(t.filters.Active()) > 0 { // hidden bar: the filters still show as pills
+	if !t.showFilters && (len(t.applied().Active()) > 0 || t.filtersEdited()) { // hidden bar: the filters still show as pills
 		bar = []string{fit(" "+t.filterPills(th)+"   "+th.chips(t.keyFor("filters"), "edit"), W)}
 	}
 	t.grid.W, t.grid.H = W, max(2, H-len(bar))
 	var out string
 	if len(t.grid.Cols) > 0 && len(t.grid.Rows) == 0 && !t.loading {
 		empty := th.Dim.Render("No rows match the filters") + "   " + th.chips(t.keyFor("filters"), "edit filters")
-		if len(t.filters.Active()) == 0 {
+		if len(t.applied().Active()) == 0 {
 			empty = th.Dim.Render("No rows yet")
 			if t.grid.Editable {
 				empty += "   " + th.chips(t.keyFor("add_row"), "add a row")
@@ -1186,22 +1190,35 @@ func (t *tableTab) keyFor(action string) string {
 	return keymap.Display(t.ws.a.d.Keys.Prefix) + " " + keymap.Display(k)
 }
 
+// boundKey is the prefixed key bound to action in ctx (else global), as shown in hints ("C-d s"); "" when unbound,
+// so hints follow a [keys] rebinding and drop an action that lost its key (T-P2-06; chips skips "").
+func boundKey(km *keymap.Map, ctx, action string) string {
+	for _, b := range km.Bindings(ctx) {
+		if b.Action == action {
+			return keymap.Display(km.Prefix) + " " + keymap.Display(b.Key)
+		}
+	}
+	return ""
+}
+
 // filterPills renders the filters as pills (column bold, operator dim, value plain) joined by
-// the dim and/or; disabled filters are struck through.
+// the dim and/or; disabled filters are struck through. They are the applied filters (the ones the
+// rows came from), marked "not applied" when the bar holds other edits.
 func (t *tableTab) filterPills(th Theme) string {
 	bg := lipgloss.Color(th.pal["header_bg"])
+	ap := t.applied()
 	join := th.Dim.Render(" and ")
-	if t.filters.Or {
+	if ap.Or {
 		join = th.Dim.Render(" or ")
 	}
 	var pills []string
-	for _, f := range t.filters.Filters {
+	for _, f := range ap.Filters {
 		col := f.Column
 		switch col {
 		case db.AnyColumn:
 			col = "any column"
 		case db.RawColumn:
-			col = "sql"
+			col, f.Op = "sql", "" // raw SQL has no operator
 		}
 		if !f.Enabled {
 			pills = append(pills, th.Dim.Background(bg).Strikethrough(true).Render(" "+strings.TrimSpace(col+" "+f.Op+" "+f.Value)+" "))
@@ -1213,7 +1230,11 @@ func (t *tableTab) filterPills(th Theme) string {
 		}
 		pills = append(pills, p+lipgloss.NewStyle().Background(bg).Render(" "))
 	}
-	return th.Section.Render("Filters") + "  " + strings.Join(pills, join)
+	s := th.Section.Render("Filters") + "  " + strings.Join(pills, join)
+	if t.filtersEdited() {
+		s += th.Warn.Render(" · not applied")
+	}
+	return s
 }
 
 // pendingRows counts the rows with uncommitted edits, inserts or deletes.
@@ -1283,14 +1304,16 @@ func (t *tableTab) footer(th Theme, W int) string {
 
 // Hint is shown in the frame's bottom edge: the keys that matter for the current view.
 func (t *tableTab) Hint(th Theme) string {
-	pre := keymap.Display(t.ws.a.d.Keys.Prefix)
+	km := t.ws.a.d.Keys
 	switch {
 	case t.view == viewData && t.showFilters && t.fb.focus:
-		return th.chips("↵", "apply", "Tab", "field", "M-n", "add", "Esc", "hide")
+		return th.chips("↵", "apply", "Tab", "field", "Space", "pick", "M-n", "add", "Esc", "hide")
+	case t.view == viewData && t.ref.Kind != db.KindTable: // a view is read-only: nothing to edit or commit (T-P3-14)
+		return th.chips("↵", "quick look", "hjkl", "move", boundKey(km, keymap.Grid, "filters"), "filter")
 	case t.view == viewData:
-		return th.chips("↵", "edit", "hjkl", "move", pre+" i", "add row", pre+" s", "commit", pre+" f", "filter")
+		return th.chips("↵", "edit", "hjkl", "move", boundKey(km, keymap.Grid, "add_row"), "add row", boundKey(km, keymap.Grid, "commit"), "commit", boundKey(km, keymap.Grid, "filters"), "filter")
 	case t.view == viewStructure || t.view == viewIndex:
-		return th.chips("↵", "edit/toggle", pre+" i", "add", "Del", "remove", pre+" s", "commit")
+		return th.chips("↵", "edit/toggle", boundKey(km, keymap.Structure, "add_row"), "add", "Del", "remove", boundKey(km, keymap.Structure, "commit"), "commit")
 	case t.view == viewTree:
 		return th.chips("↵", "fold", "E/C", "expand/collapse all")
 	}

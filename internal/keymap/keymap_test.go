@@ -1,6 +1,7 @@
 package keymap
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -369,5 +370,56 @@ func TestTakenFromPerContext(t *testing.T) { // P2-79
 	}
 	if err := TakenFrom(old, &Map{}, "x"); err == nil {
 		t.Error("an action losing every binding must be reported")
+	}
+}
+
+// T-P2-06: an override that takes another action's key is reported, not silent.
+func TestOverrideTakingAKeyWarns(t *testing.T) {
+	m, err := Build("C-d", map[string][]string{"commit": {"x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[keys] commit = "x" takes the key from quick_filter (grid); quick_filter is now unbound`
+	if w := m.Warnings(); len(w) != 1 || w[0] != want {
+		t.Fatalf("warnings = %q, want [%q]", w, want)
+	}
+	if m, _ := Build("C-d", map[string][]string{"commit": {"F9"}}); len(m.Warnings()) != 0 {
+		t.Errorf("a free key must not warn: %q", m.Warnings())
+	}
+}
+
+// T-P2-07: `webtuidb -keys` lists every context GET /api/meta reports (it sends km.All()).
+func TestListingCoversEveryContext(t *testing.T) {
+	m, _ := Build("C-d", nil)
+	seen := map[string]bool{}
+	for _, b := range m.All() {
+		seen[b.Context] = true
+	}
+	for _, c := range Contexts {
+		delete(seen, c)
+	}
+	if len(seen) != 0 {
+		t.Errorf("contexts missing from Listing: %v", seen)
+	}
+	if !strings.Contains(Listing("C-d", m), "console_find") {
+		t.Error("Listing lacks the console bindings")
+	}
+}
+
+// P1-05: two installed plugins, both with a [keys] override, must both bind.
+func TestBuildCheckedTwoOverriddenPlugins(t *testing.T) {
+	extra := []Binding{{Action: "plugin:x", Key: "alt+P", Context: Global, Desc: "plugin: x"}, {Action: "plugin:y", Key: "alt+O", Context: Global, Desc: "plugin: y"}}
+	m, conflicts, err := BuildChecked("C-a", map[string][]string{"plugin:x": {"M-Q"}, "plugin:y": {"M-W"}}, extra...)
+	if err != nil || len(conflicts) != 0 {
+		t.Fatalf("err=%v conflicts=%v", err, conflicts)
+	}
+	got := map[string]string{}
+	for _, b := range m.All() {
+		if strings.HasPrefix(b.Action, "plugin:") {
+			got[b.Action] = b.Key
+		}
+	}
+	if got["plugin:x"] != "alt+Q" || got["plugin:y"] != "alt+W" {
+		t.Fatalf("bound %v", got)
 	}
 }

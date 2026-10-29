@@ -69,7 +69,9 @@ func cell(v any) any {
 	case int32:
 		return int64(x)
 	case bson.DateTime:
-		return x.Time()
+		return x.Time().UTC() // UTC like the JSON view's $date and parseDate, so an edit round-trips
+	case time.Time:
+		return x.UTC()
 	case bson.ObjectID:
 		return x.Hex()
 	case bson.Binary:

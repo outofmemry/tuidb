@@ -52,10 +52,15 @@ func TestCheckUpdate(t *testing.T) {
 			t.Errorf("%s: %q %v, want %q", current, got, err, want)
 		}
 	}
-	bad := httptest.NewServer(http.NotFoundHandler())
+	none := httptest.NewServer(http.NotFoundHandler()) // no release published yet (T-P3-18)
+	defer none.Close()
+	if got, err := checkUpdate(&http.Client{}, none.URL, "v1"); err != nil || got != "No releases published yet." {
+		t.Errorf("404: %q %v", got, err)
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "down", 500) }))
 	defer bad.Close()
 	if _, err := checkUpdate(&http.Client{}, bad.URL, "v1"); err == nil {
-		t.Error("404 must be an error")
+		t.Error("500 must be an error")
 	}
 }
 

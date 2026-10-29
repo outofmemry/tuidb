@@ -669,6 +669,8 @@ func (s *sidebar) key(k string) tea.Cmd {
 		return s.switchTab(1)
 	case "3":
 		return s.switchTab(2)
+	case "tab": // T-P3-12: Tab cycles the sidebar tabs too
+		return s.switchTab((s.tab + 1) % 3)
 	case "right", "l":
 		if r, ok := s.current(); ok && r.kind == sbFolder {
 			s.open[r.path] = true
@@ -760,8 +762,7 @@ func (s *sidebar) pickSchema() tea.Cmd {
 		items = append(items, pickItem{Label: sc, Detail: d, Value: sc})
 	}
 	s.w.a.push(&pickerDlg{title: "Schema", filter: true, items: items, onPick: func(it pickItem, _ bool) tea.Cmd {
-		s.schema, s.sel, s.top = it.Value.(string), 0, 0
-		return s.load()
+		return s.w.useSchema(it.Value.(string))
 	}})
 	return nil
 }
@@ -898,7 +899,7 @@ func (s *sidebar) adminOp(op db.AdminOp) tea.Cmd {
 	})
 	f.validate = func(v map[string]string) error {
 		if v["confirm"] != ref.Name {
-			return fmt.Errorf("type %q to confirm", ref.Name)
+			return fmt.Errorf("type “%s” to confirm", ref.Name)
 		}
 		return nil
 	}
@@ -960,7 +961,7 @@ func (w *Workspace) closeTabsFor(ref db.ObjRef, closeThem bool) {
 
 // title is the sidebar's tab strip, set into the frame's top edge like the main pane's tabs.
 func (s *sidebar) title(th Theme) string {
-	return th.segmented([]string{"Objects", "Queries", "History"}, nil, s.tab)
+	return th.segmented([]string{"1 Objects", "2 Queries", "3 History"}, nil, s.tab) // the digits switch tabs (T-P3-12)
 }
 
 func (s *sidebar) hint(th Theme) string {
@@ -1174,6 +1175,6 @@ func (s *sidebar) addHistoryToQueries(sql string) tea.Cmd {
 			s.queries, _ = s.w.a.d.Queries.List()
 			return s.w.a.say("saved %s", q.Name)
 		})
-	}))
+	}).checked(savedQueryName))
 	return nil
 }

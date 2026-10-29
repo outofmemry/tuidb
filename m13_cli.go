@@ -228,6 +228,9 @@ func checkUpdate(client *http.Client, url, current string) (string, error) {
 		return "", fmt.Errorf("check-update: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound { // GitHub's /releases/latest with no release yet (T-P3-18)
+		return "No releases published yet.", nil
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("check-update: %s", resp.Status)
 	}

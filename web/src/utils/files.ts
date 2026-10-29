@@ -1,4 +1,5 @@
-// Reading a SQL file in the browser: the file picker gives a page only a name, never a path, so a picked file is not added to the shared recent list.
+// Reading a SQL file in the browser: the file picker gives a page only a name, never a path, so a picked file is not added to the shared recent list;
+// its name goes to this browser's own list (localRecent), and reopening it asks for the file again.
 import { ApiError, api } from './api'
 
 export function pickFile(accept = '.sql,text/plain'): Promise<File | null> {
@@ -11,10 +12,14 @@ export function pickFile(accept = '.sql,text/plain'): Promise<File | null> {
   })
 }
 
+const LOCAL = 'webtuidb-recent-files'
+export const localRecent = (): string[] => { try { return JSON.parse(localStorage.getItem(LOCAL) || '[]') } catch { return [] } }
+
 // openSqlFile asks for a .sql file.
 export async function openSqlFile(): Promise<{ name: string; text: string } | null> {
   const f = await pickFile()
   if (!f) return null
+  try { localStorage.setItem(LOCAL, JSON.stringify([f.name, ...localRecent().filter((n) => n !== f.name)].slice(0, 10))) } catch { /* private mode */ }
   return { name: f.name, text: await f.text() }
 }
 

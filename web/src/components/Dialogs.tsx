@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ApiError, api, type Gate, type Plan } from '../utils/api'
 import { openInWindow } from '../utils/m15_bin'
+import { askSecret, confirm, setPromptHost, type PromptReq } from '../utils/prompts'
+import { layersOpen } from './Layer'
+
+export { ask, askSecret, confirm } from '../utils/prompts'
 
 // openSession opens a saved connection. A password = "ask" connection answers 422 passwordRequired: the password is asked for here and the call retried.
 export async function openSession(name: string): Promise<{ id: string }> {
   const open = async (body: Record<string, string>) => {
     const r = await api<{ id: string; bootstrapErrors?: string[] }>('POST', '/sessions', body)
     // the terminal's "Bootstrap command failed (the connection is still open)" dialog; shortcut: a confirm box with the text, OK or Cancel both go on
-    if (r.bootstrapErrors?.length) await confirm('Bootstrap command failed (the connection is still open)', r.bootstrapErrors.join('\n'))
+    if (r.bootstrapErrors?.length) await confirm('Bootstrap command failed (the connection is still open)', r.bootstrapErrors.join('\n'), 'OK')
     return r
   }
   try { return await open({ Name: name }) } catch (e) {
@@ -20,17 +24,33 @@ export async function openSession(name: string): Promise<{ id: string }> {
 
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
 
+const stack: object[] = [] // the open dialogs, the top-most last: Escape closes only that one
+
 export function Dialog({ title, children, onClose, wide }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
   const box = useRef<HTMLDivElement>(null)
+  const close = useRef(onClose); close.current = onClose
   // M15.44: focus moves into the dialog (unless a field took it with autoFocus), Tab stays inside it, and closing returns focus to where it was
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null
     const el = box.current
     if (el && !el.contains(document.activeElement)) (el.querySelector<HTMLElement>(FOCUSABLE) ?? el).focus()
-    return () => { if (before?.isConnected) before.focus() }
+    const me = {}
+    stack.push(me)
+    // Escape is heard on the window, not on the box: when Save disables the focused button the focus falls to <body>, where the box hears nothing.
+    // An open menu (Layer) takes Escape first; a field that used it (preventDefault) keeps it.
+    const key = (e: KeyboardEvent) => {
+      if (stack[stack.length - 1] !== me || e.defaultPrevented || layersOpen()) return
+      if (e.key === 'Escape') { e.preventDefault(); close.current() }
+      else if (e.key === 'Tab' && el && !el.contains(document.activeElement)) { e.preventDefault(); (el.querySelector<HTMLElement>(FOCUSABLE) ?? el).focus() }
+    }
+    window.addEventListener('keydown', key)
+    return () => { window.removeEventListener('keydown', key); stack.splice(stack.indexOf(me), 1); if (before?.isConnected) before.focus() }
   }, [])
+  useEffect(() => { // the focused control went away or was disabled (Save while saving): keep the focus inside the dialog
+    const el = box.current, a = document.activeElement
+    if (el && (!a || a === document.body)) el.focus()
+  })
   const trap = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape') { e.stopPropagation(); onClose(); return }
     if (e.key !== 'Tab') return
     const l = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.getClientRects().length)
     if (!l.length) return
@@ -50,18 +70,11 @@ export function Dialog({ title, children, onClose, wide }: { title: string; chil
   )
 }
 
-// ask / confirm replace window.prompt and window.confirm with the app's own dialog. <Prompts/> is
-// mounted once at the root and renders whatever request is pending.
-type Req = { kind: 'prompt' | 'confirm'; title: string; text?: string; init: string; secret?: boolean; resolve: (v: string | null | boolean) => void }
-let pending: ((r: Req | null) => void) | null = null
-export const ask = (title: string, init = '') => new Promise<string | null>((resolve) => pending?.({ kind: 'prompt', title, init, resolve: resolve as Req['resolve'] }))
-export const askSecret = (title: string) => new Promise<string | null>((resolve) => pending?.({ kind: 'prompt', title, init: '', secret: true, resolve: resolve as Req['resolve'] }))
-export const confirm = (title: string, text?: string) => new Promise<boolean>((resolve) => pending?.({ kind: 'confirm', title, text, resolve: resolve as Req['resolve'], init: '' }))
-
+// Prompts renders the pending ask / confirm (utils/prompts.ts); it is mounted once at the root.
 export function Prompts() {
-  const [req, setReq] = useState<Req | null>(null)
+  const [req, setReq] = useState<PromptReq | null>(null)
   const [val, setVal] = useState('')
-  useEffect(() => { pending = (r) => { setReq(r); setVal(r?.init ?? '') }; return () => { pending = null } }, [])
+  useEffect(() => { setPromptHost((r) => { setReq(r); setVal(r?.init ?? '') }); return () => setPromptHost(null) }, [])
   if (!req) return null
   const done = (v: string | null | boolean) => { setReq(null); req.resolve(v) }
   const cancel = () => done(req.kind === 'prompt' ? null : false)
@@ -71,8 +84,8 @@ export function Prompts() {
       {req.text && <pre className="m-0 mb-2 max-h-[40vh] overflow-auto whitespace-pre-wrap wrap-anywhere text-[12px]">{req.text}</pre>}
       {req.kind === 'prompt' && <input autoFocus className="w-full" type={req.secret ? 'password' : 'text'} autoComplete="off" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); ok() } }} />}
       <div className="flex justify-end gap-2 mt-[18px]">
-        <button onClick={cancel}>Cancel</button>
-        <button className="btn-primary" autoFocus={req.kind === 'confirm'} disabled={req.kind === 'prompt' && !val.trim()} onClick={ok}>{req.kind === 'prompt' ? 'OK' : 'Continue'}</button>
+        <button onClick={cancel}>{req.no ?? 'Cancel'}</button>
+        <button className="btn-primary" autoFocus={req.kind === 'confirm'} disabled={req.kind === 'prompt' && !val.trim()} onClick={ok}>{req.ok ?? (req.kind === 'prompt' ? 'OK' : 'Continue')}</button>
       </div>
     </Dialog>
   )

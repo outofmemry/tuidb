@@ -22,6 +22,13 @@ const root = createRootRoute({ component: function Root() {
   const meta = useQuery({ queryKey: ['meta'], queryFn: () => api<Meta>('GET', '/meta'), staleTime: Infinity })
   if (meta.data) { applyTheme(meta.data.theme, meta.data.web); notifyCfg.on = !!meta.data.web?.notifications }
   if (meta.error instanceof ApiError && meta.error.status === 401 && meta.error.body.login) return <Login onDone={() => meta.refetch()} />
+  // no token (a copied link opened in a fresh browser tab): nothing below can load, so say how to get in instead of mounting pages that poll the API
+  if (meta.error instanceof ApiError && meta.error.status === 401) return (
+    <div className="max-w-[560px] mx-auto mt-[18vh] px-4 flex flex-col gap-3 font-sans">
+      <h1 className="m-0 text-[28px] font-medium font-mono">This link needs the access token</h1>
+      <p className="m-0 text-ink-2 text-[15px] leading-normal">Open the address that <code className="font-mono">webtuidb --frontend</code> printed, then open this link in the same browser.</p>
+    </div>
+  )
   return <><Lock ready={!!meta.data || !!meta.error} on={!!meta.data?.security?.passcode} afterMins={meta.data?.security?.lockAfterMins ?? 0}><Outlet /><Prompts /></Lock></>
 } })
 
@@ -62,6 +69,8 @@ const viewer = createRoute({ getParentRoute: () => root, path: '/sql', component
 const router = createRouter({ routeTree: root.addChildren([home, session, tableLinkRoute, queryLinkRoute, viewer]) })
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }
 
-createRoot(document.getElementById('root')!).render(
+// one React root per page: a hot update in development re-runs this module, and a second createRoot on the same element would stack a second app (and its key listeners) on the first
+const el = document.getElementById('root') as HTMLElement & { _root?: ReturnType<typeof createRoot> }
+;(el._root ??= createRoot(el)).render(
   <StrictMode><QueryClientProvider client={qc}><RouterProvider router={router} /></QueryClientProvider></StrictMode>,
 )

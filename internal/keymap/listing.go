@@ -5,12 +5,15 @@ import (
 	"strings"
 )
 
+// Contexts is every binding context in listing order (`webtuidb -keys`); GET /api/meta lists bindings of all of them.
+var Contexts = []string{Global, Sidebar, Grid, FilterBar, Structure, Editor, Results, Console}
+
 // Listing is the text `webtuidb -keys` prints: the bindings grouped by context in a fixed context order, each group in
 // keymap table order (the order GET /api/meta and both help screens use; the M14 parity test diffs them).
 func Listing(prefix string, km *Map) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "prefix: %s   (every action below is: prefix, then the key; \"-n\" bindings need no prefix)\n\n", prefix)
-	for _, ctx := range []string{Global, Sidebar, Grid, FilterBar, Structure, Editor, Results} {
+	for _, ctx := range Contexts {
 		var rows []Binding
 		for _, b := range km.All() {
 			if b.Context == ctx {

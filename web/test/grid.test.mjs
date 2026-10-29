@@ -79,7 +79,7 @@ test('menus: the editable predicate filters result menus; header keeps the list 
 
 test('header tooltip and column definition', () => {
   const c = { Name: 'id', Type: 'int', Nullable: false, Default: '', HasDef: false, PK: true }
-  assert.equal(columnTip(c), 'id\nint · not null · no default · primary key')
-  assert.equal(columnTip({ ...c, PK: false, Nullable: true, HasDef: true, Default: '0', FK: { RefSchema: 's', RefTable: 'u', RefColumns: ['id'] } }), 'id\nint · nullable · default 0 · foreign key to u(id)')
+  assert.equal(columnTip(c), 'id\nint, not null, no default, primary key')
+  assert.equal(columnTip({ ...c, PK: false, Nullable: true, HasDef: true, Default: '0', FK: { RefSchema: 's', RefTable: 'u', RefColumns: ['id'] } }), 'id\nint, nullable, default 0, foreign key to u(id)')
   assert.equal(columnDef(c), 'id int NOT NULL PRIMARY KEY')
 })

@@ -59,6 +59,7 @@ type session struct {
 	pinMu    sync.Mutex
 	pins     map[string]db.Session // query tab id -> its dedicated connection (db.Pinner)
 	pinUsed  map[string]time.Time  // query tab id -> last statement (guarded by pinMu)
+	pinTx    map[string]pinState   // query tab id -> how it was pinned and whether a transaction is open (guarded by pinMu)
 }
 
 // putNotice remembers a result's server notices (kept apart from results so they never evict an editable one).

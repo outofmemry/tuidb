@@ -152,6 +152,7 @@ type RowQuery struct {
 	Columns []string // visible columns; empty = all
 	Limit   int
 	Offset  int
+	Key     []string // primary key columns in key order; with no Sort the rows are ordered by them so pages are stable
 }
 
 type Count struct {

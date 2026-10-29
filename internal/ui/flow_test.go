@@ -559,7 +559,7 @@ func TestFlowDatabaseManagement(t *testing.T) {
 	h.want("Drop other?")
 	h.typeText("oops")
 	h.press("enter")
-	h.want(`type "other" to confirm`)
+	h.want(`type “other” to confirm`)
 	h.press("ctrl+u")
 	h.typeText("other")
 	h.press("enter")
@@ -963,7 +963,7 @@ func TestFlowTestConnectionFromTheForm(t *testing.T) {
 	if last.Name != "probe" || last.Driver != config.Postgres {
 		t.Errorf("tested with %+v", last)
 	}
-	h.press("esc")
+	h.press("esc", "y") // the form was edited: discarding asks first
 	h.press("n")
 	h.press("ctrl+t") // no name: the same validation as saving
 	h.want("needs a name")
@@ -1359,7 +1359,7 @@ func TestReviewDropTableNeedsTheNameTyped(t *testing.T) {
 	h.prefix("delete") // delete_item in the sidebar context
 	h.want("Delete customers?")
 	h.press("enter")
-	h.want(`type "customers" to confirm`)
+	h.want(`type “customers” to confirm`)
 	if len(h.fake.applied) != 0 {
 		t.Fatal("nothing may run before the name is typed")
 	}

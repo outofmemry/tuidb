@@ -40,6 +40,9 @@ func (s *pinned) Exec(ctx context.Context, stmt string, limit int) (*db.Result, 
 	if s.session.c.ReadOnly && !db.IsReadOnly("postgres", stmt) {
 		return nil, errReadOnly
 	}
+	if err := s.p.syncPath(ctx, s.c); err != nil {
+		return nil, err
+	}
 	// fetch never cancels on a pinned connection (it drains the rest), but draining a huge result is slow:
 	// let the server stop at limit+1 rows instead when the statement is a plain SELECT.
 	sql, trim := stmt, 0
@@ -52,13 +55,20 @@ func (s *pinned) Exec(ctx context.Context, stmt string, limit int) (*db.Result, 
 	}
 	res, err := s.c.fetch(ctx, s.p, sql, nil, limit)
 	if err != nil {
-		return nil, err
+		return nil, withPosition(err, sql, stmt)
 	}
 	if trim > 0 && len(res.Rows) > trim {
 		res.Rows, res.Truncated = res.Rows[:trim], true
 	}
 	res.Duration = time.Since(start)
 	return res, nil
+}
+
+// InTx asks the connection whether a transaction is open (or failed and waiting for ROLLBACK).
+func (s *pinned) InTx() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.c != nil && s.c.PgConn().TxStatus() != 'I'
 }
 
 func (s *pinned) Close() error {
@@ -89,6 +99,9 @@ func (s *pinned) Apply(ctx context.Context, stmts []db.Statement) error {
 	s.session.colMu.Lock()
 	s.session.cols = map[string][]string{} // structure may change
 	s.session.colMu.Unlock()
+	if err := s.p.syncPath(ctx, s.c); err != nil {
+		return err
+	}
 	own := wantTx(s.session.caps.Transactions, stmts) && s.c.PgConn().TxStatus() == 'I'
 	return applyOn(ctx, s.c.Conn, own, stmts)
 }
@@ -107,7 +120,7 @@ func applyOn(ctx context.Context, ex execer, own bool, stmts []db.Statement) err
 				ex.Exec(rctx, "ROLLBACK")
 				cancel()
 			}
-			return fmt.Errorf("apply %q: %w", firstLine(st.Shown()), err)
+			return fmt.Errorf("%w\nStatement: %s", err, firstLine(st.Shown()))
 		}
 	}
 	if own {

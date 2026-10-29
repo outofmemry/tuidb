@@ -382,6 +382,13 @@ func TestPutConnectionsValidates(t *testing.T) {
 		t.Fatalf("duplicate names accepted: %d", code)
 	}
 	e.ok("PUT", "/api/connections", []config.Connection{dup})
+	for col, ok := range map[string]bool{"notacolor": false, "teal": false, "#7aa2f7": true, "#abc": true, "": true, "#12345": false, "red;x": false, "rgb(1,2,3)": false} {
+		c := dup
+		c.Color = col
+		if code, _ := e.call("PUT", "/api/connections", []config.Connection{c}, "tok"); (code == 200) != ok {
+			t.Errorf("colour %q: %d", col, code)
+		}
+	}
 }
 
 func TestStaticFallback(t *testing.T) {

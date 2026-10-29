@@ -13,7 +13,7 @@ var settingDocs = map[string]string{
 	"general.recent_files":         "How many opened SQL files to remember.",
 	"general.show_connection_name": "Show the connection name on the connection stack.",
 	"general.estimate_count_over":  "Estimate the row count instead of counting when the table is larger than this.",
-	"general.default_safe_mode":    "Safe mode for new connections (silent, alert, ...).",
+	"general.default_safe_mode":    "Safe mode for new connections: silent, alert1, alert2, safe1 or safe2.",
 	"general.log_original_values":  "Keep the previous values of edited rows in the history.",
 	"general.hints":                "Actions shown in the terminal status line, in order (comma-separated; empty = built-in set).",
 

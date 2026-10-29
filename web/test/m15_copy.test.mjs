@@ -25,6 +25,12 @@ test('a sub-rectangle keeps only its columns; INSERT and HTML work too', () => {
   assert.match(cellsAs('HTML', r, cols, cell, csv, 'postgres'), /<td>c\|d<\/td>/)
 })
 
+test('JSON keeps the column order, even for integer-like names', () => {
+  const yc = [{ name: 'name', type: 'text' }, { name: '2024', type: 'int' }]
+  const out = cellsAs('JSON', { r0: 0, r1: 0, c0: 0, c1: 1 }, yc, (_, c) => ['a', '7'][c], csv, 'postgres')
+  assert.equal(out, '[\n  {\n    "name": "a",\n    "2024": "7"\n  }\n]')
+})
+
 test('rectOf and columnText', () => {
   assert.deepEqual(rectOf(null, 3, 2), { r0: 3, r1: 3, c0: 2, c1: 2 })
   assert.equal(rectSize(all), 6)

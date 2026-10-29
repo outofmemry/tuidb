@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,8 +47,17 @@ func (s *sidebar) schemaAdmin(op db.AdminOp, name string, opts map[string]string
 		if err != nil {
 			return nil
 		}
-		if op == db.OpDropSchema && name == s.schema { // the open schema is gone: fall back to the first other one
-			s.schema = s.w.sess.CurrentSchema()
+		if op == db.OpDropSchema && name == s.schema { // the open schema is gone: fall back to public, else the first other one
+			next := "public"
+			if !slices.Contains(s.schemas, next) || next == name {
+				for _, sc := range s.schemas {
+					if sc != name {
+						next = sc
+						break
+					}
+				}
+			}
+			return tea.Batch(s.w.useSchema(next), s.w.a.say("schema %s %s", name, done))
 		}
 		s.sel, s.top = 0, 0
 		return tea.Batch(s.load(), s.w.a.say("schema %s %s", name, done))
@@ -74,7 +84,7 @@ func (s *sidebar) dropSchema() tea.Cmd {
 		})
 		f.validate = func(v map[string]string) error {
 			if v["confirm"] != name {
-				return fmt.Errorf("type %q to confirm", name)
+				return fmt.Errorf("type “%s” to confirm", name)
 			}
 			return nil
 		}
@@ -243,7 +253,7 @@ func (s *sidebar) adminMany(op db.AdminOp, refs []db.ObjRef) tea.Cmd {
 	})
 	f.validate = func(v map[string]string) error {
 		if v["confirm"] != word {
-			return fmt.Errorf("type %q to confirm", word)
+			return fmt.Errorf("type “%s” to confirm", word)
 		}
 		return nil
 	}

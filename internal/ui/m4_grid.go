@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -235,10 +236,11 @@ func decodeAs(raw []byte, enc string) string {
 // parseHex reads "de ad be ef" (spaces, newlines and an optional offset-free dump are fine): two digits per byte.
 func parseHex(s string) ([]byte, error) {
 	s = strings.Join(strings.Fields(s), "")
-	if len(s)%2 != 0 {
-		return nil, fmt.Errorf("hex needs two digits per byte (%d digits given)", len(s))
+	b, err := hex.DecodeString(s)
+	if err != nil { // odd length or a non-hex digit: one plain message (T-P3-17), not encoding/hex's
+		return nil, errors.New("Hex needs pairs of 0-9 a-f.")
 	}
-	return hex.DecodeString(s)
+	return b, nil
 }
 
 // newQuickLookValue opens quick look on a cell. A bytes cell starts as a hex dump; v switches the

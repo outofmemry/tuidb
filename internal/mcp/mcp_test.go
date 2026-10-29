@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -95,13 +96,42 @@ func call(t *testing.T, s *Server, tok *config.MCPToken, tool string, args any) 
 	return r.Content[0].(*sdk.TextContent).Text, r.IsError
 }
 
+// T-P2-02: a malformed line gets a parse error and the session goes on; every request read before EOF is answered.
+func TestStdioSurvivesBadLines(t *testing.T) {
+	s := New(config.Config{}, []config.Connection{{Name: "c", Driver: "fake"}})
+	in := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+		`not json`,
+		`{"jsonrpc":"2.0","id":9,"method":"tools/list"`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_connections","arguments":{}}}`,
+	}, "\n") + "\n"
+	var out strings.Builder
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s.build(nil).Run(ctx, stdioTransport{in: strings.NewReader(in), out: &out})
+	got := out.String()
+	if strings.Count(got, `{"error":{"code":-32700,"message":"Parse error"},"id":null,"jsonrpc":"2.0"}`) != 2 {
+		t.Errorf("want two parse errors:\n%s", got)
+	}
+	for _, id := range []string{`"id":1,`, `"id":2,`, `"id":3,`} {
+		if !strings.Contains(got, id) {
+			t.Errorf("no answer with %s:\n%s", id, got)
+		}
+	}
+	if !strings.Contains(got, `\"name\":\"c\"`) && !strings.Contains(got, `"name":"c"`) {
+		t.Errorf("list_connections answer missing:\n%s", got)
+	}
+}
+
 func TestFirstWordGate(t *testing.T) {
 	for _, c := range []struct{ dialect, sql, want string }{
 		{"postgres", "/* x */ -- y\n drop table t", "DROP"},
 		{"postgres", "DO $$ BEGIN EXECUTE 'DROP TABLE orders'; END $$", "DO"},
 		{"postgres", "CALL purge()", "CALL"},
 		{"mysql", "# x\nDROP TABLE orders", "DROP"},
-		{"mysql", "/*!50000 DROP TABLE orders */", ""},
+		{"mysql", "/*!50000 DROP TABLE orders */", "DROP"}, // NEW-2: an executable comment is the statement
 		{"postgres", "# x\nDROP TABLE orders", ""},
 		{"postgres", "UPDATE t SET a=1", "UPDATE"},
 	} {
@@ -431,6 +461,8 @@ func TestSideEffectReviewCases(t *testing.T) {
 		{"postgres", `SELECT $a1$ x $$ $a1$ , dblink_exec('host=h','DELETE FROM users')`, "dblink_exec"},
 		{"postgres", `SELECT $a1$ copy( $a1$`, ""},
 		{"mysql", `SELECT LOAD_FILE('/etc/passwd')`, "load_file"},
+		{"mysql", `/*!50000 SELECT LOAD_FILE('/etc/passwd')*/`, "load_file"},
+		{"mariadb", `/*! SELECT 1 INTO OUTFILE '/tmp/x' */`, "into outfile"},
 		{"mysql", `SELECT 1 INTO  OUTFILE '/tmp/x'`, "into outfile"},
 		{"mysql", `SELECT get_lock('a', 1)`, "get_lock"},
 		{"clickhouse", `SELECT * FROM file('/etc/passwd')`, "file"},

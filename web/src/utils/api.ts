@@ -1,11 +1,15 @@
-import { linkWithToken } from './links'
+import { handoffPut, handoffTake, linkWithToken } from './links'
+import { confirm } from './prompts'
 // Types use the Go field names of the db/config structs (the API serializes them as-is).
 const KEY = 'webtuidb-token'
 
 // The server prints http://host/#token=...; the fragment never reaches the server or logs.
 export function initToken() {
   const m = location.hash.match(/token=([^&]+)/)
-  if (!m) return
+  if (!m) {
+    try { const t = handoffTake(localStorage); if (t && !sessionStorage.getItem(KEY)) { sessionStorage.setItem(KEY, t); memToken = t } } catch { /* storage blocked: the fragment form still works */ }
+    return
+  }
   try { sessionStorage.setItem(KEY, m[1]) } catch { /* private mode: token lives only until reload */ }
   memToken = m[1]
   history.replaceState(null, '', location.pathname + location.search)
@@ -17,6 +21,11 @@ function token() {
 // withToken adds the access token as a #token= fragment, so a link opened in another browser tab (a new tab starts with an empty
 // sessionStorage) still signs in; every in-app link and window.open goes through it.
 export const withToken = (url: string) => linkWithToken(url, token())
+// openWindow opens a same-origin page in a new browser tab and hands the token over through localStorage (WU-5), so it never shows in a URL.
+export function openWindow(url: string) {
+  try { handoffPut(localStorage, token()) } catch { url = withToken(url) } // no storage: fall back to the fragment
+  window.open(url, '_blank', 'noopener')
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public body: any) { super(message) }
@@ -106,7 +115,7 @@ export function beacon(path: string) {
 // postQuery saves a query; when the name is taken it asks before replacing it (the server answers 409 {exists}).
 export async function postQuery(path: string, body: Record<string, unknown>) {
   try { return await api('POST', path, body) } catch (e) {
-    if (e instanceof ApiError && e.status === 409 && e.body.exists && confirm(`A saved query "${body.Name}" already exists. Replace it?`)) return api('POST', path, { ...body, Overwrite: true })
+    if (e instanceof ApiError && e.status === 409 && e.body.exists && await confirm(`A saved query "${body.Name}" already exists. Replace it?`, undefined, 'Replace')) return api('POST', path, { ...body, Overwrite: true })
     throw e
   }
 }
@@ -205,6 +214,8 @@ export type Plan = { planId: string; statements: { display: string; readOnly: bo
 export type Special = { $: 'null' | 'default' | 'empty' } | { $expr: string; $advanced?: 'true' }
 export type Val = string | null | Special
 
+// switchSchema makes name the session's current schema (both UIs' sidebar switch) and answers the new session info
+export const switchSchema = (sid: string, name: string) => api<SessionInfo>('POST', `/sessions/${sid}/schema`, { name })
 export const keyOf = (r: ObjRef) => (r.Schema ? r.Schema + '.' + r.Name : r.Name) // sidebar pins, like the TUI
 export const recentKey = (r: ObjRef) => r.Schema + '.' + r.Name // recents and table state, like the TUI
 export const sameRef = (a: ObjRef, b: ObjRef) => a.Schema === b.Schema && a.Name === b.Name && a.Kind === b.Kind

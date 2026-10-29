@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -8,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"webtuidb/internal/config"
+	"webtuidb/internal/keymap"
 )
 
 // M15.37 passcode lock: with [security] passcode set the app starts locked, locks again after lock_after_mins
@@ -26,6 +28,21 @@ type lockDlg struct {
 	tries int
 	until time.Time // input is refused until then (after lockTries wrong passcodes)
 	now   func() time.Time
+	pre   bool // the prefix was pressed: the next key may be quit (T-P3-11), nothing else
+	armed bool // quit was asked once with uncommitted changes: the next quit goes through
+}
+
+// quit is the lock screen's way out: the bound quit key after the prefix. Dialogs cannot open over the lock, so
+// uncommitted changes are confirmed by pressing it a second time.
+func (l *lockDlg) quit() tea.Cmd {
+	for _, w := range l.a.wss {
+		if (w.dirty() || w.applying) && !l.armed {
+			l.armed = true
+			l.err = "uncommitted changes will be lost: press " + boundKey(l.a.d.Keys, keymap.Global, "quit") + " again to quit"
+			return nil
+		}
+	}
+	return l.a.quitNow()
 }
 
 func (a *App) passcodeSet() bool { return a.d.Cfg.Security.Passcode != "" }
@@ -33,7 +50,7 @@ func (a *App) passcodeSet() bool { return a.d.Cfg.Security.Passcode != "" }
 // lock puts the lock screen on top; without a passcode it says how to set one.
 func (a *App) lock() tea.Cmd {
 	if !a.passcodeSet() {
-		return a.say("no passcode is set: run webtuidb -set-passcode and add the line it prints to config.toml")
+		return a.fail(errors.New("no passcode is set: run webtuidb -set-passcode and add the line it prints to config.toml"))
 	}
 	if !a.locked() {
 		a.push(&lockDlg{a: a, in: lineEdit{Secret: true}, now: time.Now})
@@ -79,6 +96,18 @@ func (l *lockDlg) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case tea.PasteMsg:
 		l.in.Handle(m)
 	case tea.KeyPressMsg:
+		k := keymap.FromMsg(m)
+		if l.pre {
+			l.pre = false
+			if act, ok := l.a.d.Keys.Lookup(keymap.Global, k); ok && act == "quit" {
+				return l, l.quit()
+			}
+			return l, nil
+		}
+		if k == l.a.d.Keys.Prefix {
+			l.pre = true
+			return l, nil
+		}
 		switch m.Keystroke() {
 		case "enter":
 			if config.CheckPasscode(l.a.d.Cfg.Security.Passcode, l.in.Value()) {
@@ -111,7 +140,11 @@ func (l *lockDlg) View(th Theme, maxW, maxH int) string {
 	if l.err != "" {
 		body = append(body, "", th.Err.Render(l.err))
 	}
-	return box(th, "🔒 Locked", body, "Enter: unlock", w)
+	foot := "Enter: unlock"
+	if q := boundKey(l.a.d.Keys, keymap.Global, "quit"); q != "" {
+		foot += "   " + q + ": quit"
+	}
+	return box(th, "🔒 Locked", body, foot, w)
 }
 
 // cover is the full-screen view: nothing of the workspace shows while the lock is up.

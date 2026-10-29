@@ -380,7 +380,7 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 	for i, st := range stmts {
 		args, err := parseCommand(st.Text)
 		if err != nil || len(args) == 0 {
-			return fmt.Errorf("statement %d %q: invalid command: %v", i+1, st.Text, err)
+			return fmt.Errorf("statement %d (%s): invalid command: %v", i+1, st.Text, err)
 		}
 		all[i] = args
 	}
@@ -425,7 +425,7 @@ func (s *session) Apply(ctx context.Context, stmts []db.Statement) error {
 		var done, failed []string
 		for i, c := range cmds {
 			if e := c.Err(); e != nil && !errors.Is(e, goredis.Nil) {
-				failed = append(failed, fmt.Sprintf("statement %d %q: %v", i+1, stmts[i].Text, e))
+				failed = append(failed, fmt.Sprintf("statement %d (%s): %v", i+1, stmts[i].Text, e))
 			} else {
 				done = append(done, strconv.Itoa(i+1))
 			}

@@ -111,7 +111,7 @@ func (drv) Open(ctx context.Context, conn config.Connection, dial db.DialFunc) (
 		switch m := cmdRe.FindStringSubmatch(b); {
 		case m != nil && strings.EqualFold(m[1], "CONSISTENCY"):
 			if s.cons, err = gocql.ParseConsistencyWrapper(m[2]); err != nil {
-				return nil, fmt.Errorf("bootstrap %q: %w", b, err)
+				return nil, fmt.Errorf("bootstrap (%s): %w", b, err)
 			}
 		case useRe.MatchString(b):
 			ks = keyspaceName(useRe.FindStringSubmatch(b))
@@ -126,7 +126,7 @@ func (drv) Open(ctx context.Context, conn config.Connection, dial db.DialFunc) (
 	for _, b := range once {
 		if err := s.ses.Query(b).ExecContext(ctx); err != nil {
 			s.ses.Close()
-			return nil, fmt.Errorf("bootstrap %q: %w", b, err)
+			return nil, fmt.Errorf("bootstrap (%s): %w", b, err)
 		}
 	}
 	var v string

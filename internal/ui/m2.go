@@ -82,7 +82,7 @@ func (w *Workspace) job(label string, work func(ctx context.Context, sess db.Ses
 			case stopped:
 				return tea.Batch(w.a.say("%s: stopped", label), je.finish(w, nil, true))
 			case err != nil:
-				return tea.Batch(w.a.fail(fmt.Errorf("%s: %w", label, err)), je.finish(w, err, false))
+				return tea.Batch(w.a.fail(fmt.Errorf("%s: %s", label, cleanReply(err.Error()))), je.finish(w, err, false)) // tool output may carry escapes (NEW-4)
 			}
 			msg, cmd := then()
 			return tea.Batch(w.a.say("%s", msg), cmd, je.finish(w, nil, false))
@@ -310,8 +310,16 @@ func (w *Workspace) importWizard(ref db.ObjRef, hasRef bool) tea.Cmd {
 		{Key: "keepquote", Label: "Keep formula apostrophe", Kind: fBool, Value: "false", Show: notSQL},
 		{Key: "create", Label: "Create the table", Kind: fBool, Show: notSQL},
 		{Key: "table", Label: "Table", Kind: fText, Value: ref.Name, Show: notSQL},
-	}, func(v map[string]string) tea.Cmd {
-		path := strings.TrimSpace(v["path"])
+	}, nil)
+	for _, fl := range f.fields { // the last answers come back (a failed or finished import must not cost the typing)
+		if val, ok := w.lastImport[fl.Key]; ok && !(fl.Key == "table" && hasRef) {
+			fl.Value = val
+			if fl.Kind == fText {
+				fl.edit = newLine(val)
+			}
+		}
+	}
+	opts := func(v map[string]string) importer.Options {
 		o := importer.Options{Source: importer.Source(v["source"]), CSV: w.a.d.Cfg.CSV, Header: v["header"] == "true", CreateTable: v["create"] == "true", Encoding: v["encoding"], Driver: w.conn.Driver,
 			NullAs: v["nullas"], EmptyIsNull: v["emptynull"] == "true", KeepFormulaQuote: v["keepquote"] == "true"}
 		if d := v["delim"]; d != "" {
@@ -321,17 +329,14 @@ func (w *Workspace) importWizard(ref db.ObjRef, hasRef bool) tea.Cmd {
 		if !hasRef || ref.Name != v["table"] {
 			o.Table = db.ObjRef{Schema: w.sess.CurrentSchema(), Name: strings.TrimSpace(v["table"]), Kind: db.KindTable}
 		}
+		return o
+	}
+	var cols []string // the preview validate read
+	var rows [][]string
+	f.onSubmit = func(v map[string]string) tea.Cmd {
+		path, o, cols, rows := strings.TrimSpace(v["path"]), opts(v), cols, rows
 		if o.Source == "sql" {
 			return w.startImport(path, o)
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return w.a.fail(err)
-		}
-		cols, rows, err := importer.Preview(file, o, 100)
-		file.Close()
-		if err != nil {
-			return w.a.fail(err)
 		}
 		if o.CreateTable { // the new table's columns are the file's
 			return w.mapColumns(path, o, cols, rows, cols)
@@ -351,15 +356,28 @@ func (w *Workspace) importWizard(ref db.ObjRef, hasRef bool) tea.Cmd {
 				return w.mapColumns(path, o, cols, rows, columnNames(have))
 			}
 		})
-	})
+	}
 	f.validate = func(v map[string]string) error {
-		if st, err := os.Stat(strings.TrimSpace(v["path"])); err != nil || st.IsDir() {
+		w.lastImport = v
+		path := strings.TrimSpace(v["path"])
+		if st, err := os.Stat(path); err != nil || st.IsDir() {
 			return fmt.Errorf("cannot read that file")
 		}
-		if v["source"] != "sql" && strings.TrimSpace(v["table"]) == "" {
+		if v["source"] == "sql" {
+			return nil
+		}
+		if strings.TrimSpace(v["table"]) == "" {
 			return fmt.Errorf("table name required")
 		}
-		return nil
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		pctx, pcancel := context.WithTimeout(context.Background(), 30*time.Second) // IO-7: a preview must not hang on a huge file
+		defer pcancel()
+		cols, rows, err = importer.PreviewContext(pctx, file, opts(v), 100) // a file the importer cannot read keeps the form open
+		return err
 	}
 	f.onChange = func(key string, v map[string]string) { // pick the format from the file extension
 		if key != "path" {
@@ -486,7 +504,7 @@ func (w *Workspace) searchInDatabase() tea.Cmd {
 		if w.jobCancel != nil {
 			return w.a.say("another export, import or search is still running (cancel it first)")
 		}
-		o := db.SearchOptions{Value: v["value"], Op: v["op"], AllSchemas: v["all"] == "true" && w.caps.Schemas}
+		o := db.SearchOptions{Value: v["value"], Op: v["op"], Schema: w.sb.schema, AllSchemas: v["all"] == "true" && w.caps.Schemas}
 		for _, n := range strings.Split(v["tables"], ",") {
 			if n = strings.TrimSpace(n); n != "" {
 				o.Tables = append(o.Tables, n)
@@ -535,8 +553,10 @@ func (w *Workspace) searchInDatabase() tea.Cmd {
 							detail = "error: " + h.Err.Error()
 						}
 						label, at := h.Ref.Name, len(p.items)
-						if o.AllSchemas { // grouped by schema: a hit goes after the last one of its schema or an earlier schema
+						if o.AllSchemas || h.Ref.Schema != "" && h.Ref.Schema != w.sess.CurrentSchema() { // T-P2-09: say which schema opens
 							label = h.Ref.Schema + "." + h.Ref.Name
+						}
+						if o.AllSchemas { // grouped by schema: a hit goes after the last one of its schema or an earlier schema
 							at = sort.Search(len(p.items), func(i int) bool { return p.items[i].Value.(db.SearchHit).Ref.Schema > h.Ref.Schema })
 							if len(p.items) > 0 && at <= p.sel {
 								p.sel++

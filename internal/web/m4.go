@@ -188,7 +188,7 @@ func (s *Server) jobFile(ss *session, r *http.Request) (any, error) {
 // same way (a JSON error before the stream starts).
 // shortcut: db.Session has no row cursor, so a statement's rows are fetched whole and then sent in batches; upgrade when the drivers expose one.
 func (s *Server) execStream(ss *session, r *http.Request) (any, error) {
-	stmts, limit, sess, err := s.execPrep(ss, r)
+	stmts, limit, sess, run, err := s.execPrep(ss, r)
 	if err != nil {
 		return nil, err
 	}
@@ -196,14 +196,20 @@ func (s *Server) execStream(ss *session, r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	var ran []string
 	if len(stmts) > summarizeOver {
 		it := ss.runSummary(r, sess, stmts, limit)
 		ev.send("done", map[string]any{"i": 0, "stmt": it.Stmt, "label": it.Label, "message": it.Message, "affected": it.Affected, "durationMs": it.DurationMs})
-		ev.send("end", map[string]any{})
+		for _, st := range stmts {
+			ran = append(ran, st.Text)
+		}
+		ev.send("end", run.done(ss, ran))
 		return streamed{}, nil
 	}
+	defer func() { ev.send("end", run.done(ss, ran)) }() // the pin and transaction state, also after a cancel
 	for i, st := range stmts {
 		it := ss.execOne(r, sess, st, limit)
+		ran = append(ran, st.Text)
 		if it.Error == "" {
 			ev.send("columns", map[string]any{"i": i, "stmt": it.Stmt, "label": it.Label, "columns": it.Columns})
 			for from := 0; from < len(it.Cells); from += 100 {
@@ -220,7 +226,6 @@ func (s *Server) execStream(ss *session, r *http.Request) (any, error) {
 			return streamed{}, nil
 		}
 	}
-	ev.send("end", map[string]any{})
 	return streamed{}, nil
 }
 

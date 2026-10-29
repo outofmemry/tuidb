@@ -108,7 +108,7 @@ func buildOptions(conn config.Connection, dial db.DialFunc) (goredis.Options, er
 		for _, b := range conn.Bootstrap {
 			args, err := parseCommand(b)
 			if err != nil || len(args) == 0 {
-				return opt, fmt.Errorf("bootstrap %q: %v", b, err)
+				return opt, fmt.Errorf("bootstrap (%s): %v", b, err)
 			}
 			cmds = append(cmds, args)
 		}

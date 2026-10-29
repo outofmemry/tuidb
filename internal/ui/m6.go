@@ -153,7 +153,7 @@ func (w *welcome) deleteGroup(g string) tea.Cmd {
 			return fmt.Errorf("%s is still sending a change: wait for it to finish", strings.Join(applying, ", "))
 		}
 		if v["confirm"] != g {
-			return fmt.Errorf("type %q to confirm", g)
+			return fmt.Errorf("type “%s” to confirm", g)
 		}
 		return nil
 	}
@@ -293,7 +293,7 @@ func (a *App) openSQLFile(path string) tea.Cmd {
 	if w := a.ws(); w != nil {
 		cmd := w.newQueryTab(string(b))
 		if t, ok := w.tab().(*queryTab); ok {
-			t.name = filepath.Base(path)
+			t.name, t.file, t.fileText = filepath.Base(path), path, t.ed.Text()
 		}
 		return cmd
 	}

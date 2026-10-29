@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { api, ApiError, cancelInflight, clip, download, inflightCount, postQuery, qs, recentKey, sameRef, saveBlob, withToken, type Connection, type FilterSet, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
+import { api, ApiError, cancelInflight, clip, download, inflightCount, openWindow, postQuery, qs, recentKey, sameRef, saveBlob, switchSchema, type Connection, type FilterSet, type Meta, type ObjRef, type Plan, type SessionInfo } from '../utils/api'
 import { DataTab } from '../components/DataTab'
 import { Dialog, PlanDialog, ask, confirm, openSession } from '../components/Dialogs'
 import { DataDiffDialog, FakeDataDialog, SchemaDiffDialog } from '../components/Wave'
@@ -19,6 +19,7 @@ import { ProcessDialog, SearchDialog } from '../components/Tools'
 import { AssistantTab, DiagramTab, MetricsTab } from '../components/Views'
 import { Logo } from '../components/logos'
 import { Select } from '../components/Select'
+import { Layer, MENU, at as place } from '../components/Layer'
 import { copyText } from '../utils/copy'
 import { queryLink, tableLink } from '../utils/links'
 import { Machine, canon, contextOf, display, inTextField, keysLocked, moveFocus } from '../utils/keys'
@@ -75,6 +76,8 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const [help, setHelp] = useState(false)
   const [switcher, setSwitcher] = useState(false)
   const [dbMenu, setDbMenu] = useState(false)
+  const swBtn = useRef<HTMLButtonElement>(null), dbBtn = useRef<HTMLButtonElement>(null) // the menus hang under these
+  const savedPaths = useRef<Record<number, string>>({}) // query tab id -> the saved query it was opened from (a hook: it must sit above the early returns below)
   const [consoleOn, setConsoleOn] = useState(false)
   const [safeDlg, setSafeDlg] = useState(false)
   const [palette, setPalette] = useState(false)
@@ -103,7 +106,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   // workspaces: every open session with the database it is on
   const opens = useQuery({ queryKey: ['opens', switcher], enabled: switcher, gcTime: 0, queryFn: async () => Object.fromEntries(await Promise.all(Object.entries(openSessions()).map(async ([n, id]) => [n, (await api<SessionInfo>('GET', `/sessions/${id}`).catch(() => null))?.database ?? '']))) as Record<string, string> })
   // MCP approval sheet: a client sent a non-read-only statement and waits for an answer
-  const approvals = useQuery({ queryKey: ['mcpapprovals'], queryFn: () => api<{ id: string; token: string; connection: string; sql: string }[]>('GET', '/mcp/approvals'), refetchInterval: 2000, gcTime: 0 })
+  const approvals = useQuery({ queryKey: ['mcpapprovals'], queryFn: () => api<{ id: string; token: string; connection: string; sql: string }[]>('GET', '/mcp/approvals'), refetchInterval: (q) => (q.state.error instanceof ApiError && q.state.error.status === 401 ? false : 2000), gcTime: 0 })
   const approval = approvals.data?.[0]
   const answerApproval = (approve: boolean) => { if (approval) api('POST', `/mcp/approvals/${approval.id}`, { approve }).catch((e) => notify(String(e.message ?? e))).finally(() => approvals.refetch()) }
   const [pending, setPending] = useState<string | null>(null) // context the prefix was pressed in, for which-key
@@ -167,15 +170,22 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     }).catch(() => {})
   }, [info.data, meta.data])
   useEffect(() => { schedule() }, [tabs])
+  useEffect(() => { // the shown tab stays in view in a tab bar that scrolls (phones, many tabs)
+    document.querySelectorAll('[data-tabbar] > [aria-selected=true]').forEach((el) => el.scrollIntoView({ block: 'nearest', inline: 'nearest' }))
+  }, [actives])
   // a connection URL that named a table (schema, table, column, operation, value, condition) opens it right after the connect
   const openedTarget = useRef(false)
   const dirty = useRef<Record<number, boolean>>({}) // table tabs with pending edits, reported by DataTab
+  const liveFilters = useRef<Record<number, FilterSet>>({}) // each table tab's applied filters, reported by DataTab (Copy link)
   const [dirtyIds, setDirtyIds] = useState<Set<number>>(new Set())
   const markDirty = (id: number, d: boolean) => { if (!!dirty.current[id] === d) return; dirty.current[id] = d; setDirtyIds((x) => { const n = new Set(x); d ? n.add(id) : n.delete(id); return n }) }
   const [mobileMenu, setMobileMenu] = useState<{ x: number; y: number } | null>(null) // the top bar's ⋯ menu on phones
-  const okToDrop = async (ts: Tab[]) => !ts.some((t) => dirty.current[t.id]) || confirm('Discard pending changes in the tab(s) being closed?')
+  const txOpen = useRef<Record<number, boolean>>({}) // query tabs holding an open transaction, reported by QueryTab
+  const okToDrop = async (ts: Tab[]) =>
+    (!ts.some((t) => txOpen.current[t.id]) || await confirm('This tab has an open transaction. Close it and roll back?', 'Everything since BEGIN is rolled back. COMMIT first to keep it.', 'Roll back and close')) &&
+    (!ts.some((t) => dirty.current[t.id]) || await confirm('Discard pending changes in the tab(s) being closed?', undefined, 'Discard'))
   useEffect(() => {
-    const warn = (e: BeforeUnloadEvent) => { if (Object.values(dirty.current).some(Boolean)) e.preventDefault() }
+    const warn = (e: BeforeUnloadEvent) => { if ([...Object.values(dirty.current), ...Object.values(txOpen.current)].some(Boolean)) e.preventDefault() }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [])
@@ -184,6 +194,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     if (!info.data || !meta.data || openedTarget.current || !o?.Table) return
     openedTarget.current = true
     const ref: ObjRef = { Schema: o.Schema || (info.data.caps.Schemas ? info.data.schema : ''), Name: o.Table, Kind: 'table' }
+    if (info.data.caps.Schemas && ref.Schema !== info.data.schema) switchSchema(sid, ref.Schema).then((x) => qc.setQueryData(['session', sid], x), () => {}) // the sidebar and status bar show the URL's schema
     if (!o.Column) return void openObj(ref)
     const want = (OPEN_OPS[(o.Operation || '=').toLowerCase()] ?? o.Operation) || '='
     const op = (meta.data.operators[info.data.caps.Dialect] ?? []).find((x) => x.toLowerCase() === want.toLowerCase()) ?? want
@@ -207,8 +218,11 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
       setPending(r.pending ? ctx : null)
       if (r.action) act.current(r.action)
     }
+    // a click anywhere forgets a pressed prefix, so the key sheet never stays up after the mouse took over
+    const onDown = () => { if (m.pending) { m.pending = false; setPending(null) } }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    window.addEventListener('pointerdown', onDown, true)
+    return () => { window.removeEventListener('keydown', onKey, true); window.removeEventListener('pointerdown', onDown, true) }
   }, [km])
   if (info.error) { forget(sid); return <div className="min-h-full bg-[radial-gradient(var(--rule)_1px,transparent_1px)] bg-[size:22px_22px]"><div className="max-w-[920px] mx-auto px-7 pt-10 pb-20 max-[760px]:px-4 max-[760px]:pt-7 max-[760px]:pb-12"><header className="flex items-baseline gap-4"><h1 className={START_H1}>This session has ended</h1></header><p className="mt-2.5 max-w-[56ch] text-[15px] text-ink-2">{info.error.message}. Connect again from the connections list.</p><p className="my-[1em]"><button className="btn-primary" onClick={() => nav({ to: '/' })}>Back to connections</button></p></div></div> }
   if (!info.data || !meta.data) return <div className="flex flex-col h-full" role="status"><div className={PROGRESS} aria-label="Connecting" /><div className={EMPTY}>Connecting…</div></div>
@@ -241,7 +255,10 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   // M12.3: the same object already open in this pane is shown; otherwise the current table tab is replaced when it has no pending changes.
   // Tabs with changes, editors and other pages are kept, and newTab (sidebar "Open in new tab") always adds.
   const openObj = (o: ObjRef, record = true, view?: 'structure', newTab = false) => {
-    if (!['table', 'view', 'matview'].includes(o.Kind)) return
+    if (!['table', 'view', 'matview'].includes(o.Kind)) { // functions, procedures, sequences and types open their definition in an editor, as Show DDL does
+      api<{ text: string }>('GET', `/sessions/${sid}/object/ddl` + qs({ schema: o.Schema, name: o.Name, kind: o.Kind })).then((r) => newQuery(r.text), (e) => notify(e instanceof Error ? e.message : String(e)))
+      return
+    }
     if (record) { // cap 50, a new open drops the forward trail
       const t = trail.current
       if (t.list[t.i] === undefined || !sameRef(t.list[t.i], o)) { t.list = [...t.list.slice(0, t.i + 1), o].slice(-50); t.i = t.list.length - 1 }
@@ -265,7 +282,6 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   }
   // a search hit opens its table in a fresh tab with the hit's filters, so a tab with edits is never replaced
   const openHit = (o: ObjRef, filters: FilterSet) => { addTab({ kind: 'table', obj: o, filters }) }
-  const savedPaths = useRef<Record<number, string>>({}) // query tab id -> the saved query it was opened from
   const newQuery = (text = '', autorun = false, path?: string) => { const id = addTab({ kind: 'query', n: ++queries.current, text, autorun }); texts.current[id] = text; if (path) savedPaths.current[id] = path }
   const openPage = (kind: 'diagram' | 'metrics' | 'assistant', focusOn?: ObjRef) => {
     const ex = tabs.find((t) => t.kind === kind)
@@ -285,7 +301,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   const closeOtherConns = async () => {
     const others = Object.entries(openSessions()).filter(([, id]) => id !== sid)
     if (!others.length) return notify('No other connection is open')
-    if (!(await confirm(`Close ${others.length} other connection${others.length === 1 ? '' : 's'}?`))) return
+    if (!(await confirm(`Close ${others.length} other connection${others.length === 1 ? '' : 's'}?`, undefined, 'Close'))) return
     await Promise.all(others.map(([, id]) => api('DELETE', `/sessions/${id}`).catch(() => {})))
     others.forEach(([, id]) => forget(id))
     notify(`Closed ${others.length} other connection${others.length === 1 ? '' : 's'}`)
@@ -400,10 +416,11 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
       case 'move_tab_right': return moveTab(id, 1)
       case 'copy_link': { // (a plain link: the token fragment would hand the API to whoever the link is pasted to) a table or saved-query tab copies its own link, any other tab the workspace link
         const t = tabs.find((x) => x.id === id), path = t?.kind === 'query' ? savedPaths.current[id] : undefined
-        const rel = t?.kind === 'table' ? tableLink(sid, t.obj.Schema, t.obj.Name, t.filters?.Filters?.length ? t.filters : undefined) : path ? queryLink(sid, path) : `/s/${sid}`
+        const fs = t ? liveFilters.current[t.id] ?? (t.kind === 'table' ? t.filters : undefined) : undefined // the filters applied now, not the ones the tab opened with
+        const rel = t?.kind === 'table' ? tableLink(sid, t.obj.Schema, t.obj.Name, fs?.Filters?.length ? fs : undefined) : path ? queryLink(sid, path) : `/s/${sid}`
         return void copyText(location.origin + rel).then(() => notify('Copied the link'), (e) => notify(String(e)))
       }
-      case 'open_window': return void window.open(withToken(`/s/${sid}`), '_blank', 'noopener') // the token travels in the fragment, so the new browser tab signs in
+      case 'open_window': return openWindow(`/s/${sid}`) // the token is handed over through storage, not the URL (WU-5)
     }
   }
   // entries of the database picker's menu (menus.Database)
@@ -433,10 +450,11 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     if (!ev.defaultPrevented) newQuery(text)
   }
   const switchDb = async (name: string) => {
-    if (tabs.length && !(await okToDrop(tabs) && await confirm('Switching closes all open tabs. Continue?'))) return
+    if (tabs.length && !(await okToDrop(tabs) && await confirm('Switching closes all open tabs. Continue?', undefined, 'Switch'))) return
     try { await api('POST', `/sessions/${sid}/database`, { Name: name }); setTabs([]); setActives([0, 0]); setSplit(false); setFocus(0); trail.current = { list: [], i: -1 }; qc.invalidateQueries() } catch (e) { notify(String(e)) }
   }
   const disconnect = async () => {
+    if (!(await okToDrop(tabs))) return // unsent changes are asked about first, as they are when a tab closes
     try { await api('DELETE', `/sessions/${sid}`) } catch (e) { if (!(e instanceof ApiError && e.status === 404)) return notify(`Could not disconnect: ${e instanceof Error ? e.message : e}. Try again.`) }
     dropWorkspace(i.name); forget(sid); qc.clear(); nav({ to: '/' }) }
   // Switching keeps this session open on the server, so coming back is instant; Disconnect closes it.
@@ -476,7 +494,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
     if (action.startsWith('plugin:')) return pluginRun.current(action.slice(7))
     switch (action) {
       case 'help': return setHelp(true)
-      case 'reconnect': return void confirm(`Reconnect to ${i.name}? Unsent changes in open tabs are lost.`).then((ok) => { if (ok) reconnect() })
+      case 'reconnect': return void confirm(`Reconnect to ${i.name}? Unsent changes in open tabs are lost.`, undefined, 'Reconnect').then((ok) => { if (ok) reconnect() })
       case 'safe_mode': return setSafeDlg(true)
       case 'toggle_console': return setConsoleOn((c) => !c)
       case 'open_anything': return setPalette(true)
@@ -547,19 +565,18 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
   }
 
   return (
-    <div className="flex flex-col h-full" style={accent} data-zen={zen || undefined}>
+    <div className="flex flex-col h-full overflow-x-clip" style={accent} data-zen={zen || undefined}>
       {risky && <div className="h-[3px] flex-none bg-accent" role="note" aria-label={`${i.tag} database`} title={`${i.tag}: this is not a scratch database`} />}
       <div className="relative flex items-center gap-3 h-10 text-[12px] pr-2.5 bg-panel border-b border-rule font-mono max-[760px]:h-auto max-[760px]:min-h-10 max-[760px]:flex-wrap max-[760px]:gap-x-2.5 max-[760px]:gap-y-1.5 max-[760px]:pr-2">
         <div className="self-stretch flex items-center gap-2.5 px-3.5 bg-accent text-on-accent font-semibold text-[13px] whitespace-nowrap max-[760px]:self-auto max-[760px]:h-10">
           <button className={`${BADGE_GHOST} hover:bg-transparent! hidden max-[760px]:inline-block`} onClick={() => setSide(!side)} aria-expanded={side}>Objects</button>
-          <button className={`${BADGE_GHOST} flex items-center gap-2 -mx-1.5 font-semibold text-[14px] hover:bg-[rgb(255_255_255/0.16)]! aria-expanded:bg-[rgb(255_255_255/0.16)]!`} onClick={() => setSwitcher(!switcher)} aria-expanded={switcher} aria-haspopup="menu" title="Switch connection">
+          <button ref={swBtn} className={`${BADGE_GHOST} flex items-center gap-2 -mx-1.5 font-semibold text-[14px] hover:bg-[rgb(255_255_255/0.16)]! aria-expanded:bg-[rgb(255_255_255/0.16)]!`} onClick={() => setSwitcher(!switcher)} aria-expanded={switcher} aria-haspopup="menu" title="Switch connection">
             <Logo driver={i.driver} size={16} className="text-inherit opacity-85" />{i.name}<span className={CARET} aria-hidden>▾</span>
           </button>
         </div>
         {switcher && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => { setSwitcher(false); setAskDb(null) }} aria-hidden />
-            <div className={`${SWITCHER} top-10 left-0`} role="menu" aria-label="Connections">
+          <Layer onClose={() => { setSwitcher(false); setAskDb(null) }}>
+            <div className={SWITCHER} style={swBtn.current ? place(swBtn.current.getBoundingClientRect(), { width: 260, height: 420 }) : { left: 0, top: 40 }} role="menu" aria-label="Connections">
               {conns.isLoading && <div className="p-2.5 text-[12.5px] text-ink-2">Loading…</div>}
               {(conns.data ?? []).map((c) => {
                 const open = openSessions()[c.Name]
@@ -578,18 +595,17 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
               <button role="menuitem" className={SW_ITEM} onClick={() => { setSwitcher(false); setTool('mcp') }}>MCP activity</button>
               <button role="menuitem" className={SW_ITEM} onClick={() => nav({ to: '/' })}>All connections</button>
             </div>
-          </>
+          </Layer>
         )}
-        <span className="font-mono text-[11.5px] text-ink-2 truncate max-[760px]:hidden">{i.serverInfo}{i.encoding ? ` · ${i.encoding}` : ''}</span>
+        <span className="font-mono text-[11.5px] text-ink-2 truncate min-w-0 shrink max-[760px]:hidden">{i.serverInfo}{i.encoding ? ` · ${i.encoding}` : ''}</span>
         <button className="chip hover:text-ink hover:border-ink-3 cursor-pointer" title="Safe mode decides what needs confirmation before it is sent. Click to change it." onClick={() => setSafeDlg(true)}>{i.levelLabel}</button>
         {i.readOnly && <span className="chip border-del text-del" title="This connection refuses every statement that changes data">read only</span>}
         {(dbs.data?.databases.length ?? 0) > 1 && (
           <div className="relative">
-            <button className="flex items-center gap-1.5 px-2 py-0.5 font-medium text-[14px] border-transparent hover:border-rule-2 aria-expanded:border-rule-2" onClick={() => setDbMenu(!dbMenu)} aria-expanded={dbMenu} aria-haspopup="menu" title={`Switch ${i.caps.DatabaseNoun || 'database'}`}>{i.database}<span className={CARET} aria-hidden>▾</span></button>
+            <button ref={dbBtn} className="flex items-center gap-1.5 px-2 py-0.5 font-medium text-[14px] border-transparent hover:border-rule-2 aria-expanded:border-rule-2" onClick={() => setDbMenu(!dbMenu)} aria-expanded={dbMenu} aria-haspopup="menu" title={`Switch ${i.caps.DatabaseNoun || 'database'}`}>{i.database}<span className={CARET} aria-hidden>▾</span></button>
             {dbMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setDbMenu(false)} aria-hidden />
-                <div className={`${SWITCHER} top-7 -left-2`} role="menu" aria-label={i.caps.DatabaseNoun || 'Databases'}>
+              <Layer onClose={() => setDbMenu(false)}>
+                <div className={SWITCHER} style={dbBtn.current ? place(dbBtn.current.getBoundingClientRect(), { width: 260, height: 420 }) : { left: 0, top: 40 }} role="menu" aria-label={i.caps.DatabaseNoun || 'Databases'}>
                   {dbs.data!.databases.map((d) => (
                     <div key={d} className="flex items-center" onContextMenu={(e) => { e.preventDefault(); setDbMenuAt({ x: e.clientX, y: e.clientY, db: d }) }}>
                       <button role="menuitem" className={`${SW_ITEM} flex-1 min-w-0 ${d === i.database ? 'btn-on' : ''}`} autoFocus={d === i.database} onKeyDown={(e) => { if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); setDbMenuAt({ x: r.left + 24, y: r.bottom, db: d }) } }} onClick={() => { setDbMenu(false); if (d !== i.database) switchDb(d) }}>
@@ -599,13 +615,13 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
                     </div>
                   ))}
                 </div>
-              </>
+              </Layer>
             )}
           </div>
         )}
         <span className="flex-1 min-w-0" />
-        {toolbar.map((t) => <button key={t.name} className={`max-[760px]:hidden ${t.icon ? 'btn-icon' : ''} ${t.on ? 'btn-on' : ''}`} aria-pressed={t.on === undefined ? undefined : t.on} aria-label={t.icon ? t.title : undefined} title={t.title} onClick={t.run}>{t.label}</button>)}
-        <button className="btn-icon hidden max-[760px]:inline-block text-[15px] leading-none" aria-label="Menu" aria-haspopup="menu" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMobileMenu({ x: r.right - 220, y: r.bottom + 2 }) }}>⋯</button>
+        {toolbar.map((t) => <button key={t.name} className={`flex-none ${KEEP.has(t.name) ? 'max-[760px]:hidden' : 'max-[980px]:hidden'} ${t.icon ? 'btn-icon' : ''} ${t.on ? 'btn-on' : ''}`} aria-pressed={t.on === undefined ? undefined : t.on} aria-label={t.icon ? t.title : undefined} title={t.title} onClick={t.run}>{t.label}</button>)}
+        <button className="btn-icon flex-none hidden max-[980px]:inline-block text-[15px] leading-none" aria-label="Menu" aria-haspopup="menu" title="More: new query, history, saved queries, open anything, key bindings, disconnect" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMobileMenu({ x: r.right - 220, y: r.bottom + 2 }) }}>⋯</button>
       </div>
       {mobileMenu && <TabMenu x={mobileMenu.x} y={mobileMenu.y} onClose={() => setMobileMenu(null)} items={[['New query', () => newQuery()], ['History', () => setDrawer(drawer === 'history' ? '' : 'history')], ['Saved queries', () => setDrawer(drawer === 'queries' ? '' : 'queries')], ['Open anything', () => setPalette(true)], ['Key bindings', () => setHelp(true)], ['-', () => {}], ['Disconnect', disconnect]]} />}
       <div className="flex flex-1 min-h-0 relative">
@@ -613,9 +629,10 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
         <Sidebar key={i.database} open={side} collapsed={collapsed || zen} sid={sid} info={i} meta={meta.data} onOpen={openObj} onQueryText={newQuery} onPlan={setPlan} notify={notify} onDiagram={(o) => openPage('diagram', o)} />
         <div className={`flex-1 min-w-0 grid bg-canvas grid-rows-[auto_minmax(0,1fr)] ${split ? 'grid-cols-2 max-[760px]:grid-cols-1 max-[760px]:grid-rows-[auto_minmax(0,1fr)_auto_minmax(0,1fr)]' : 'grid-cols-1'}`}>
           {(split ? [0, 1] : [0]).map((pn) => (
-            <div key={pn} className={`flex h-8 min-w-0 text-[12px] border-b border-rule overflow-x-auto [scrollbar-width:none] bg-[var(--tabs-bg,var(--canvas))] font-mono border-t-2 ${split && pn === focus ? 'border-t-accent' : 'border-t-transparent'} ${pn ? 'col-start-2 row-start-1 border-l border-l-rule max-[760px]:col-start-1 max-[760px]:row-start-3' : 'col-start-1 row-start-1'}`} onMouseDownCapture={() => setFocus(pn)} onDoubleClick={(e) => { if (e.target === e.currentTarget) { setFocus(pn); act.current('new_tab') } }} role="tablist" aria-label={split ? `Tabs, pane ${pn + 1}` : 'Tabs'}>
+            <div key={pn} className={`flex h-8 min-w-0 text-[12px] border-b border-rule overflow-x-auto [scrollbar-width:none] bg-[var(--tabs-bg,var(--canvas))] font-mono border-t-2 ${split && pn === focus ? 'border-t-accent' : 'border-t-transparent'} ${pn ? 'col-start-2 row-start-1 border-l border-l-rule max-[760px]:col-start-1 max-[760px]:row-start-3' : 'col-start-1 row-start-1'}`} onMouseDownCapture={() => setFocus(pn)} onDoubleClick={(e) => { if (e.target === e.currentTarget) { setFocus(pn); act.current('new_tab') } }} role="tablist" data-tabbar aria-label={split ? `Tabs, pane ${pn + 1}` : 'Tabs'}>
               {tabs.filter((t) => t.pane === pn).map((t) => (
                 <div key={t.id} role="tab" aria-selected={t.id === actives[pn]} tabIndex={t.id === actives[pn] ? 0 : -1} draggable
+                  title={t.kind === 'table' ? (t.obj.Schema ? `${t.obj.Schema}.${t.obj.Name}` : t.obj.Name) : t.name}
                   className={`group flex items-center gap-2 pl-3.5 pr-2.5 cursor-pointer whitespace-nowrap border-r border-rule hover:text-ink hover:bg-panel ${t.id === actives[pn] ? 'text-ink bg-[var(--tab-active-bg,var(--panel))] shadow-[inset_0_-2px_0_var(--accent)]' : 'text-ink-2'} ${dragTab === t.id ? 'opacity-40' : ''}`}
                   onClick={() => setActive(pn, t.id)} onContextMenu={(e) => { e.preventDefault(); setTmenu({ x: e.clientX, y: e.clientY, id: t.id }) }}
                   onKeyDown={(e) => { // keyboard: Enter shows the tab, shift+F10 / the menu key opens its menu, alt+arrows move it
@@ -628,7 +645,7 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
                   onDragStart={(e) => { setDragTab(t.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-webtuidb-tab', String(t.id)) }} onDragEnd={() => setDragTab(null)}
                   onDragOver={(e) => { if (dragTab !== null && dragTab !== t.id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move' } }}
                   onDrop={(e) => { if (dragTab === null) return; e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); reorder(dragTab, t.id, e.clientX > r.left + r.width / 2); setDragTab(null) }}>
-                  {t.kind === 'table' && t.obj.Schema && t.obj.Schema !== i.schema && <span className="text-ink-3 text-[11px]">{t.obj.Schema}.</span>}{tabLabel(t)}
+                  <span className="max-w-[240px] truncate">{t.kind === 'table' && t.obj.Schema && t.obj.Schema !== i.schema && <span className="text-ink-3 text-[11px]">{t.obj.Schema}.</span>}{tabLabel(t)}</span>
                   <button className={`btn-ghost px-1 ${t.id === actives[pn] ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`} aria-label="Tab menu" aria-haspopup="menu" onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setTmenu({ x: r.left, y: r.bottom, id: t.id }) }}>▾</button>
                   <button className={`btn-ghost btn-icon w-5 ${dirtyIds.has(t.id) ? 'text-edit hover:text-ink' : t.id === actives[pn] ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`} aria-label={dirtyIds.has(t.id) ? 'Close tab (has unsent changes)' : 'Close tab'} title={dirtyIds.has(t.id) ? 'Unsent changes. Click to close.' : 'Close'} onClick={(e) => { e.stopPropagation(); close(t.id) }}>{dirtyIds.has(t.id) ? <><span className="group-hover:hidden [button:hover_&]:hidden">●</span><span className="hidden group-hover:inline">✕</span></> : '✕'}</button>
                 </div>
@@ -647,8 +664,9 @@ export function Workspace({ sid, target }: { sid: string; target?: Target }) {
             return (
               <div key={t.id} className={`min-h-0 min-w-0 flex flex-col row-start-2 ${t.pane ? 'col-start-2 border-l border-rule max-[760px]:col-start-1 max-[760px]:row-start-4' : 'col-start-1'}`} hidden={!shownHere} onMouseDownCapture={() => setFocus(t.pane)}
                 onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }} onDrop={(e) => dropFile(t, e)}>
-                {t.kind === 'table' ? <DataTab sid={sid} info={i} meta={meta.data!} obj={t.obj} initFilters={t.filters} initView={t.view} notify={notify} active={live} onFollow={openHit} onDirty={(d) => markDirty(t.id, d)} />
-                  : t.kind === 'query' ? <QueryTab sid={sid} info={i} meta={meta.data!} tabKey={`${i.name}/tab${t.n}`} initial={t.text} autorun={t.autorun} notify={notify} shown={live} onCancel={afterCancel} onText={(x) => { texts.current[t.id] = x; schedule() }} onDirty={(d) => markDirty(t.id, d)} onClose={() => close(t.id)} />
+                {t.kind === 'table' ? <DataTab sid={sid} info={i} meta={meta.data!} obj={t.obj} initFilters={t.filters} initView={t.view} notify={notify} active={live} onFollow={openHit} onDirty={(d) => markDirty(t.id, d)} onFilters={(f) => { liveFilters.current[t.id] = f }} />
+                  : t.kind === 'query' ? <QueryTab sid={sid} info={i} meta={meta.data!} tabKey={`${i.name}/tab${t.n}`} initial={t.text} autorun={t.autorun} notify={notify} shown={live} onCancel={afterCancel} onText={(x) => { texts.current[t.id] = x; schedule() }} onDirty={(d) => markDirty(t.id, d)} onTx={(x) => { txOpen.current[t.id] = x }} onClose={() => close(t.id)}
+                    onSaved={(name) => setTabs((l) => l.map((x) => (x.id === t.id ? { ...x, name: name.split('/').pop() } : x)))} />
                   : t.kind === 'diagram' ? <DiagramTab sid={sid} info={i} focus={t.focus} onStructure={(r) => openObj(r, true, 'structure')} onPlan={setPlan} />
                   : t.kind === 'metrics' ? <MetricsTab sid={sid} info={i} shown={shownHere} others={openSessions()} notify={notify} />
                   : <AssistantTab sid={sid} notify={notify} onRun={(q) => newQuery(q, true)} />}
@@ -728,7 +746,9 @@ const EMPTY = 'px-8 py-14 max-w-[46ch] text-ink-2 text-[15px] leading-normal'
 const START_H1 = "m-0 text-[36px] leading-none tracking-[-.03em] font-medium font-mono max-[760px]:text-[32px] after:inline-block after:w-[.5em] after:h-[.85em] after:ml-[.12em] after:align-[-.08em] after:bg-accent after:animate-blink motion-reduce:after:animate-none"
 const BADGE_GHOST = 'btn-ghost text-inherit! opacity-75 hover:opacity-100 hover:border-transparent!'
 const CARET = 'text-[10px] opacity-70'
-const SWITCHER = 'popover absolute z-[41] w-max min-w-[240px] max-w-[min(480px,calc(100vw-24px))] max-h-[70vh] overflow-auto m-0 p-1.5'
+const SWITCHER = `${MENU} w-max min-w-[240px] max-w-[min(480px,calc(100vw-24px))] m-0`
+// the top bar's buttons that stay on narrower windows (the rest move into the ⋯ menu below 980px; everything does below 760px)
+const KEEP = new Set(['new_query_tab', 'open_anything', 'help'])
 const SW_ITEM = 'menu-item'
 const WK_ROW = 'flex gap-2 items-center whitespace-nowrap'
 const TOAST_GHOST = 'btn-ghost text-inherit! opacity-80 flex-none hover:opacity-100 hover:bg-[rgb(128_128_128/0.25)]!'
@@ -761,13 +781,15 @@ function PaletteHost({ sid, info, dbs, bindings, onTable, onSql, onDb, onAction,
   return <Palette items={items} onClose={onClose} />
 }
 
-// Help lists every binding the terminal UI has, in the same order, so both screens read the same.
-function Help({ km, onClose }: { km: Meta['keymap']; onClose: () => void }) {
+// Help lists what the terminal help lists (internal/ui/help.go): the context focused when it opened, then global, each in
+// keymap order, so both screens read the same (W-P2-19).
+export function Help({ km, onClose }: { km: Meta['keymap']; onClose: () => void }) {
   const [q, setQ] = useState('')
-  const ctxs = [...new Set(km.bindings.map((b) => b.Context))]
+  const [ctx] = useState(contextOf) // read before the search box takes focus
+  const ctxs = ctx === 'global' ? ['global'] : [ctx, 'global']
   const t = q.trim().toLowerCase()
   const hit = (b: Meta['keymap']['bindings'][number]) => !t || b.Desc.toLowerCase().includes(t) || b.Key.toLowerCase().includes(t) || b.Action.includes(t.replace(/\s+/g, '_'))
-  const n = km.bindings.filter(hit).length
+  const n = km.bindings.filter((b) => ctxs.includes(b.Context) && hit(b)).length
   return (
     <Dialog title="Key bindings" onClose={onClose} wide>
       <p className="text-ink-2 mt-0 mb-2.5">Press <kbd>{display(km.prefix)}</kbd> then a key. <kbd>Esc</kbd> cancels, pressing the prefix twice sends it to the page. Greyed bindings only exist in the terminal UI.</p>
@@ -778,7 +800,7 @@ function Help({ km, onClose }: { km: Meta['keymap']; onClose: () => void }) {
           const list = km.bindings.filter((b) => b.Context === c && hit(b))
           return list.length ? (
             <section key={c}>
-              <h3 className="mt-3 mb-1 text-[12.5px] text-ink-2">{c}</h3>
+              <h3 className="mt-3 mb-1 text-[12.5px] text-ink-2">{c[0].toUpperCase() + c.slice(1)}</h3>
               {list.map((b) => (
                 <div key={b.Action + b.Key} className={`flex items-center gap-2.5 py-0.5 text-[12.5px] ${supported(b.Action) ? '' : 'text-ink-3'}`} title={supported(b.Action) ? undefined : 'Not in the web UI'}>
                   <kbd className="min-w-[7em] text-center">{b.NoPrefix ? '' : display(km.prefix) + ' '}{display(b.Key)}</kbd><span>{b.Desc}</span>
@@ -831,7 +853,7 @@ function Drawer({ kind, conn, dir, menus, notify, onUse, onRun, onInsert, onClos
     try { await api('POST', '/queries/rename', { from: s.Path, to: dirPart + (n.endsWith('.sql') ? n : n + '.sql') }); saved.refetch() } catch (e) { fail('Could not rename')(e) }
   }
   const delQuery = async (s: { Path: string; Name: string }) => {
-    if (!(await confirm(`Delete the saved query ${s.Name}?`))) return
+    if (!(await confirm(`Delete the saved query ${s.Name}?`, undefined, 'Delete'))) return
     try { await api('DELETE', '/queries/' + encPath(s.Path)); saved.refetch() } catch (e) { fail('Could not delete')(e) }
   }
   const moveQuery = async (s: { Path: string }, folder: string) => { // POST /queries/rename moves the file; a folder is part of the path
@@ -851,7 +873,7 @@ function Drawer({ kind, conn, dir, menus, notify, onUse, onRun, onInsert, onClos
           case 'open_new_tab': return onRun(h.sql)
           case 'add_to_queries': return void addToQueries(h.sql)
           case 'copy': return void copy(h.sql)
-          case 'clear_all': return void (async () => { if (!(await confirm('Clear history for this connection?'))) return; try { await api('DELETE', '/history' + qs({ conn, all: 1 })) } catch (e) { fail('Could not clear history')(e) } finally { hist.refetch() } })()
+          case 'clear_all': return void (async () => { if (!(await confirm('Clear history for this connection?', undefined, 'Clear'))) return; try { await api('DELETE', '/history' + qs({ conn, all: 1 })) } catch (e) { fail('Could not clear history')(e) } finally { hist.refetch() } })()
         }
       }, whyNot(it)])
     }
@@ -884,7 +906,7 @@ function Drawer({ kind, conn, dir, menus, notify, onUse, onRun, onInsert, onClos
         {kind === 'history' && <>
           <button className="btn-ghost" onClick={async () => { try { const f = await download('/history/export' + qs({ conn, format: 'csv' })); saveBlob(f.blob, `${conn}-history.csv`) } catch (e) { fail('Could not save history')(e) } }}>Save As…</button>
           <label className="btn-ghost cursor-pointer border border-transparent px-1.5 hover:bg-raised">Import…<input type="file" accept=".csv,.json" hidden onChange={(e) => readFile(e, async (name, text) => { try { await api('POST', '/history/import', { Conn: conn, Format: name.endsWith('.csv') ? 'csv' : 'json', Content: text }); hist.refetch(); notify('Imported history') } catch (er) { fail('Could not import')(er) } })} /></label>
-          <button className="btn-ghost" onClick={async () => { if (!(await confirm('Clear history for this connection?'))) return; try { await api('DELETE', '/history' + qs({ conn, all: 1 })) } catch (e) { notify(`Could not clear history: ${e instanceof Error ? e.message : e}`) } finally { hist.refetch() } }}>Clear</button>
+          <button className="btn-ghost" onClick={async () => { if (!(await confirm('Clear history for this connection?', undefined, 'Clear'))) return; try { await api('DELETE', '/history' + qs({ conn, all: 1 })) } catch (e) { notify(`Could not clear history: ${e instanceof Error ? e.message : e}`) } finally { hist.refetch() } }}>Clear</button>
         </>}
         {kind === 'queries' && <>
           <label className="btn-ghost cursor-pointer border border-transparent px-1.5 hover:bg-raised" title="Save a .sql file as a saved query">Import…<input type="file" accept=".sql,text/plain" hidden onChange={(e) => readFile(e, async (name, text) => { try { await postQuery('/queries/import-file', { Name: name, SQL: text }); saved.refetch(); notify('Imported ' + name) } catch (er) { fail('Could not import')(er) } })} /></label>

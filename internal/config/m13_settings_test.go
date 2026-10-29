@@ -55,6 +55,7 @@ func TestApplyValuesRoundTrip(t *testing.T) {
 	for bad, vals := range map[string]map[string]string{
 		"not one of": {"table.filter_state": "nope"}, "whole number": {"general.row_limit": "x"}, "unknown setting": {"nope.key": "1"},
 		"lock_after_mins": {"security.lock_after_mins": "-1"}, "true or false": {"table.alternating_rows": "maybe"},
+		"query_timeout_secs must be >= 0": {"general.query_timeout_secs": "-5"}, // T-P3-16
 	} {
 		if err := ApplyValues(p, vals); err == nil || !strings.Contains(err.Error(), bad) {
 			t.Errorf("%v: got %v, want %q", vals, err, bad)
@@ -183,5 +184,18 @@ func TestHasComments(t *testing.T) {
 	}
 	if HasComments(dir + "/missing.toml") {
 		t.Error("missing file")
+	}
+}
+
+// NEW-3: a value the next start would reject is not saved, and the file is left as it was.
+func TestApplyValuesRefusesWhatLoadRejects(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	orig := []byte("[general]\nprefix = \"C-a\"\n")
+	os.WriteFile(p, orig, 0o644)
+	if err := ApplyValues(p, map[string]string{"general.hints": "commmit"}); err == nil {
+		t.Fatalf("typo saved: %v", err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != string(orig) {
+		t.Fatalf("file changed: %q", b)
 	}
 }

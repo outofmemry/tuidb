@@ -152,6 +152,9 @@ func (t *queryTab) resultEditKeys(g *Grid, msg tea.Msg) bool {
 
 // Dirty / Statements / Commit / Discard make results behave like a table tab for the workspace commit keys.
 func (t *queryTab) Dirty() bool {
+	if t.inTx || t.fileDirty() { // closing rolls the transaction back / loses the file edits: ask first (askClose)
+		return true
+	}
 	if t.other != nil && strings.TrimSpace(t.other.Text()) != "" { // the unfocused pane's text is not saved with the tab: ask before closing
 		return true
 	}

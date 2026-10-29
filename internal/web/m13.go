@@ -43,12 +43,15 @@ func (s *Server) cfg() config.Config {
 	return s.o.Cfg
 }
 
-func (s *Server) reloadCfg() {
-	if c, err := config.Load(s.configPath()); err == nil {
-		s.liveMu.Lock()
-		s.live = &c
-		s.liveMu.Unlock()
+func (s *Server) reloadCfg() error {
+	c, err := config.Load(s.configPath())
+	if err != nil {
+		return err
 	}
+	s.liveMu.Lock()
+	s.live = &c
+	s.liveMu.Unlock()
+	return nil
 }
 
 // configPath is the config.toml the process was started with (-config), else the default one.
@@ -366,7 +369,9 @@ func (s *Server) putSettings(r *http.Request) (any, error) {
 	if err := config.ApplyValues(s.configPath(), in.Values); err != nil {
 		return nil, bad("%v", err)
 	}
-	s.reloadCfg()
+	if err := s.reloadCfg(); err != nil {
+		return nil, bad("saved, but the config does not load: %v", err)
+	}
 	out := map[string]any{"fields": schemaFields(s.cfg()), "restart": true}
 	if had {
 		out["warning"] = commentsWarning
@@ -418,7 +423,9 @@ func (s *Server) putKeys(r *http.Request) (any, error) {
 	if err := config.WriteKeys(s.configPath(), in.Keys, pluginBindings()...); err != nil {
 		return nil, &apiErr{Code: http.StatusConflict, Msg: err.Error()}
 	}
-	s.reloadCfg()
+	if err := s.reloadCfg(); err != nil {
+		return nil, bad("saved, but the config does not load: %v", err)
+	}
 	if had {
 		return map[string]any{"warning": commentsWarning}, nil
 	}

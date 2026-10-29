@@ -114,6 +114,9 @@ func (t Theme) chip(key string) string {
 func (t Theme) chips(pairs ...string) string {
 	var parts []string
 	for i := 0; i+1 < len(pairs); i += 2 {
+		if pairs[i] == "" { // an action left without a key (boundKey) gets no hint
+			continue
+		}
 		parts = append(parts, t.chip(pairs[i])+t.Hint.Render(" "+pairs[i+1]))
 	}
 	return strings.Join(parts, "  ")

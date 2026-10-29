@@ -198,11 +198,8 @@ func (t *assistantTab) sendFailed(text string, err error, stopped bool) tea.Cmd 
 			return tea.Batch(save, w.a.fail(fmt.Errorf("assistant: stopped%s", note)))
 		}
 		return tea.Batch(save, w.a.say("assistant: stopped"))
-	case errors.Is(err, errNoAIKey):
-		if note != "" {
-			return tea.Batch(save, w.a.fail(fmt.Errorf("%s%s", err.Error(), note)))
-		}
-		return tea.Batch(save, w.a.say("%s", err.Error()))
+	case errors.Is(err, errNoAIKey): // a refusal: ✗, like every other one (T-P3-01)
+		return tea.Batch(save, w.a.fail(fmt.Errorf("%s%s", err.Error(), note)))
 	}
 	return tea.Batch(save, w.a.fail(fmt.Errorf("assistant: %w%s", err, note)))
 }

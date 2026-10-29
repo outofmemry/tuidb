@@ -66,7 +66,7 @@ func TestM3UsersDropNeedsTheName(t *testing.T) {
 	h.pickLabel("Drop user")
 	h.want("Drop user ann?")
 	h.press("enter")
-	h.want("type \"ann\"")
+	h.want("type “ann”")
 	setField(t, h, "confirm", "ann")
 	h.press("enter", "enter")
 	if len(h.fake.applied) != 1 || h.fake.applied[0][0].Text != "DROP ann" {
@@ -108,9 +108,8 @@ func TestM3BackupToolMissing(t *testing.T) {
 	h := newHarness(t, nil)
 	h.connect()
 	h.prefix("b")
-	setField(t, h, "file", "x.sql")
-	h.press("enter")
-	h.want("pg_dump not found")
+	h.want("pg_dump not found") // said before the form is filled in (T-P3-17)
+	h.want("Backup shop")       // the form still opens: Ctrl+t inside it is where the path is set
 }
 
 func TestM3RestoreGoesThroughSafeMode(t *testing.T) {

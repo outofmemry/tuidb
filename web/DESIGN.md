@@ -28,7 +28,14 @@ Concept: the connection's colour runs the room.
   start at the width of their name and first rows (a saved width wins), numbers sit flush right,
   NULL is dim italic.
 - **Menus:** one popover style everywhere (`popover` + `menu-item`): the connection switcher, Select,
-  the tab, row and ⋯ menus. Less frequent actions go behind a ⋯ button rather than widening a toolbar.
+  the tab, row and ⋯ menus. Every floating menu renders through `Layer` (`components/Layer.tsx`): a
+  portal to `<body>` above dialogs and sticky headers, a backdrop that swallows the outside click (so
+  nothing underneath is pressed by accident), and the same close rules everywhere: outside click,
+  right-click outside, Escape, window blur or resize. Never hand-roll a `fixed inset-0` backdrop in a
+  component. Less frequent actions go behind a ⋯ button rather than widening a toolbar.
   Motion is a short rise or pop, and `motion-safe:` keeps it off when the user asked for less.
+- **Plain words first:** a failure says what to check in one sentence ("Nothing answered at that
+  address…") and keeps the driver's text behind "Technical details". Anything that loses work asks
+  first (closing or disconnecting with unsent changes).
 - **Quality floor:** visible keyboard focus, reduced motion respected, usable at phone width (the
   object list becomes a drawer, connection rows stack).

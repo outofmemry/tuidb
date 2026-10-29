@@ -32,6 +32,7 @@ type fakeSession struct {
 	objs             []db.Object // overrides Objects when set
 	editor           string      // overrides Caps.Editor ("redis")
 	curDB            string
+	schema           string
 	failRows         error // Rows returns this error
 	colCalls         atomic.Int64
 	procs            []db.ProcessInfo
@@ -76,7 +77,11 @@ func (f *fakeSession) CurrentDatabase() string {
 	}
 	return "shop"
 }
-func (f *fakeSession) CurrentSchema() string { return "public" }
+func (f *fakeSession) CurrentSchema() string { return orStr(f.schema, "public") }
+func (f *fakeSession) SetSchema(_ context.Context, name string) error {
+	f.schema = name
+	return nil
+}
 func (f *fakeSession) UseDatabase(_ context.Context, name string) error {
 	f.curDB = name
 	return nil

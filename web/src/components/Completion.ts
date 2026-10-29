@@ -33,21 +33,24 @@ export function rank(word: string, all: Cand[], limit = 50): Cand[] {
   return hits.sort((a, b) => b.s - a.s).slice(0, limit).map((h) => h.c) // Array.sort is stable
 }
 
-// Every table named after FROM / JOIN, with its alias: `alias.` narrows to that table.
+// Every table named after FROM / JOIN, with its alias: `alias.` narrows to that table. The value keeps the schema
+// (`shop.customers`), so `c.` on `shop.customers c` offers shop's columns, not the current schema's customers.
 const ALIAS = /\b(?:from|join)\s+((?:"[^"]+"|\w+)(?:\.(?:"[^"]+"|\w+))?)(?:\s+(?:as\s+)?(\w+))?/gi
 const NOT_ALIAS = new Set(['where', 'on', 'using', 'join', 'inner', 'left', 'right', 'full', 'outer', 'cross', 'natural', 'group', 'order', 'limit', 'offset', 'having', 'union', 'except', 'intersect', 'window', 'returning', 'set', 'values', 'select', 'lateral'])
 export function aliasesIn(sql: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const m of sql.matchAll(ALIAS)) {
-    const t = m[1].replace(/"/g, '').split('.').pop()!.toLowerCase()
-    out[t] = t
-    if (m[2] && !NOT_ALIAS.has(m[2].toLowerCase())) out[m[2].toLowerCase()] = t
+    const full = m[1].replace(/"/g, '').toLowerCase(), t = full.split('.').pop()!
+    out[t] = full
+    if (m[2] && !NOT_ALIAS.has(m[2].toLowerCase())) out[m[2].toLowerCase()] = full
   }
   return out
 }
-// the tables an unqualified column may come from (refRe in the terminal UI)
+// the tables an unqualified column may come from (refRe in the terminal UI), schema-qualified as written
 const REFS = /\b(?:from|join|update|into|table)\s+((?:"[^"]+"|\w+)(?:\.(?:"[^"]+"|\w+))?)/gi
-export const tablesRead = (sql: string) => [...new Set([...sql.matchAll(REFS)].map((m) => m[1].replace(/"/g, '').split('.').pop()!.toLowerCase()))]
+export const tablesRead = (sql: string) => [...new Set([...sql.matchAll(REFS)].map((m) => m[1].replace(/"/g, '').toLowerCase()))]
+// splitRef turns `shop.customers` into ['shop', 'customers'] and `customers` into ['', 'customers']
+export const splitRef = (ref: string): [string, string] => { const i = ref.lastIndexOf('.'); return [i < 0 ? '' : ref.slice(0, i), ref.slice(i + 1)] }
 
 // Mongo shell methods offered after `db.<collection>.` and after a closing `)` (a chained cursor method)
 export const MONGO_METHODS = ['find', 'findOne', 'aggregate', 'count', 'insertOne', 'insertMany', 'updateOne', 'updateMany', 'deleteOne', 'deleteMany', 'sort', 'limit', 'skip', 'project']
@@ -88,7 +91,7 @@ export function completionSource(env: () => Env) {
         if (/^db\.\w+$/i.test(qual)) all = MONGO_METHODS.map((text) => ({ text, kind: 'method', insert: text + '(' }))
         else if (qual === 'db') all = e.objects.map((o) => ({ text: o.Name, kind: 'collection' }))
       } else {
-        const parts = qual.split('.'), table = parts.pop()!, schema = parts.pop() ?? ''
+        const [schema, table] = splitRef(qual)
         for (const c of await e.colsOf(schema, table)) all.push({ text: c, kind: 'column' })
         let inSchema = e.objects.filter((o) => o.Schema.toLowerCase() === qual) // schema.table
         if (!inSchema.length && !all.length) inSchema = await e.schemaObjects(qual)
@@ -102,7 +105,7 @@ export function completionSource(env: () => Env) {
         if (fn ? !e.opts.functions : !e.opts.tables) continue
         add({ text: o.Name, kind: o.Kind, insert: e.opts.prefixSchema && o.Schema ? `${o.Schema}.${o.Name}` : undefined })
       }
-      if (e.kind === 'sql') for (const t of tablesRead(stmt)) for (const c of await e.colsOf('', t)) add({ text: c, kind: 'column' })
+      if (e.kind === 'sql') for (const t of tablesRead(stmt)) for (const c of await e.colsOf(...splitRef(t))) add({ text: c, kind: 'column' })
       for (const q of e.saved) for (const k of q.Keywords ?? []) {
         if (seen.has(k.toLowerCase())) continue
         seen.add(k.toLowerCase())

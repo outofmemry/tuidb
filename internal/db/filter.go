@@ -248,9 +248,15 @@ func BuildSelect(d Dialect, q RowQuery, allCols []string) (string, []any, error)
 	if where != "" {
 		b.WriteString(" WHERE " + where)
 	}
-	if len(q.Sort) > 0 {
-		o := make([]string, len(q.Sort))
-		for i, s := range q.Sort {
+	sort := q.Sort
+	if len(sort) == 0 { // LIMIT/OFFSET over an unordered scan shows an updated row twice or not at all
+		for _, k := range q.Key {
+			sort = append(sort, Sort{Column: k})
+		}
+	}
+	if len(sort) > 0 {
+		o := make([]string, len(sort))
+		for i, s := range sort {
 			o[i] = d.Quote(s.Column)
 			if s.Desc {
 				o[i] += " DESC"

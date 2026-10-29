@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -128,7 +129,7 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 	if len(s.cfg.MCP.Tokens) > 0 {
 		tok = &s.cfg.MCP.Tokens[0]
 	}
-	return s.build(tok).Run(ctx, &sdk.StdioTransport{})
+	return s.build(tok).Run(ctx, stdioTransport{in: os.Stdin, out: os.Stdout})
 }
 
 // Handler serves streamable HTTP; the Bearer token picks the scope. The verifier returns the token
@@ -585,6 +586,8 @@ var skipLead = regexp.MustCompile(`^(?:\s+|--[^\n]*|/\*(?:[^!+](?s:.*?))?\*/)`)
 // hashLead also skips "# ..." comments, which MySQL and ClickHouse allow.
 var hashLead = regexp.MustCompile(`^#[^\n]*`)
 
+var execLead = regexp.MustCompile(`^/\*!\d*`)
+
 // firstWord is the upper-cased first keyword of sql, after whitespace and comments ("" when it is not a plain
 // keyword, which the read-write gate treats as unsafe).
 func firstWord(dialect, sql string) string {
@@ -592,6 +595,9 @@ func firstWord(dialect, sql string) string {
 		m := skipLead.FindString(sql)
 		if m == "" && (dialect == "mysql" || dialect == "mariadb" || dialect == "clickhouse") {
 			m = hashLead.FindString(sql)
+		}
+		if m == "" && (dialect == "mysql" || dialect == "mariadb") {
+			m = execLead.FindString(sql) // the executable comment's marker, the body is the statement (NEW-2)
 		}
 		if m == "" {
 			break
@@ -694,6 +700,13 @@ func stripLiterals(dialect, sql string) string {
 		switch {
 		case c == '-' && strings.HasPrefix(sql[i:], "--"), c == '#' && my:
 			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+			b.WriteByte(' ')
+		case my && strings.HasPrefix(sql[i:], "/*!"):
+			// /*!50000 SELECT ... */ runs on MySQL: keep the body, drop only the marker and its version digits (NEW-2)
+			i += 3
+			for i < len(sql) && sql[i] >= '0' && sql[i] <= '9' {
 				i++
 			}
 			b.WriteByte(' ')

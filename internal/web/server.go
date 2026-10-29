@@ -392,6 +392,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET "+sp+"/databases", s.api(s.withSession(s.databases)))
 	m.HandleFunc("POST "+sp+"/database", s.api(s.withSession(s.useDatabase)))
 	m.HandleFunc("GET "+sp+"/schemas", s.api(s.withSession(s.schemas)))
+	m.HandleFunc("POST "+sp+"/schema", s.api(s.withSession(s.useSchema)))
 	m.HandleFunc("GET "+sp+"/objects", s.api(s.withSession(s.objects)))
 	m.HandleFunc("GET "+sp+"/object/{what}", s.api(s.withSession(s.object)))
 	m.HandleFunc("POST "+sp+"/rows", s.api(s.withSession(s.rows)))

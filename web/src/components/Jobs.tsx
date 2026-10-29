@@ -3,7 +3,7 @@
 // and sends a desktop notification when a job finishes while the page is hidden.
 import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, download, saveBlob, type JobRow, type MenuItem } from '../utils/api'
+import { ApiError, api, download, saveBlob, type JobRow, type MenuItem } from '../utils/api'
 import { desktopNotify } from '../utils/theme'
 import { whyNot } from '../utils/menus'
 
@@ -16,7 +16,7 @@ export function useJobs(sid: string, open: boolean) {
   const last = useRef<Map<string, boolean>>(new Map())
   const q = useQuery({
     queryKey: ['jobs', sid], queryFn: () => api<{ jobs: JobRow[] | null }>('GET', `/sessions/${sid}/jobs`), gcTime: 0,
-    refetchInterval: (query) => (open || query.state.data?.jobs?.some((j) => !j.done) ? 1000 : 4000),
+    refetchInterval: (query) => (query.state.error instanceof ApiError && query.state.error.status === 401 ? false : open || query.state.data?.jobs?.some((j) => !j.done) ? 1000 : 4000), // no token: stop asking
   })
   const jobs = q.data?.jobs ?? []
   useEffect(() => {

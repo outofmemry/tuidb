@@ -417,7 +417,7 @@ func (s *sidebar) dropDatabase(name string) tea.Cmd {
 	}, func(map[string]string) tea.Cmd { return s.databaseAdmin(db.OpDropDatabase, name, nil, "dropped") })
 	f.validate = func(v map[string]string) error {
 		if v["confirm"] != name {
-			return fmt.Errorf("type %q to confirm", name)
+			return fmt.Errorf("type “%s” to confirm", name)
 		}
 		return nil
 	}

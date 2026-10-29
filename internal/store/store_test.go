@@ -102,6 +102,15 @@ func TestQueries(t *testing.T) {
 	if _, err := s.Save("", "  ", nil, ""); err == nil {
 		t.Error("empty name")
 	}
+	// a "/" in the name is a folder separator
+	if q, err := s.Save("", "webtest/orders by status", nil, "SELECT 1"); err != nil || q.Path != "webtest/orders_by_status.sql" || q.Folder != "webtest" || q.Name != "orders by status" {
+		t.Errorf("folder in name: %+v %v", q, err)
+	}
+	for _, bad := range []string{"../x/y", "/etc/y", "a/../../y", "a/"} {
+		if _, err := s.Save("", bad, nil, ""); err == nil {
+			t.Errorf("name %q must be rejected", bad)
+		}
+	}
 	if got, _ := (&Queries{Root: filepath.Join(t.TempDir(), "none")}).List(); len(got) != 0 {
 		t.Error("missing root lists empty")
 	}

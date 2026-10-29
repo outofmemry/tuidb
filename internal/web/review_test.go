@@ -142,6 +142,24 @@ func TestDataDiffRefusesTruncatedRead(t *testing.T) {
 	}
 }
 
+// W-P2-01/02: the row limit is in /api/meta, and /rows says when the clamp cut the client's request short.
+func TestRowLimitExposed(t *testing.T) {
+	e := newEnvCfg(t, "", func(c *config.Config) { c.General.RowLimit = 3 })
+	if m := e.ok("GET", "/api/meta", nil); m["rowLimit"] != float64(3) {
+		t.Errorf("meta rowLimit %v", m["rowLimit"])
+	}
+	id := e.open()
+	ref := map[string]any{"name": "t", "kind": "table"}
+	for _, c := range []struct {
+		limit int
+		want  bool
+	}{{0, true}, {1000, true}, {3, false}} {
+		if out := e.ok("POST", "/api/sessions/"+id+"/rows", map[string]any{"ref": ref, "limit": c.limit}); out["truncated"] != c.want {
+			t.Errorf("limit %d: truncated %v", c.limit, out["truncated"])
+		}
+	}
+}
+
 func TestSessionCloseRemovesExportFile(t *testing.T) {
 	e := newEnv(t, "")
 	id := e.open()

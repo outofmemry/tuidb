@@ -184,15 +184,44 @@ func palette(t config.Theme) map[string]string {
 	return variant(pal, over)
 }
 
-// themeError is the problem with theme.file, "" when there is none.
+// themeError is the problem with theme.file or [theme.colors], "" when there is none.
 func themeError(t config.Theme) string {
-	if t.File == "" {
+	if t.File != "" {
+		if _, err := themeFileColors(t.File); err != nil {
+			return err.Error()
+		}
+	}
+	return colorsError(t.Colors)
+}
+
+// colorsError names the [theme.colors] entries that do nothing: an unknown key, or a value that is not #rgb,
+// #rrggbb or an ANSI number 0-255 (T-P3-16; tag.* and driver.* take any name).
+func colorsError(colors map[string]string) string {
+	var bad []string
+	for k, v := range colors {
+		_, known := darkPalette[k]
+		if !known && !strings.HasPrefix(k, "tag.") && !strings.HasPrefix(k, "driver.") {
+			bad = append(bad, fmt.Sprintf("%s is not a theme color", k))
+			continue
+		}
+		if !isColor(v) {
+			bad = append(bad, fmt.Sprintf("%s = %q is not a color (#rrggbb or 0-255)", k, v))
+		}
+	}
+	if len(bad) == 0 {
 		return ""
 	}
-	if _, err := themeFileColors(t.File); err != nil {
-		return err.Error()
+	sort.Strings(bad)
+	return "[theme.colors]: " + strings.Join(bad, "; ")
+}
+
+func isColor(v string) bool {
+	if h, ok := strings.CutPrefix(v, "#"); ok {
+		_, err := strconv.ParseUint(h, 16, 32)
+		return err == nil && (len(h) == 3 || len(h) == 6)
 	}
-	return ""
+	n, err := strconv.Atoi(v)
+	return err == nil && n >= 0 && n <= 255
 }
 
 // ThemeTOML is the resolved palette as a [theme.colors] table, ready to paste into config.toml.

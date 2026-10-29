@@ -87,7 +87,7 @@ func TestM6GroupRenameAndDelete(t *testing.T) {
 	h.pickLabel("Delete")
 	setField(t, h, "confirm", "wrong")
 	h.press("enter")
-	h.want("type \"jobs\"")
+	h.want("type “jobs”")
 	setField(t, h, "confirm", "jobs")
 	h.press("enter")
 	if len(h.a.d.Conns) != 1 || h.a.d.Conns[0].Name != "c" {
@@ -359,6 +359,7 @@ func TestM6FilterSQLPopover(t *testing.T) {
 	h.openCustomers()
 	tt := h.a.ws().tab().(*tableTab)
 	tt.filters = db.FilterSet{Filters: []db.Filter{{Column: "name", Op: "=", Value: "Bob", Enabled: true}}}
+	tt.markApplied() // the popover shows the applied filter (T-P2-03)
 	h.run("filter_sql")
 	h.want("Filter SQL")
 	h.want(`WHERE "name" = 'Bob'`)

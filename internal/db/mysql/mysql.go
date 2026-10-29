@@ -124,7 +124,7 @@ func (b bootConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	for _, st := range b.stmts {
 		if _, err := ex.ExecContext(ctx, st, nil); err != nil {
 			c.Close()
-			return nil, fmt.Errorf("bootstrap %q: %w", st, err)
+			return nil, fmt.Errorf("bootstrap (%s): %w", st, err)
 		}
 	}
 	return c, nil
@@ -625,6 +625,38 @@ func (s *session) colNames(ctx context.Context, ref db.ObjRef) ([]string, error)
 	return names, nil
 }
 
+// pkey returns the primary key columns in key order (cached with the filter columns, so DDL clears it).
+func (s *session) pkey(ctx context.Context, ref db.ObjRef) []string {
+	key := "pk\x00" + ref.Schema + "." + ref.Name
+	s.mu.RLock()
+	pk, ok := s.cols[key]
+	s.mu.RUnlock()
+	if ok {
+		return pk
+	}
+	pk = []string{}
+	rows, err := s.db().QueryContext(ctx, `SELECT COLUMN_NAME FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = 'PRIMARY' ORDER BY SEQ_IN_INDEX`, s.schemaOf(ref), ref.Name)
+	if err != nil {
+		return nil // no key known: the browse stays unordered
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var n string
+		if rows.Scan(&n) != nil {
+			return nil
+		}
+		pk = append(pk, n)
+	}
+	if rows.Err() != nil {
+		return nil
+	}
+	s.mu.Lock()
+	s.cols[key] = pk
+	s.mu.Unlock()
+	return pk
+}
+
 func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 	var cols []string
 	if len(q.Filters.Active()) > 0 {
@@ -632,6 +664,9 @@ func (s *session) Rows(ctx context.Context, q db.RowQuery) (*db.Result, error) {
 		if cols, err = s.colNames(ctx, q.ObjRef); err != nil {
 			return nil, err
 		}
+	}
+	if len(q.Sort) == 0 && q.Key == nil {
+		q.Key = s.pkey(ctx, q.ObjRef)
 	}
 	text, args, err := db.BuildSelect(db.MySQL, q, cols)
 	if err != nil {

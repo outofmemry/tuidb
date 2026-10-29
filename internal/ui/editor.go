@@ -527,7 +527,10 @@ func (e *Editor) refreshComplete() {
 
 func (e *Editor) acceptComplete() {
 	c := e.ac.items[e.ac.sel]
-	_, st := e.prefixAtCursor()
+	p, st := e.prefixAtCursor()
+	if i := strings.LastIndex(p, "."); i >= 0 { // schema. / alias. / db.coll. stay: only the word after the last dot is replaced
+		st += utf8.RuneCountInString(p[:i+1])
+	}
 	text := c.Text
 	if c.Insert != "" {
 		text = strings.TrimRight(c.Insert, "\n")

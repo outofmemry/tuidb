@@ -101,6 +101,7 @@ func (ss *session) sweepPins(ttl time.Duration) {
 			old = append(old, p)
 			delete(ss.pins, tab)
 			delete(ss.pinUsed, tab)
+			delete(ss.pinTx, tab)
 		}
 	}
 	ss.pinMu.Unlock()
@@ -148,10 +149,51 @@ func (ss *session) pinned(tab string) (db.Session, error) {
 	return p, nil
 }
 
+// pinState: auto = BEGIN pinned the tab (the pin is released again at COMMIT / ROLLBACK); tx = a transaction is
+// open, guessed from the statements for drivers that cannot say (db.TxReporter).
+type pinState struct{ auto, tx bool }
+
+// autoPin gives an unpinned tab its own connection when the batch starts with BEGIN / START TRANSACTION, so the
+// transaction carries over to the tab's next run instead of autocommitting on another pooled connection.
+func (ss *session) autoPin(tab, pin string, stmts []db.Stmt) (string, bool) {
+	if pin != "" || tab == "" || len(stmts) == 0 || !isPinner(ss.o.Sess) || db.TxVerb(ss.o.Sess.Caps().Dialect, stmts[0].Text) != 1 {
+		return pin, false
+	}
+	return tab, true
+}
+
+// afterRun records what ran on a pinned tab and answers whether it is still pinned and holds a transaction; a pin
+// that BEGIN made is released once the transaction is over.
+func (ss *session) afterRun(pin string, auto bool, ran []string) (pinned, inTx bool) {
+	if pin == "" {
+		return false, false
+	}
+	ss.pinMu.Lock()
+	p, st := ss.pins[pin], ss.pinTx[pin]
+	st.auto = st.auto || auto
+	ss.pinMu.Unlock()
+	if p == nil {
+		return false, false
+	}
+	st.tx = db.InTx(p, db.TxAfter(ss.o.Sess.Caps().Dialect, st.tx, ran))
+	if st.auto && !st.tx {
+		ss.releasePin(pin)
+		return false, false
+	}
+	ss.pinMu.Lock()
+	if ss.pinTx == nil {
+		ss.pinTx = map[string]pinState{}
+	}
+	ss.pinTx[pin] = st
+	ss.pinMu.Unlock()
+	return true, st.tx
+}
+
 func (ss *session) releasePin(tab string) {
 	ss.pinMu.Lock()
 	p := ss.pins[tab]
 	delete(ss.pins, tab)
+	delete(ss.pinTx, tab)
 	ss.pinMu.Unlock()
 	if p != nil {
 		p.Close() // ends an open transaction
@@ -161,7 +203,7 @@ func (ss *session) releasePin(tab string) {
 func (ss *session) releasePins() {
 	ss.pinMu.Lock()
 	ps := ss.pins
-	ss.pins = nil
+	ss.pins, ss.pinTx = nil, nil
 	ss.pinMu.Unlock()
 	for _, p := range ps {
 		p.Close()

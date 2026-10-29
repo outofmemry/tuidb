@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -49,6 +50,27 @@ func oneLine(s string) string {
 		return s
 	}
 	return strings.NewReplacer("\r\n", "⏎", "\n", "⏎", "\r", "⏎", "\t", "→").Replace(s)
+}
+
+// savedQueryName checks the "Add to saved queries" form before it closes (store.Queries.Save would refuse it).
+func savedQueryName(v map[string]string) error {
+	name := v["name"]
+	if i := strings.LastIndex(name, "/"); i >= 0 { // "folder/name": the part after the last slash is the name
+		name = name[i+1:]
+	}
+	if strings.TrimSpace(name) == "" {
+		return errors.New("a saved query needs a name")
+	}
+	return nil
+}
+
+// sqlLines splits a statement for a preview: line breaks stay, a tab shows as → like in the grid.
+func sqlLines(s string) []string {
+	ls := strings.Split(s, "\n")
+	for i, l := range ls {
+		ls[i] = oneLine(l)
+	}
+	return ls
 }
 
 // cellText is how a value is shown in the grid.
@@ -132,6 +154,12 @@ func matchName(pattern, name string, fuzzyMode bool) (int, bool) {
 }
 
 func runeLen(s string) int { return utf8.RuneCountInString(s) }
+
+// wordWrap is wrapText breaking at spaces (only a word wider than w is cut), for dialog prose: wrapText alone
+// split "edi|ted" and "Error 10|45" (T-P3-03).
+func wordWrap(s string, w int) []string {
+	return wrapText(ansi.Wrap(s, max(1, w), ""), w)
+}
 
 // wrapText hard-wraps s to width w (display cells) keeping explicit newlines.
 func wrapText(s string, w int) []string {

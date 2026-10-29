@@ -26,6 +26,21 @@ func SchemaDiff(from, to []db.TableDef, plan func(old, new *db.TableDef) ([]db.S
 	return append(keep, drops...), err
 }
 
+// Rebase moves the TO tables of a schema diff into the FROM schema, where the statements run: each table, and
+// each foreign key that referenced the table's own (TO) schema, now names FROM, so a created table references
+// FROM's tables. Keys into a third schema are left alone.
+func Rebase(to []db.TableDef, from string) {
+	for i := range to {
+		fks := append([]db.ForeignKey(nil), to[i].ForeignKeys...)
+		for k := range fks {
+			if fks[k].RefSchema == to[i].Schema {
+				fks[k].RefSchema = from
+			}
+		}
+		to[i].Schema, to[i].ForeignKeys = from, fks
+	}
+}
+
 // SchemaDiffParts is SchemaDiff with the DROP TABLE statements kept apart, so a caller can make them opt-in.
 func SchemaDiffParts(from, to []db.TableDef, plan func(old, new *db.TableDef) ([]db.Statement, error), quote ...func(string) string) (keep, drops []db.Statement, err error) {
 	q := func(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`) + `"` }

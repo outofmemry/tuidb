@@ -47,6 +47,7 @@ func (s *Server) meta(r *http.Request) (any, error) {
 		"pluginConflicts":    nonNil(conflicts), // plugin shortcuts that were skipped (a clash); never an error
 		"login":              c.Web.Password != "",
 		"query_timeout_secs": c.General.QueryTimeoutSecs, // the client prompts keep waiting / cancel after this; /exec has no hard timeout
+		"rowLimit":           c.General.RowLimit,         // /rows and /exec clamp every limit to this (a connection's override is in its session info)
 		"export":             map[string]any{"filename": c.Export.Filename, "header": c.Export.Header},
 	}
 	for k, v := range s.metaExtra() {
@@ -127,6 +128,11 @@ func (s *Server) putConns(r *http.Request) (any, error) {
 		}
 		if err := checkTools(c, old[c.Name]); err != nil {
 			return nil, err
+		}
+		// hex only, as the colour menu (setColor) and the terminal (lipgloss) take no CSS names;
+		// only a changed colour is checked, so a hand-edited file does not block saving the rest of the list
+		if c.Color != old[c.Name].Color && !colorRe.MatchString(c.Color) {
+			return nil, bad("%q: Use a colour code like #7aa2f7.", c.Name)
 		}
 		if names[c.Name] {
 			return nil, bad("duplicate connection name %q", c.Name)
@@ -327,6 +333,28 @@ func (s *Server) useDatabase(ss *session, r *http.Request) (any, error) {
 	return ss.info(), nil
 }
 
+// useSchema makes req.Name the session's current schema (db.SchemaSetter), as the terminal's sidebar switch does:
+// the editor, search, Open anything and completion then work in it, and info().schema survives a reload.
+func (s *Server) useSchema(ss *session, r *http.Request) (any, error) {
+	var req struct{ Name string }
+	if err := decode(r, &req); err != nil {
+		return nil, err
+	}
+	if !ss.o.Sess.Caps().Schemas || strings.TrimSpace(req.Name) == "" {
+		return nil, bad("this connection has no schemas to switch to")
+	}
+	set, ok := ss.o.Sess.(db.SchemaSetter)
+	if !ok {
+		return nil, bad("%s cannot switch the current schema", ss.conn.Driver)
+	}
+	ctx, cancel := ss.ctx(r)
+	defer cancel()
+	if err := set.SetSchema(ctx, req.Name); err != nil {
+		return nil, bad("%v", err)
+	}
+	return ss.info(), nil
+}
+
 func (s *Server) schemas(ss *session, r *http.Request) (any, error) {
 	ctx, cancel := ss.ctx(r)
 	defer cancel()
@@ -446,6 +474,7 @@ func (s *Server) rows(ss *session, r *http.Request) (any, error) {
 	if req.Ref.Name == "" {
 		return nil, bad("ref.name is required")
 	}
+	asked := req.Limit
 	req.Limit = ss.clampLimit(req.Limit) // never above the configured limit
 	ctx, cancel := ss.ctx(r)
 	defer cancel()
@@ -456,6 +485,10 @@ func (s *Server) rows(ss *session, r *http.Request) (any, error) {
 		return nil, bad("%v", err)
 	}
 	out := toJSON(res, cols)
+	// the clamp cut the client's request short: a full page means the row limit hid the rest
+	if req.Limit > 0 && (asked <= 0 || asked > req.Limit) && len(res.Rows) >= req.Limit {
+		out.Truncated = true
+	}
 	// like the TUI: only plain tables with a primary key are editable (a key-less WHERE can hit many rows)
 	if cerr == nil && !ss.conn.ReadOnly && res.HasRows && req.Ref.Kind == db.KindTable && hasPK(cols) {
 		out.Editable = true
@@ -501,7 +534,19 @@ type execItem struct {
 
 // execPrep decodes an exec request and does everything before the first statement runs:
 // split, bind parameters, safe-mode gate, row limit. Shared by /exec and /exec/stream.
-func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit int, sess db.Session, err error) {
+// execRun is how a prepared batch runs: on a pinned tab's connection (pin, "" = the pool), auto when BEGIN pinned it.
+type execRun struct {
+	pin  string
+	auto bool
+}
+
+// done reports the tab's pin and transaction state after ran (the statements that were sent) for the response.
+func (x execRun) done(ss *session, ran []string) map[string]any {
+	pinned, inTx := ss.afterRun(x.pin, x.auto, ran)
+	return map[string]any{"pinned": pinned, "inTx": inTx, "autoPinned": x.auto && pinned}
+}
+
+func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit int, sess db.Session, run execRun, err error) {
 	var req struct {
 		Text        string
 		Limit       int // 0 = the connection's row limit, <0 = no limit
@@ -512,25 +557,26 @@ func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit 
 		Vars        map[string]string // query parameter values; nil = ask when the statements have any
 		ParamFormat string            // overrides [editor] param_format for this run (the Variables dialog's picker)
 		Pin         string            // a query tab's id: its statements run on one dedicated connection (see session.pinned)
+		Tab         string            // the query tab's pin id even when it is not pinned: BEGIN pins it (session.autoPin)
 		Syntax      string            // Mongo: "shell" | "command" | "" (either, told apart by a leading "{")
 	}
 	if err := decode(r, &req); err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, run, err
 	}
 	dialect := ss.o.Sess.Caps().Dialect
 	if err := checkSyntax(dialect, req.Syntax, req.Text); err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, run, err
 	}
 	stmts = db.Split(dialect, req.Text)
 	if req.Current {
 		st, ok := db.StatementAt(stmts, req.Offset)
 		if !ok {
-			return nil, 0, nil, bad("no statement at the cursor")
+			return nil, 0, nil, run, bad("no statement at the cursor")
 		}
 		stmts = []db.Stmt{st}
 	}
 	if len(stmts) == 0 {
-		return nil, 0, nil, bad("nothing to run")
+		return nil, 0, nil, run, bad("nothing to run")
 	}
 	ed := ss.srv.o.Cfg.Editor
 	if req.Vars != nil || ed.QueryParams || req.ParamFormat != "" {
@@ -546,7 +592,7 @@ func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit 
 			}
 		}
 		if missing {
-			return nil, 0, nil, &apiErr{Code: http.StatusUnprocessableEntity, Msg: "the statements have query parameters", Extra: map[string]any{"params": names}}
+			return nil, 0, nil, run, &apiErr{Code: http.StatusUnprocessableEntity, Msg: "the statements have query parameters", Extra: map[string]any{"params": names}}
 		}
 		for i := range stmts {
 			stmts[i].Text = db.Bind(stmts[i].Text, pf, req.Vars, dialect)
@@ -558,20 +604,21 @@ func (s *Server) execPrep(ss *session, r *http.Request) (stmts []db.Stmt, limit 
 		gated[i], shown[i] = db.Statement{Text: st.Text}, st.Text
 	}
 	if err := ss.readOnlyViolation(gated); err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, run, err
 	}
 	g := ss.gate(gated)
 	if err := ss.check(g, req.Confirmed, req.Password); err != nil {
 		if ae, ok := err.(*apiErr); ok {
 			ae.Extra["statements"] = shown
 		}
-		return nil, 0, nil, err
+		return nil, 0, nil, run, err
 	}
 	limit = ss.clampLimit(req.Limit)
-	if sess, err = ss.pinned(req.Pin); err != nil {
-		return nil, 0, nil, err
+	run.pin, run.auto = ss.autoPin(req.Tab, req.Pin, stmts)
+	if sess, err = ss.pinned(run.pin); err != nil {
+		return nil, 0, nil, run, err
 	}
-	return stmts, limit, sess, nil
+	return stmts, limit, sess, run, nil
 }
 
 // execOne runs one statement; a failure is the item's Error, not a request error.
@@ -597,22 +644,29 @@ func (ss *session) execOne(r *http.Request, sess db.Session, st db.Stmt, limit i
 }
 
 func (s *Server) exec(ss *session, r *http.Request) (any, error) {
-	stmts, limit, sess, err := s.execPrep(ss, r)
+	stmts, limit, sess, run, err := s.execPrep(ss, r)
 	if err != nil {
 		return nil, err
 	}
-	if len(stmts) > summarizeOver {
-		return map[string]any{"results": []execItem{ss.runSummary(r, sess, stmts, limit)}}, nil
-	}
 	var out []execItem
-	for _, st := range stmts {
-		item := ss.execOne(r, sess, st, limit)
-		out = append(out, item)
-		if item.Error != "" && ss.srv.o.Cfg.Editor.ReturnOnError {
-			break // otherwise later statements still run, each with its own error tab
+	var ran []string
+	if len(stmts) > summarizeOver {
+		out = []execItem{ss.runSummary(r, sess, stmts, limit)}
+		for _, st := range stmts {
+			ran = append(ran, st.Text)
+		}
+	} else {
+		for _, st := range stmts {
+			item := ss.execOne(r, sess, st, limit)
+			out, ran = append(out, item), append(ran, st.Text)
+			if item.Error != "" && ss.srv.o.Cfg.Editor.ReturnOnError {
+				break // otherwise later statements still run, each with its own error tab
+			}
 		}
 	}
-	return map[string]any{"results": out}, nil
+	res := run.done(ss, ran)
+	res["results"] = out
+	return res, nil
 }
 
 func (ss *session) record(sql, source string, dur time.Duration, orig string) {
