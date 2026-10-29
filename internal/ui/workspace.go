@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -295,6 +296,9 @@ func (w *Workspace) recordOrig(sql, source string, dur time.Duration, err error,
 
 // gate asks for confirmation / password according to the safe-mode level, then runs run.
 func (w *Workspace) gate(stmts []db.Statement, run func() tea.Cmd) tea.Cmd {
+	if w.conn.ReadOnly && db.WritesRefused(w.caps.Dialect, stmts) { // every engine, not only the ones whose driver guards itself
+		return w.a.fail(errors.New(db.ReadOnlyRefusal))
+	}
 	readOnly := true
 	var lines []string
 	for _, s := range stmts {

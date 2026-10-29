@@ -232,6 +232,20 @@ func mongoReadOnly(stmt string) bool {
 	return ts[0].s == "db" && callsOnly(ts, mongoSafe)
 }
 
+// ReadOnlyRefusal is the message every front end shows when a read_only connection is asked to change data.
+const ReadOnlyRefusal = "this connection is read-only; data-changing statements are refused"
+
+// WritesRefused says whether a read_only connection must refuse stmts: one of them is not read-only.
+// PostgreSQL and MySQL also enforce it on the server; the other engines rely on this check alone.
+func WritesRefused(dialect string, stmts []Statement) bool {
+	for _, st := range stmts {
+		if !st.ReadOnly && !IsReadOnly(dialect, st.Text) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsReadOnly says whether a statement is SELECT/EXPLAIN/SHOW-like, which Alert/Safe Mode 2 let through.
 // It is a keyword heuristic on a dialect-aware token stream: a SELECT that calls a side-effecting
 // function still counts as read-only. When in doubt it answers false (the user is asked once more).
