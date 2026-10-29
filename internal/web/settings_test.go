@@ -140,3 +140,20 @@ func TestSettingsWarnCommentsAndKeyTaken(t *testing.T) {
 		t.Fatalf("taking a default's key must be a 409: %d %v", code, out)
 	}
 }
+
+// Saving one action from the browser keeps the other bindings already in [keys]; an empty list resets only that action.
+func TestPutKeysMergesIntoExistingKeys(t *testing.T) {
+	e := newEnv(t, "")
+	path := filepath.Join(config.ConfigDir(), "config.toml")
+	e.ok("PUT", "/api/settings/keys", map[string]any{"keys": map[string]any{"next_tab": []string{"ctrl+alt+j"}}})
+	e.ok("PUT", "/api/settings/keys", map[string]any{"keys": map[string]any{"prev_tab": []string{"ctrl+alt+k"}}})
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), "ctrl+alt+j") || !strings.Contains(string(b), "ctrl+alt+k") {
+		t.Fatalf("an unrelated binding was lost: %s", b)
+	}
+	e.ok("PUT", "/api/settings/keys", map[string]any{"keys": map[string]any{"prev_tab": []string{}}})
+	b, _ = os.ReadFile(path)
+	if !strings.Contains(string(b), "ctrl+alt+j") || strings.Contains(string(b), "ctrl+alt+k") {
+		t.Fatalf("an empty list must reset only that action: %s", b)
+	}
+}

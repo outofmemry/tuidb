@@ -70,11 +70,24 @@ func (s *Server) putKeys(r *http.Request) (any, error) {
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	// dry run: the same "takes the key from" check as the terminal UI's key form
 	cur := s.cfg()
+	// The browser sends only the actions it edited; merge them into the overrides already in [keys] so the other
+	// bindings survive. An empty list resets that action to its default.
+	merged := map[string][]string{}
+	for a, specs := range cur.KeyOverrides {
+		merged[a] = specs
+	}
+	for a, specs := range in.Keys {
+		if len(specs) == 0 {
+			delete(merged, a)
+		} else {
+			merged[a] = specs
+		}
+	}
+	// dry run: the same "takes the key from" check as the terminal UI's key form
 	old, _, _ := cur.KeymapChecked(pluginBindings())
 	next := cur
-	next.KeyOverrides = in.Keys
+	next.KeyOverrides = merged
 	nm, _, err := next.KeymapChecked(pluginBindings())
 	if err != nil {
 		return nil, &apiErr{Code: http.StatusConflict, Msg: err.Error()}
@@ -83,11 +96,6 @@ func (s *Server) putKeys(r *http.Request) (any, error) {
 		var changed []string // the actions this save edits; losing one of those is the point of the edit
 		for a, specs := range in.Keys {
 			if !slices.Equal(specs, cur.KeyOverrides[a]) {
-				changed = append(changed, a)
-			}
-		}
-		for a := range cur.KeyOverrides {
-			if _, ok := in.Keys[a]; !ok {
 				changed = append(changed, a)
 			}
 		}
@@ -105,7 +113,7 @@ func (s *Server) putKeys(r *http.Request) (any, error) {
 		}
 	}
 	had := config.HasComments(s.configPath())
-	if err := config.WriteKeys(s.configPath(), in.Keys, pluginBindings()...); err != nil {
+	if err := config.WriteKeys(s.configPath(), merged, pluginBindings()...); err != nil {
 		return nil, &apiErr{Code: http.StatusConflict, Msg: err.Error()}
 	}
 	if err := s.reloadCfg(); err != nil {
