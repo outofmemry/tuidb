@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api, type DiagramTable, type ObjRef, type Plan } from '../../utils/api'
 import { draftOf, FK_ACTIONS, newDef } from '../../utils/tabledef'
 import { withForeignKey } from '../../utils/diagram'
-import { Dialog, ask } from '../shell/Dialogs'
+import { Dialog, askMatch } from '../shell/Dialogs'
 import { Select } from '../shell/Select'
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -59,7 +59,7 @@ export function FkDialog({ sid, from, col, to, onPlan, onClose }: { sid: string;
 
 // dropTable asks for the table's name, then plans the DROP through the same admin route as the sidebar's Drop….
 export async function dropTable(sid: string, ref: ObjRef, onPlan: (p: Plan) => void, notify: (m: string) => void) {
-  const t = await ask(`Type ${ref.Name} to drop this table`)
+  const t = await askMatch(`Type ${ref.Name} to drop this table`, ref.Name)
   if (t === null) return
   if (t !== ref.Name) return notify('The name did not match; nothing dropped.')
   try { onPlan(await api<Plan>('POST', `/sessions/${sid}/plan/admin`, { Op: 'drop', Ref: ref })) } catch (e) { notify(msg(e)) }

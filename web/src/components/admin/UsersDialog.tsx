@@ -2,7 +2,7 @@
 import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, type DbUser, type Plan, type SessionInfo } from '../../utils/api'
-import { Dialog, ask } from '../shell/Dialogs'
+import { Dialog, askMatch } from '../shell/Dialogs'
 import { enterSubmits, limitHint } from '../../utils/forms'
 import { ACTIONS, ROW, TH, TD, msg } from '../shell/ui'
 
@@ -58,7 +58,7 @@ export function UsersDialog({ sid, info, onPlan, onClose }: { sid: string; info:
     return plan({ Kind: form.kind, User: who(u), Grant: { Object: object, Privs: picked, Columns: cols.length ? cols : undefined } })
   }
   const drop = async (u: DbUser) => {
-    const t = await ask(`Type ${u.Name} to drop this ${pg ? 'role' : 'account'}`)
+    const t = await askMatch(`Type ${u.Name} to drop this ${pg ? 'role' : 'account'}`, u.Name)
     if (t === null) return
     if (t !== u.Name) return setErr('The name did not match; nothing dropped.')
     plan({ Kind: 'drop', User: who(u) })

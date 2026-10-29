@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ApiError, api, type Gate, type Plan } from '../../utils/api'
 import { openInWindow } from '../../utils/binary'
-import { askSecret, confirm, setPromptHost, type PromptReq } from '../../utils/prompts'
+import { askSecret, confirm, enterAnswers, isDanger, setPromptHost, typedOk, type PromptReq } from '../../utils/prompts'
 import { layersOpen } from './Layer'
 
-export { ask, askSecret, confirm } from '../../utils/prompts'
+export { ask, askMatch, askSecret, confirm } from '../../utils/prompts'
 
 // openSession opens a saved connection. A password = "ask" connection answers 422 passwordRequired: the password is asked for here and the call retried.
 export async function openSession(name: string): Promise<{ id: string }> {
@@ -78,14 +78,15 @@ export function Prompts() {
   if (!req) return null
   const done = (v: string | null | boolean) => { setReq(null); req.resolve(v) }
   const cancel = () => done(req.kind === 'prompt' ? null : false)
-  const ok = () => done(req.kind === 'prompt' ? val : true)
+  const ok = () => { if (req.kind === 'prompt' && !typedOk(val, req.match)) return; done(req.kind === 'prompt' ? val : true) }
+  const danger = req.kind === 'confirm' && isDanger(req.ok) // red dialog: Cancel has the focus, so a reflexive Enter cancels
   return (
     <Dialog title={req.title} onClose={cancel}>
       {req.text && <pre className="m-0 mb-2 max-h-[40vh] overflow-auto whitespace-pre-wrap wrap-anywhere text-[12px]">{req.text}</pre>}
-      {req.kind === 'prompt' && <input autoFocus className="w-full" type={req.secret ? 'password' : 'text'} autoComplete="off" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); ok() } }} />}
+      {req.kind === 'prompt' && <input autoFocus className="w-full" type={req.secret ? 'password' : 'text'} autoComplete="off" value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (enterAnswers('prompt', val, req.match)) ok() } }} />}
       <div className="flex justify-end gap-2 mt-[18px]">
-        <button onClick={cancel}>{req.no ?? 'Cancel'}</button>
-        <button className="btn-primary" autoFocus={req.kind === 'confirm'} disabled={req.kind === 'prompt' && !val.trim()} onClick={ok}>{req.ok ?? (req.kind === 'prompt' ? 'OK' : 'Continue')}</button>
+        <button autoFocus={danger} onClick={cancel}>{req.no ?? 'Cancel'}</button>
+        <button className="btn-primary" autoFocus={req.kind === 'confirm' && !danger} disabled={req.kind === 'prompt' && !typedOk(val, req.match)} onClick={ok}>{req.ok ?? (req.kind === 'prompt' ? 'OK' : 'Continue')}</button>
       </div>
     </Dialog>
   )

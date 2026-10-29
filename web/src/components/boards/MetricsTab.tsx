@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Layer, MENU, at as place } from '../shell/Layer'
 import { api, download, saveBlob, watchJob, type BoardInfo, type BoardPanel, type ObjRef, type PanelOut, type SessionInfo } from '../../utils/api'
-import { ask, Dialog } from '../shell/Dialogs'
+import { ask, askMatch, Dialog } from '../shell/Dialogs'
 import { enterSubmits } from '../../utils/forms'
 import { isVarPanel, panelVals } from '../../utils/boards'
 import { Select } from '../shell/Select'
@@ -108,7 +108,7 @@ export function MetricsTab({ sid, info, shown, others, notify }: { sid: string; 
   }
   const del = async () => {
     if (!board) return
-    const t = await ask(`Type ${board.name} to delete this board`); if (t === null) return
+    const t = await askMatch(`Type ${board.name} to delete this board`, board.name); if (t === null) return
     if (t !== board.name) return notify('The name did not match; nothing deleted.')
     try { await api('DELETE', `/boards/${encodeURIComponent(board.name)}`); setName(''); setPanels([]); await list.refetch(); notify('Board deleted') } catch (e) { notify(msg(e)) }
   }
