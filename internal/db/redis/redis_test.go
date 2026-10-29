@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -289,5 +290,25 @@ func TestStreamFromIgnoresStaleMarks(t *testing.T) {
 	}
 	if from, pos := s.streamFrom("k", 15, "b|5-0"); from != "-" || pos != 0 {
 		t.Errorf("stale mark used: %q %d", from, pos)
+	}
+}
+
+// The filter bar offers an operator only when the driver accepts it (both UIs read db.Operators).
+func TestFilterOperatorsOfferedAreAccepted(t *testing.T) {
+	offered := db.Operators("redis")
+	for _, op := range offered {
+		if _, err := match(op, "abc", "a"); err != nil {
+			t.Errorf("offered operator %q is rejected: %v", op, err)
+		}
+	}
+	for _, op := range db.Operators("postgres") {
+		if _, err := match(op, "abc", "a"); err != nil && slices.Contains(offered, op) {
+			t.Errorf("%q is offered but rejected", op)
+		}
+	}
+	for _, op := range []string{"<", ">", "<=", ">=", "IN", "NOT IN", "IS NULL", "IS NOT NULL", "BETWEEN", "NOT BETWEEN"} {
+		if slices.Contains(offered, op) {
+			t.Errorf("%q must not be offered for redis", op)
+		}
 	}
 }

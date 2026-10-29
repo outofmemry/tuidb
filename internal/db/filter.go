@@ -39,6 +39,9 @@ func Operators(dialect string) []string {
 	if dialect == "partiql" { // DynamoDB: no LIKE, and no suffix test
 		return []string{"=", "<>", "<", ">", "<=", ">=", "IN", "NOT IN", "IS NULL", "IS NOT NULL", "BETWEEN", "NOT BETWEEN", "Contains", "Not contains", "Has prefix"}
 	}
+	if dialect == "redis" { // filters run in memory on text: no ordering, no lists, no NULL
+		return []string{"=", "<>", "LIKE", "Contains", "Not contains", "Has prefix", "Has suffix"}
+	}
 	if dialect == "cql" { // CQL has no <>, NOT IN, IS NULL, BETWEEN or substring matching (LIKE needs a SASI index)
 		return []string{"=", "<", ">", "<=", ">=", "IN", "LIKE"}
 	}
