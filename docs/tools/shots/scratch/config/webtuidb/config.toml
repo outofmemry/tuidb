@@ -1,0 +1,10 @@
+[general]
+prefix = "C-d"
+query_timeout_secs = 3
+
+[[tag]]
+name = "qa"
+color = "#ff9e64"
+
+[[source]]
+path = "/Users/krishmakhijani/Developement/webtuidb/docs/tools/shots/scratch/team"

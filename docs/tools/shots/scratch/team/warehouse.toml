@@ -1,0 +1,10 @@
+[[connection]]
+name = "Team warehouse"
+driver = "postgres"
+host = "127.0.0.1"
+port = 55432
+user = "webtuidb"
+password = "webtuidb"
+database = "shop"
+tag = "staging"
+group = "Team"

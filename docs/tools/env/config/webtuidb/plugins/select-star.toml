@@ -1,0 +1,15 @@
+# Command plugin with output = "sql": writes a SELECT for the table under the cursor or in the
+# current tab. The text goes into the SQL editor (or a new query tab).
+name = "select-star"
+command = "python3"
+args = ["-c", """
+import json, sys
+c = json.load(sys.stdin)
+o = c.get("object") or {}
+if not o.get("Name"):
+    sys.exit("select-star: no table here")
+name = (o["Schema"] + "." if o.get("Schema") else "") + o["Name"]
+print(f"SELECT *\\nFROM {name}\\nLIMIT 100;")
+"""]
+contexts = ["sidebar", "grid"]
+output = "sql"

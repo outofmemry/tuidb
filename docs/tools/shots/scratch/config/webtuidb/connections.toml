@@ -1,0 +1,131 @@
+# Connections used for the documentation screenshots. They point at the compose test databases
+# (make up) plus the demo "shop" dataset loaded by docs/tools/seed.sh.
+[[connection]]
+name = "Shop (Postgres)"
+driver = "postgres"
+host = "127.0.0.1"
+port = 55432
+user = "webtuidb"
+password = "webtuidb"
+database = "shop"
+tag = "development"
+color = "#7aa2f7"
+group = "Shop"
+
+[[connection]]
+name = "Shop prod replica"
+driver = "postgres"
+host = "127.0.0.1"
+port = 55432
+user = "webtuidb"
+password = "webtuidb"
+database = "shop"
+tag = "production"
+color = "#f7768e"
+safe_mode = "alert2"
+read_only = true
+group = "Shop"
+
+[[connection]]
+name = "Shop (MySQL)"
+driver = "mysql"
+host = "127.0.0.1"
+port = 53306
+user = "root"
+password = "root"
+database = "shop"
+tag = "development"
+color = "#e0af68"
+group = "Shop"
+
+[[connection]]
+name = "Shop (MariaDB)"
+driver = "mariadb"
+host = "127.0.0.1"
+port = 53307
+user = "webtuidb"
+password = "webtuidb"
+database = "webtuidb"
+tag = "testing"
+group = "Other engines"
+
+[[connection]]
+name = "Analytics (ClickHouse)"
+driver = "clickhouse"
+host = "127.0.0.1"
+port = 59000
+user = "webtuidb"
+password = "webtuidb"
+database = "webtuidb"
+tag = "staging"
+color = "#9ece6a"
+group = "Other engines"
+
+[[connection]]
+name = "Cache (Redis)"
+driver = "redis"
+host = "127.0.0.1"
+port = 56379
+password = "webtuidb"
+database = "0"
+tag = "local"
+color = "#bb9af7"
+group = "Other engines"
+
+[[connection]]
+name = "Shop (MongoDB)"
+driver = "mongodb"
+host = "127.0.0.1"
+port = 57017
+user = "webtuidb"
+password = "webtuidb"
+database = "shop"
+tag = "development"
+color = "#73daca"
+group = "Other engines"
+[connection.options]
+authSource = "admin"
+
+[[connection]]
+name = "Events (Cassandra)"
+driver = "cassandra"
+host = "127.0.0.1"
+port = 59042
+user = "webtuidb"
+password = "webtuidb"
+database = "webtuidb"
+tag = "testing"
+group = "Other engines"
+
+[[connection]]
+name = "Sessions (DynamoDB local)"
+driver = "dynamodb"
+host = "http://127.0.0.1:58000"
+user = "local"
+password = "local"
+database = "us-east-1"
+tag = "local"
+group = "Other engines"
+
+[[connection]]
+name = "Shop reporting (ask)"
+driver = "postgres"
+host = "127.0.0.1"
+port = 55432
+user = "webtuidb"
+password = "ask"
+database = "shop"
+tag = "qa"
+group = "Shop/Reporting"
+
+[[connection]]
+name = "Shop bootstrap demo"
+driver = "postgres"
+host = "127.0.0.1"
+port = 55432
+user = "webtuidb"
+password = "webtuidb"
+database = "shop"
+tag = "testing"
+group = "Shop/Reporting"
+bootstrap = ["SET search_path TO analytics, public", "SET statement_timeout = '30s'"]

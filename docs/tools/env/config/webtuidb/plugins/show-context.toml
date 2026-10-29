@@ -1,0 +1,5 @@
+# Command plugin: prints the JSON context webtuidb sends on stdin, pretty-printed.
+# Runs anywhere (no contexts), output is plain text shown in a window.
+name = "show-context"
+command = "python3"
+args = ["-c", "import json, sys; print(json.dumps(json.load(sys.stdin), indent=2))"]

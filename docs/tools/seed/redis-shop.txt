@@ -1,0 +1,18 @@
+SET shop:counter:orders 1200
+SET shop:config:currency "EUR"
+HSET shop:product:1 sku AU-0001 name "Studio headphones" price 149.00 stock 42
+HSET shop:product:2 sku AU-0002 name "Bluetooth speaker" price 59.90 stock 120
+HSET shop:product:3 sku CA-0001 name "Mirrorless camera body" price 1299.00 stock 7
+HSET shop:customer:1 email ann.lee1@example.com name "Ann Lee" country US
+HSET shop:customer:2 email bob.novak2@example.com name "Bob Novak" country GB
+LPUSH shop:queue:emails "order-1199" "order-1198" "order-1197" "welcome-240"
+SADD shop:tags:product:1 audio wired studio
+SADD shop:tags:product:2 audio wireless portable
+ZADD shop:leaderboard:revenue 18200.5 "Mirrorless camera body" 9870 "Studio headphones" 7240.5 "Espresso grinder" 4450 "27 inch monitor"
+SETEX shop:session:7f3a 86400 "{\"customer_id\":17,\"cart\":[1,2]}"
+SETEX shop:session:9c1b 86400 "{\"customer_id\":42,\"cart\":[5]}"
+XADD shop:events * type order.placed order_id 1200 total 149.00
+XADD shop:events * type order.paid order_id 1200 provider stripe
+XADD shop:events * type order.shipped order_id 1199 carrier dhl
+SET cache:home:banner "Spring sale: 10% off audio"
+SET cache:rates:usd 1.08

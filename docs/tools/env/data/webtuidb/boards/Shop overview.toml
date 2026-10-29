@@ -1,0 +1,63 @@
+Name = "Shop overview"
+refresh_secs = 60
+connection = ""
+
+[[var]]
+  Name = "days"
+  Label = "Days"
+  Default = "30"
+  Options = ["7", "30", "90"]
+
+[[panel]]
+  Title = "Status"
+  Kind = "dropdown"
+  Query = ""
+  Chart = ""
+  var = "status"
+  options = ["all", "new", "paid", "shipped", "delivered", "cancelled", "refunded"]
+  default = "all"
+
+[[panel]]
+  Title = "Revenue"
+  Kind = "number"
+  Query = "SELECT to_char(coalesce(sum(total), 0), 'FM999G999D00') AS revenue FROM orders WHERE ($status = 'all' OR status::text = $status) AND placed_at > (SELECT max(placed_at) FROM orders) - interval '1 day' * $days"
+  Chart = ""
+  refresh_on = "Orders"
+
+[[panel]]
+  Title = "Orders"
+  Kind = "number"
+  Query = "SELECT count(*) FROM orders WHERE ($status = 'all' OR status::text = $status) AND placed_at > (SELECT max(placed_at) FROM orders) - interval '1 day' * $days"
+  Chart = ""
+
+[[panel]]
+  Title = "Orders per day"
+  Kind = "line"
+  Query = "SELECT to_char(placed_at, 'MM-DD') AS day, count(*) AS orders FROM orders WHERE ($status = 'all' OR status::text = $status) AND placed_at > (SELECT max(placed_at) FROM orders) - interval '1 day' * $days GROUP BY 1 ORDER BY 1"
+  Chart = "x: day, y: orders"
+
+[[panel]]
+  Title = "Top products"
+  Kind = "bar"
+  Query = "SELECT p.name, sum(i.quantity * i.unit_price) AS revenue FROM order_items i JOIN products p ON p.id = i.product_id JOIN orders o ON o.id = i.order_id WHERE ($status = 'all' OR o.status::text = $status) GROUP BY p.name ORDER BY revenue DESC LIMIT 6"
+  Chart = "x: name, y: revenue"
+
+[[panel]]
+  Title = "Latest orders"
+  Kind = "table"
+  Query = "SELECT id, status, total, to_char(placed_at, 'YYYY-MM-DD') AS placed FROM orders WHERE ($status = 'all' OR status::text = $status) ORDER BY placed_at DESC LIMIT 6"
+  Chart = ""
+
+[[panel]]
+  Title = "Recount"
+  Kind = "button"
+  Query = ""
+  Chart = ""
+  target = "Orders"
+
+[[panel]]
+  Title = "Export orders"
+  Kind = "exporter"
+  Query = "SELECT * FROM orders WHERE ($status = 'all' OR status::text = $status) ORDER BY placed_at DESC"
+  Chart = ""
+  format = "csv"

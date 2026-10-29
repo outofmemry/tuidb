@@ -1,0 +1,6 @@
+# Settings used for the documentation screenshots (defaults otherwise).
+[general]
+prefix = "C-d"
+
+[security]
+passcode = "$2a$10$u34oCnk.iKey.Lz8qOVyGunw6Il28UCR9/rvV891tFntYeys05S7."
