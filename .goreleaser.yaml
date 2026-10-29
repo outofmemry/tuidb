@@ -20,7 +20,7 @@ archives:
       - goos: windows
         formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    files: [README.md, docs/webtuidb.1]
+    files: [README.md, man/webtuidb.1]
 
 checksum:
   name_template: checksums.txt

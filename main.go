@@ -41,7 +41,7 @@ import (
 // Version is set at release time with -ldflags "-X main.Version=v1.2.3".
 var Version = "dev"
 
-//go:embed docs/webtuidb.1
+//go:embed man/webtuidb.1
 var manPage string
 
 func main() {
