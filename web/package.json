@@ -3,11 +3,14 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && touch ../internal/web/dist/.gitkeep",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.mjs",
     "test:keys": "node --test tests/keys.test.mjs"
   },
   "dependencies": {

@@ -9,7 +9,7 @@ test:
 	go vet ./... && go test ./...
 # Web unit tests (pure TypeScript modules under web/tests, run by node --test).
 web-test:
-	cd web && npx tsc --noEmit -p . && node --test tests/
+	cd web && npx tsc --noEmit -p . && node --test tests/*.test.mjs
 up:
 	docker compose up -d --wait postgres mysql clickhouse redis mongo mariadb cassandra dynamodb && docker compose run --rm redis-seed
 down:
@@ -25,3 +25,9 @@ docker:
 # Both UIs offer the same menus, actions and config keys (M14).
 parity:
 	go test ./internal/menus/... ./internal/config/... -run 'Parity|TestHolds' && go test ./internal/web ./internal/ui -run Parity
+# Documentation site (Hugo + Hextra, vendored). `make docs` builds into docs/public; `make docs-serve` previews.
+docs:
+	hugo -s docs --minify --quiet
+docs-serve:
+	hugo server -s docs --disableFastRender
+.PHONY: docs docs-serve
