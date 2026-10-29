@@ -18,6 +18,9 @@ func (s *Server) execPage(ss *session, r *http.Request) (any, error) {
 		return nil, err
 	}
 	req.Limit = ss.clampLimit(req.Limit)
+	if ss.o.Sess.Caps().NoSubquery { // CQL and PartiQL reject "SELECT * FROM (<stmt>)"; say so instead of sending it
+		return map[string]any{"supported": false, "reason": "load more is not available for this engine"}, nil
+	}
 	stmt, ok := db.PageStatement(ss.o.Sess.Caps().Dialect, req.Text, req.Limit, req.Offset)
 	if !ok {
 		return map[string]any{"supported": false}, nil

@@ -29,7 +29,7 @@ func (drv) Name() string { return config.Cassandra }
 
 var caps = db.Capabilities{
 	Indexes: true, Triggers: true, MatViews: true, Functions: true,
-	Editor: "sql", Dialect: "cql", DatabaseNoun: "keyspace",
+	Editor: "sql", Dialect: "cql", DatabaseNoun: "keyspace", NoSubquery: true,
 	Types: strings.Fields("text varchar ascii int bigint smallint tinyint varint float double decimal boolean uuid timeuuid timestamp date time duration inet blob counter " +
 		"list<text> set<text> map<text,text> frozen<list<text>> frozen<set<text>> tuple<int,text>"),
 }

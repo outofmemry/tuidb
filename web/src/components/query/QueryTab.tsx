@@ -408,12 +408,13 @@ export function QueryTab({ sid, info, meta, initial, notify, shown, autorun, tab
     if (cur.resultId) setPends((m) => { const { [cur.resultId!]: _g, ...rest } = m; return rest })
     try {
       const size = cur.pageSize ?? cur.cells.length
-      const p = await api<{ supported: boolean; result?: ExecItem; more?: boolean }>('POST', `/sessions/${sid}/exec/page`, { text: cur.stmt, limit: size, offset: cur.cells.length, pin: pinned ? pinId : undefined })
+      const p = await api<{ supported: boolean; reason?: string; result?: ExecItem; more?: boolean }>('POST', `/sessions/${sid}/exec/page`, { text: cur.stmt, limit: size, offset: cur.cells.length, pin: pinned ? pinId : undefined })
       if (p.supported && p.result) {
         const add = p.result
         // shortcut: the server snapshot behind resultId holds the first page only, so a result that grew by Load more is no longer editable
         return setResults((all) => all.map((x, i) => (i === active ? { ...x, editable: false, cells: [...x.cells, ...(add.cells ?? [])], truncated: !!p.more, pageSize: size, durationMs: x.durationMs + add.durationMs } : x)))
       }
+      if (p.reason) return notify(p.reason) // the engine cannot page (Cassandra, DynamoDB): say so instead of re-running with a doubled limit
       const r = await api<{ results: ExecItem[] }>('POST', `/sessions/${sid}/exec`, { text: cur.stmt, limit: cur.cells.length * 2, vars: {}, pin: pinned ? pinId : undefined })
       if (r.results[0]?.error) return notify(r.results[0].error)
       setResults((all) => all.map((x, i) => (i === active ? normItem(r.results[0]) : x)))
